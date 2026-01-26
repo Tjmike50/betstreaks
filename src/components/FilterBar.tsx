@@ -1,6 +1,8 @@
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -91,6 +93,23 @@ export function FilterBar({ filters, onFiltersChange }: FilterBarProps) {
           max={100}
           step={5}
           className="py-2"
+        />
+      </div>
+
+      {/* Advanced Toggle */}
+      <div className="flex items-center justify-between pt-2 border-t border-border">
+        <Label
+          htmlFor="advanced-toggle"
+          className="text-sm text-muted-foreground cursor-pointer"
+        >
+          Show low thresholds
+        </Label>
+        <Switch
+          id="advanced-toggle"
+          checked={filters.advanced}
+          onCheckedChange={(checked) =>
+            onFiltersChange({ ...filters, advanced: checked })
+          }
         />
       </div>
     </div>

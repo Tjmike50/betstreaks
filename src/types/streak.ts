@@ -22,4 +22,5 @@ export interface StreakFilters {
   minStreak: number;
   minSeasonWinPct: number;
   playerSearch: string;
+  advanced: boolean;
 }

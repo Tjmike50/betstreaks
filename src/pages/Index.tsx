@@ -12,6 +12,7 @@ const Index = () => {
     minStreak: 2,
     minSeasonWinPct: 0,
     playerSearch: "",
+    advanced: false,
   });
 
   const { data: streaks, isLoading, error } = useStreaks(filters);
