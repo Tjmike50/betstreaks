@@ -7,7 +7,7 @@ export default {
   theme: {
     container: {
       center: true,
-      padding: "2rem",
+      padding: "1rem",
       screens: {
         "2xl": "1400px",
       },
@@ -56,6 +56,11 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
+        },
+        streak: {
+          green: "hsl(var(--streak-green))",
+          blue: "hsl(var(--streak-blue))",
+          gold: "hsl(var(--streak-gold))",
         },
       },
       borderRadius: {
