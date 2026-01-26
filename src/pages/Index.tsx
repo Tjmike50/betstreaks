@@ -27,6 +27,9 @@ const Index = () => {
         <p className="text-sm text-muted-foreground mt-1">
           Active NBA player prop streaks
         </p>
+        <p className="text-xs text-muted-foreground mt-2">
+          Use streaks to identify consistency — always compare with sportsbook lines before betting.
+        </p>
       </header>
 
       {/* Filters */}

@@ -5,6 +5,9 @@ export function Footer() {
         Streaks are calculated from the most recent game backward. Season hit
         rate is based on games played this season.
       </p>
+      <p className="text-xs text-muted-foreground leading-relaxed mt-2">
+        BetStreaks is a research tool. No betting advice is provided. Past performance does not guarantee future results.
+      </p>
     </footer>
   );
 }
