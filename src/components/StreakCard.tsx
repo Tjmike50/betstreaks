@@ -25,15 +25,15 @@ export function StreakCard({ streak }: StreakCardProps) {
       className="bg-card border-border hover:border-primary/50 transition-all duration-200 cursor-pointer active:scale-[0.98]"
     >
       <CardContent className="p-4 space-y-3">
-        {/* Header: Player Name + Team Badge */}
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-foreground truncate pr-2">
+        {/* Header: Player Name + Team Badge inline */}
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-bold text-foreground truncate">
             {streak.player_name}
           </h3>
           {streak.team_abbr && (
             <Badge
               variant="secondary"
-              className="bg-secondary text-secondary-foreground shrink-0"
+              className="bg-secondary text-secondary-foreground shrink-0 text-xs"
             >
               {streak.team_abbr}
             </Badge>
