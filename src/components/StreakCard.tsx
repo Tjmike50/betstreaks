@@ -34,6 +34,9 @@ export function StreakCard({ streak }: StreakCardProps) {
       if (streak.stat === "PTS") {
         return `Team PTS ≥ ${streak.threshold}`;
       }
+      if (streak.stat === "PTS_U") {
+        return `Team PTS ≤ ${streak.threshold}`;
+      }
     }
     return `${streak.stat} ≥ ${streak.threshold}`;
   };

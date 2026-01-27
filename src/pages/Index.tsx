@@ -43,7 +43,7 @@ const Index = () => {
             value={filters.entityType}
             onValueChange={(value) => {
               const newEntityType = value as "player" | "team";
-              const validTeamStats = ["All", "ML", "PTS"];
+              const validTeamStats = ["All", "ML", "PTS", "PTS_U"];
               const validPlayerStats = ["All", "PTS", "AST", "REB", "3PM"];
               
               // Reset stat to "All" if current stat isn't valid for the new tab
