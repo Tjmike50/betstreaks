@@ -55,7 +55,7 @@ const Index = () => {
       </div>
 
       {/* Filters */}
-      <FilterBar filters={filters} onFiltersChange={setFilters} />
+      <FilterBar filters={filters} onFiltersChange={setFilters} entityType={filters.entityType} />
 
       {/* Content */}
       <main className="flex-1 px-4 py-4">

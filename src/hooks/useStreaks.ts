@@ -67,7 +67,9 @@ export function useStreaks(filters: StreakFilters) {
       }
 
       if (filters.playerSearch.trim()) {
-        query = query.ilike("player_name", `%${filters.playerSearch.trim()}%`);
+        // For teams, search by team_abbr; for players, search by player_name
+        const searchField = filters.entityType === "team" ? "team_abbr" : "player_name";
+        query = query.ilike(searchField, `%${filters.playerSearch.trim()}%`);
       }
 
       const { data, error } = await query;

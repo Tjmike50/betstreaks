@@ -15,19 +15,24 @@ import type { StreakFilters } from "@/types/streak";
 interface FilterBarProps {
   filters: StreakFilters;
   onFiltersChange: (filters: StreakFilters) => void;
+  entityType: "player" | "team";
 }
 
-const STAT_OPTIONS = ["All", "PTS", "AST", "REB", "3PM"];
+const PLAYER_STAT_OPTIONS = ["All", "PTS", "AST", "REB", "3PM"];
+const TEAM_STAT_OPTIONS = ["All", "ML", "PTS"];
 const STREAK_OPTIONS = [2, 3, 5, 7, 10];
 
-export function FilterBar({ filters, onFiltersChange }: FilterBarProps) {
+export function FilterBar({ filters, onFiltersChange, entityType }: FilterBarProps) {
+  const isTeam = entityType === "team";
+  const statOptions = isTeam ? TEAM_STAT_OPTIONS : PLAYER_STAT_OPTIONS;
+  const searchPlaceholder = isTeam ? "Search team..." : "Search player...";
   return (
     <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border px-4 py-4 space-y-4">
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search player..."
+          placeholder={searchPlaceholder}
           value={filters.playerSearch}
           onChange={(e) =>
             onFiltersChange({ ...filters, playerSearch: e.target.value })
@@ -47,7 +52,7 @@ export function FilterBar({ filters, onFiltersChange }: FilterBarProps) {
             <SelectValue placeholder="All" />
           </SelectTrigger>
           <SelectContent className="bg-card border-border">
-            {STAT_OPTIONS.map((stat) => (
+            {statOptions.map((stat) => (
               <SelectItem key={stat} value={stat} className="text-foreground">
                 {stat}
               </SelectItem>
@@ -96,22 +101,24 @@ export function FilterBar({ filters, onFiltersChange }: FilterBarProps) {
         />
       </div>
 
-      {/* Advanced Toggle */}
-      <div className="flex items-center justify-between pt-2 border-t border-border">
-        <Label
-          htmlFor="advanced-toggle"
-          className="text-sm text-muted-foreground cursor-pointer"
-        >
-          Show low thresholds
-        </Label>
-        <Switch
-          id="advanced-toggle"
-          checked={filters.advanced}
-          onCheckedChange={(checked) =>
-            onFiltersChange({ ...filters, advanced: checked })
-          }
-        />
-      </div>
+      {/* Advanced Toggle - only show for players */}
+      {!isTeam && (
+        <div className="flex items-center justify-between pt-2 border-t border-border">
+          <Label
+            htmlFor="advanced-toggle"
+            className="text-sm text-muted-foreground cursor-pointer"
+          >
+            Show low thresholds
+          </Label>
+          <Switch
+            id="advanced-toggle"
+            checked={filters.advanced}
+            onCheckedChange={(checked) =>
+              onFiltersChange({ ...filters, advanced: checked })
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }

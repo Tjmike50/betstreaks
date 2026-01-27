@@ -10,6 +10,7 @@ interface StreakCardProps {
 
 export function StreakCard({ streak }: StreakCardProps) {
   const navigate = useNavigate();
+  const isTeam = streak.entity_type === "team";
 
   const handleClick = () => {
     navigate(`/player/${streak.player_id}`);
@@ -19,18 +20,36 @@ export function StreakCard({ streak }: StreakCardProps) {
     return dateStr;
   };
 
+  // Get display name: for teams, prefer team_abbr
+  const displayName = isTeam
+    ? streak.team_abbr || streak.player_name
+    : streak.player_name;
+
+  // Get bet label: special formatting for teams
+  const getBetLabel = () => {
+    if (isTeam) {
+      if (streak.stat === "ML") {
+        return "ML Wins";
+      }
+      if (streak.stat === "PTS") {
+        return `Team PTS ≥ ${streak.threshold}`;
+      }
+    }
+    return `${streak.stat} ≥ ${streak.threshold}`;
+  };
+
   return (
     <Card
       onClick={handleClick}
       className="bg-card border-border hover:border-primary/50 transition-all duration-200 cursor-pointer active:scale-[0.98]"
     >
       <CardContent className="p-4 space-y-3">
-        {/* Header: Player Name + Team Badge inline */}
+        {/* Header: Name + Team Badge (only for players) */}
         <div className="flex items-center gap-2">
           <h3 className="text-lg font-bold text-foreground truncate">
-            {streak.player_name}
+            {displayName}
           </h3>
-          {streak.team_abbr && (
+          {!isTeam && streak.team_abbr && (
             <Badge
               variant="secondary"
               className="bg-secondary text-secondary-foreground shrink-0 text-xs"
@@ -42,9 +61,7 @@ export function StreakCard({ streak }: StreakCardProps) {
 
         {/* Bet Label */}
         <div className="inline-flex items-center gap-2 bg-primary/15 text-primary px-3 py-1.5 rounded-lg">
-          <span className="font-semibold">
-            {streak.stat} ≥ {streak.threshold}
-          </span>
+          <span className="font-semibold">{getBetLabel()}</span>
         </div>
 
         {/* Stats Grid */}
