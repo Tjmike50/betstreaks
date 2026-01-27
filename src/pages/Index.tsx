@@ -15,6 +15,8 @@ const Index = () => {
     playerSearch: "",
     advanced: false,
     entityType: "player",
+    sortBy: "streak",
+    bestBets: false,
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 

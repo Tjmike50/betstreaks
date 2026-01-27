@@ -86,12 +86,34 @@ export function useStreaks(filters: StreakFilters) {
       // De-duplicate: show only best card per player+stat
       streaks = deduplicateStreaks(streaks);
 
-      // Re-sort after deduplication to maintain order
+      // Apply Best Bets filter
+      if (filters.bestBets) {
+        streaks = streaks.filter(
+          (s) => s.season_win_pct >= 55 && s.streak_len >= 3
+        );
+      }
+
+      // Sort based on selected option
       streaks.sort((a, b) => {
-        if (b.streak_len !== a.streak_len) return b.streak_len - a.streak_len;
-        if (b.season_win_pct !== a.season_win_pct)
-          return b.season_win_pct - a.season_win_pct;
-        return b.last_game.localeCompare(a.last_game);
+        switch (filters.sortBy) {
+          case "season":
+            if (b.season_win_pct !== a.season_win_pct)
+              return b.season_win_pct - a.season_win_pct;
+            return b.streak_len - a.streak_len;
+          case "l10":
+            const aL10Pct = a.last10_games > 0 ? (a.last10_hits / a.last10_games) * 100 : 0;
+            const bL10Pct = b.last10_games > 0 ? (b.last10_hits / b.last10_games) * 100 : 0;
+            if (bL10Pct !== aL10Pct) return bL10Pct - aL10Pct;
+            return b.streak_len - a.streak_len;
+          case "recent":
+            return b.last_game.localeCompare(a.last_game);
+          case "streak":
+          default:
+            if (b.streak_len !== a.streak_len) return b.streak_len - a.streak_len;
+            if (b.season_win_pct !== a.season_win_pct)
+              return b.season_win_pct - a.season_win_pct;
+            return b.last_game.localeCompare(a.last_game);
+        }
       });
 
       return streaks;

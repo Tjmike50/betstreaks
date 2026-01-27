@@ -21,6 +21,8 @@ export interface Streak {
   last5_games: number;
 }
 
+export type SortOption = "streak" | "season" | "l10" | "recent";
+
 export interface StreakFilters {
   stat: string;
   minStreak: number;
@@ -28,4 +30,6 @@ export interface StreakFilters {
   playerSearch: string;
   advanced: boolean;
   entityType: "player" | "team";
+  sortBy: SortOption;
+  bestBets: boolean;
 }
