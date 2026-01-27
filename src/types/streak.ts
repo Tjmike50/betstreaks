@@ -17,8 +17,10 @@ export interface Streak {
   updated_at: string;
   last10_hits: number;
   last10_games: number;
+  last10_hit_pct: number | null;
   last5_hits: number;
   last5_games: number;
+  last5_hit_pct: number | null;
 }
 
 export type SortOption = "streak" | "season" | "l10" | "recent";

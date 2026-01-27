@@ -102,7 +102,7 @@ export function StreakCard({ streak }: StreakCardProps) {
             <div className="flex items-center gap-2 text-streak-blue">
               <TrendingUp className="h-4 w-4" />
               <span>
-                L10: {streak.last10_games > 0 ? Math.round((streak.last10_hits / streak.last10_games) * 100) : 0}%{" "}
+                L10: {streak.last10_hit_pct != null ? Math.round(streak.last10_hit_pct) : Math.round((streak.last10_hits / streak.last10_games) * 100)}%{" "}
                 <span className="text-muted-foreground">
                   ({streak.last10_hits}/{streak.last10_games})
                 </span>
@@ -115,7 +115,7 @@ export function StreakCard({ streak }: StreakCardProps) {
             <div className="flex items-center gap-2 text-streak-blue">
               <TrendingUp className="h-4 w-4" />
               <span>
-                L5: {streak.last5_games > 0 ? Math.round((streak.last5_hits / streak.last5_games) * 100) : 0}%{" "}
+                L5: {streak.last5_hit_pct != null ? Math.round(streak.last5_hit_pct) : Math.round((streak.last5_hits / streak.last5_games) * 100)}%{" "}
                 <span className="text-muted-foreground">
                   ({streak.last5_hits}/{streak.last5_games})
                 </span>
