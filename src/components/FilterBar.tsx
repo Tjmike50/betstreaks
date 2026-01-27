@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { StreakFilters } from "@/types/streak";
+import type { StreakFilters, SortOption } from "@/types/streak";
 
 interface FilterBarProps {
   filters: StreakFilters;
@@ -34,6 +34,13 @@ const TEAM_STAT_OPTIONS = [
 ];
 const STREAK_OPTIONS = [2, 3, 5, 7, 10];
 
+const SORT_OPTIONS: { label: string; value: SortOption }[] = [
+  { label: "Longest streak", value: "streak" },
+  { label: "Best season hit%", value: "season" },
+  { label: "Best L10 hit%", value: "l10" },
+  { label: "Most recent", value: "recent" },
+];
+
 // Calculate active filter count
 function getActiveFilterCount(filters: StreakFilters, entityType: "player" | "team"): number {
   let count = 0;
@@ -41,6 +48,8 @@ function getActiveFilterCount(filters: StreakFilters, entityType: "player" | "te
   if (filters.minStreak !== 2) count++;
   if (filters.minSeasonWinPct !== 0) count++;
   if (entityType === "player" && filters.advanced) count++;
+  if (filters.sortBy !== "streak") count++;
+  if (filters.bestBets) count++;
   return count;
 }
 
@@ -200,24 +209,64 @@ export function FilterBar({
             />
           </div>
 
-          {/* Advanced Toggle - only show for players */}
-          {!isTeam && (
-            <div className="flex items-center justify-between pt-2 border-t border-border">
+          {/* Sort Dropdown */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">Sort by:</span>
+            <Select
+              value={filters.sortBy}
+              onValueChange={(value) => onFiltersChange({ ...filters, sortBy: value as SortOption })}
+            >
+              <SelectTrigger className="h-10 bg-card border-border flex-1">
+                <SelectValue placeholder="Longest streak" />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border">
+                {SORT_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-foreground">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Toggles Section */}
+          <div className="space-y-3 pt-2 border-t border-border">
+            {/* Best Bets Toggle */}
+            <div className="flex items-center justify-between">
               <Label
-                htmlFor="advanced-toggle"
+                htmlFor="best-bets-toggle"
                 className="text-sm text-muted-foreground cursor-pointer"
               >
-                Show low thresholds
+                Best Bets (55%+ season, 3+ streak)
               </Label>
               <Switch
-                id="advanced-toggle"
-                checked={filters.advanced}
+                id="best-bets-toggle"
+                checked={filters.bestBets}
                 onCheckedChange={(checked) =>
-                  onFiltersChange({ ...filters, advanced: checked })
+                  onFiltersChange({ ...filters, bestBets: checked })
                 }
               />
             </div>
-          )}
+
+            {/* Advanced Toggle - only show for players */}
+            {!isTeam && (
+              <div className="flex items-center justify-between">
+                <Label
+                  htmlFor="advanced-toggle"
+                  className="text-sm text-muted-foreground cursor-pointer"
+                >
+                  Show low thresholds
+                </Label>
+                <Switch
+                  id="advanced-toggle"
+                  checked={filters.advanced}
+                  onCheckedChange={(checked) =>
+                    onFiltersChange({ ...filters, advanced: checked })
+                  }
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
