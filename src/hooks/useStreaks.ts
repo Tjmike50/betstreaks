@@ -55,6 +55,7 @@ export function useStreaks(filters: StreakFilters) {
       let query = supabase
         .from("streaks")
         .select("*")
+        .eq("entity_type", filters.entityType)
         .gte("streak_len", filters.minStreak)
         .gte("season_win_pct", filters.minSeasonWinPct)
         .order("streak_len", { ascending: false })

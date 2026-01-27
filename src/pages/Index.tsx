@@ -4,6 +4,7 @@ import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
 import { useStreaks } from "@/hooks/useStreaks";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { StreakFilters } from "@/types/streak";
 
 const Index = () => {
@@ -13,6 +14,7 @@ const Index = () => {
     minSeasonWinPct: 0,
     playerSearch: "",
     advanced: false,
+    entityType: "player",
   });
 
   const { data: streaks, isLoading, error } = useStreaks(filters);
@@ -31,6 +33,26 @@ const Index = () => {
           Use streaks to identify consistency — always compare with sportsbook lines before betting.
         </p>
       </header>
+
+      {/* Entity Type Tabs */}
+      <div className="px-4 pt-4">
+        <Tabs
+          value={filters.entityType}
+          onValueChange={(value) =>
+            setFilters({ ...filters, entityType: value as "player" | "team" })
+          }
+          className="w-full"
+        >
+          <TabsList className="w-full">
+            <TabsTrigger value="player" className="flex-1">
+              Players
+            </TabsTrigger>
+            <TabsTrigger value="team" className="flex-1">
+              Teams
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
 
       {/* Filters */}
       <FilterBar filters={filters} onFiltersChange={setFilters} />

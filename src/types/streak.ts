@@ -23,4 +23,5 @@ export interface StreakFilters {
   minSeasonWinPct: number;
   playerSearch: string;
   advanced: boolean;
+  entityType: "player" | "team";
 }
