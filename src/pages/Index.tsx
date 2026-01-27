@@ -41,9 +41,18 @@ const Index = () => {
         <div className="px-4 pt-3 pb-2">
           <Tabs
             value={filters.entityType}
-            onValueChange={(value) =>
-              setFilters({ ...filters, entityType: value as "player" | "team" })
-            }
+            onValueChange={(value) => {
+              const newEntityType = value as "player" | "team";
+              const validTeamStats = ["All", "ML", "PTS"];
+              const validPlayerStats = ["All", "PTS", "AST", "REB", "3PM"];
+              
+              // Reset stat to "All" if current stat isn't valid for the new tab
+              const newStat = newEntityType === "team" 
+                ? (validTeamStats.includes(filters.stat) ? filters.stat : "All")
+                : (validPlayerStats.includes(filters.stat) ? filters.stat : "All");
+              
+              setFilters({ ...filters, entityType: newEntityType, stat: newStat });
+            }}
             className="w-full"
           >
             <TabsList className="w-full">
