@@ -24,7 +24,14 @@ interface FilterBarProps {
 }
 
 const PLAYER_STAT_OPTIONS = ["All", "PTS", "AST", "REB", "3PM"];
-const TEAM_STAT_OPTIONS = ["All", "ML", "PTS"];
+
+// Team stat options with display labels mapped to DB values
+const TEAM_STAT_OPTIONS = [
+  { label: "All", value: "All" },
+  { label: "ML", value: "ML" },
+  { label: "Team PTS Over", value: "PTS" },
+  { label: "Team PTS Under", value: "PTS_U" },
+];
 const STREAK_OPTIONS = [2, 3, 5, 7, 10];
 
 // Calculate active filter count
@@ -45,7 +52,6 @@ export function FilterBar({
   onToggleExpanded 
 }: FilterBarProps) {
   const isTeam = entityType === "team";
-  const statOptions = isTeam ? TEAM_STAT_OPTIONS : PLAYER_STAT_OPTIONS;
   const searchPlaceholder = isTeam ? "Search team..." : "Search player...";
   const activeFilterCount = getActiveFilterCount(filters, entityType);
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -137,11 +143,19 @@ export function FilterBar({
                 <SelectValue placeholder="All" />
               </SelectTrigger>
               <SelectContent className="bg-card border-border">
-                {statOptions.map((stat) => (
-                  <SelectItem key={stat} value={stat} className="text-foreground">
-                    {stat}
-                  </SelectItem>
-                ))}
+                {isTeam ? (
+                  TEAM_STAT_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value} className="text-foreground">
+                      {opt.label}
+                    </SelectItem>
+                  ))
+                ) : (
+                  PLAYER_STAT_OPTIONS.map((stat) => (
+                    <SelectItem key={stat} value={stat} className="text-foreground">
+                      {stat}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>
