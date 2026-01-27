@@ -16,6 +16,7 @@ const Index = () => {
     advanced: false,
     entityType: "player",
   });
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   const { data: streaks, isLoading, error } = useStreaks(filters);
 
@@ -34,28 +35,37 @@ const Index = () => {
         </p>
       </header>
 
-      {/* Entity Type Tabs */}
-      <div className="px-4 pt-4">
-        <Tabs
-          value={filters.entityType}
-          onValueChange={(value) =>
-            setFilters({ ...filters, entityType: value as "player" | "team" })
-          }
-          className="w-full"
-        >
-          <TabsList className="w-full">
-            <TabsTrigger value="player" className="flex-1">
-              Players
-            </TabsTrigger>
-            <TabsTrigger value="team" className="flex-1">
-              Teams
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+      {/* Sticky Section: Entity Type Tabs + Filters */}
+      <div className="sticky top-0 z-20 bg-background">
+        {/* Entity Type Tabs */}
+        <div className="px-4 pt-3 pb-2">
+          <Tabs
+            value={filters.entityType}
+            onValueChange={(value) =>
+              setFilters({ ...filters, entityType: value as "player" | "team" })
+            }
+            className="w-full"
+          >
+            <TabsList className="w-full">
+              <TabsTrigger value="player" className="flex-1">
+                Players
+              </TabsTrigger>
+              <TabsTrigger value="team" className="flex-1">
+                Teams
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
 
-      {/* Filters */}
-      <FilterBar filters={filters} onFiltersChange={setFilters} entityType={filters.entityType} />
+        {/* Filters */}
+        <FilterBar 
+          filters={filters} 
+          onFiltersChange={setFilters} 
+          entityType={filters.entityType}
+          isExpanded={filtersExpanded}
+          onToggleExpanded={() => setFiltersExpanded(!filtersExpanded)}
+        />
+      </div>
 
       {/* Content */}
       <main className="flex-1 px-4 py-4">
