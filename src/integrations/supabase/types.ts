@@ -20,8 +20,10 @@ export type Database = {
           id: string
           last_game: string
           last10_games: number | null
+          last10_hit_pct: number | null
           last10_hits: number | null
           last5_games: number | null
+          last5_hit_pct: number | null
           last5_hits: number | null
           player_id: number
           player_name: string
@@ -42,8 +44,10 @@ export type Database = {
           id?: string
           last_game: string
           last10_games?: number | null
+          last10_hit_pct?: number | null
           last10_hits?: number | null
           last5_games?: number | null
+          last5_hit_pct?: number | null
           last5_hits?: number | null
           player_id: number
           player_name: string
@@ -64,8 +68,10 @@ export type Database = {
           id?: string
           last_game?: string
           last10_games?: number | null
+          last10_hit_pct?: number | null
           last10_hits?: number | null
           last5_games?: number | null
+          last5_hit_pct?: number | null
           last5_hits?: number | null
           player_id?: number
           player_name?: string

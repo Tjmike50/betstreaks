@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Flame, TrendingUp, Calendar } from "lucide-react";
+import { Flame, TrendingUp, Calendar, Star } from "lucide-react";
 import type { Streak } from "@/types/streak";
 
 interface StreakCardProps {
@@ -25,6 +25,9 @@ export function StreakCard({ streak }: StreakCardProps) {
     ? streak.team_abbr || streak.player_name
     : streak.player_name;
 
+  // Check if qualifies as "Best Bet"
+  const isBestBet = streak.season_win_pct >= 55 && streak.streak_len >= 3;
+
   // Get bet label: special formatting for teams
   const getBetLabel = () => {
     if (isTeam) {
@@ -47,8 +50,8 @@ export function StreakCard({ streak }: StreakCardProps) {
       className="bg-card border-border hover:border-primary/50 transition-all duration-200 cursor-pointer active:scale-[0.98]"
     >
       <CardContent className="p-4 space-y-3">
-        {/* Header: Name + Team Badge (only for players) */}
-        <div className="flex items-center gap-2">
+        {/* Header: Name + Team Badge (only for players) + Best Bet Badge */}
+        <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-lg font-bold text-foreground truncate">
             {displayName}
           </h3>
@@ -58,6 +61,12 @@ export function StreakCard({ streak }: StreakCardProps) {
               className="bg-secondary text-secondary-foreground shrink-0 text-xs"
             >
               {streak.team_abbr}
+            </Badge>
+          )}
+          {isBestBet && (
+            <Badge className="bg-streak-gold text-background shrink-0 text-xs gap-1">
+              <Star className="h-3 w-3 fill-current" />
+              Best Bet
             </Badge>
           )}
         </div>
