@@ -86,10 +86,12 @@ export function useStreaks(filters: StreakFilters) {
       // De-duplicate: show only best card per player+stat
       streaks = deduplicateStreaks(streaks);
 
-      // Apply Best Bets filter
+      // Apply Best Bets filter: streak >= 3 AND (season >= 55% OR L10 >= 60%)
       if (filters.bestBets) {
         streaks = streaks.filter(
-          (s) => s.season_win_pct >= 55 && s.streak_len >= 3
+          (s) =>
+            s.streak_len >= 3 &&
+            (s.season_win_pct >= 55 || (s.last10_hit_pct ?? 0) >= 60)
         );
       }
 
