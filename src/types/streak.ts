@@ -15,6 +15,10 @@ export interface Streak {
   sport: string;
   entity_type: string;
   updated_at: string;
+  last10_hits: number;
+  last10_games: number;
+  last5_hits: number;
+  last5_games: number;
 }
 
 export interface StreakFilters {

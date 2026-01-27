@@ -81,12 +81,38 @@ export function StreakCard({ streak }: StreakCardProps) {
           <div className="flex items-center gap-2 text-streak-blue">
             <TrendingUp className="h-4 w-4" />
             <span>
-              Season hit rate: {Math.round(streak.season_win_pct)}%{" "}
+              Season: {Math.round(streak.season_win_pct)}%{" "}
               <span className="text-muted-foreground">
                 ({streak.season_wins}/{streak.season_games})
               </span>
             </span>
           </div>
+
+          {/* Last 10 Hit Rate */}
+          {streak.last10_games > 0 && (
+            <div className="flex items-center gap-2 text-streak-blue">
+              <TrendingUp className="h-4 w-4" />
+              <span>
+                L10: {streak.last10_games > 0 ? Math.round((streak.last10_hits / streak.last10_games) * 100) : 0}%{" "}
+                <span className="text-muted-foreground">
+                  ({streak.last10_hits}/{streak.last10_games})
+                </span>
+              </span>
+            </div>
+          )}
+
+          {/* Last 5 Hit Rate */}
+          {streak.last5_games > 0 && (
+            <div className="flex items-center gap-2 text-streak-blue">
+              <TrendingUp className="h-4 w-4" />
+              <span>
+                L5: {streak.last5_games > 0 ? Math.round((streak.last5_hits / streak.last5_games) * 100) : 0}%{" "}
+                <span className="text-muted-foreground">
+                  ({streak.last5_hits}/{streak.last5_games})
+                </span>
+              </span>
+            </div>
+          )}
 
           {/* Last Game */}
           <div className="flex items-center gap-2 text-muted-foreground">
