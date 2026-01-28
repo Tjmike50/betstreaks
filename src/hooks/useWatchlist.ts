@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { isLoggedIn, getUserId, setAuthState } from "@/lib/auth";
 import type { Streak } from "@/types/streak";
 
 const STORAGE_KEY = "betstreaks_watchlist";
@@ -22,7 +23,10 @@ function getStreakKey(streak: Pick<Streak, "entity_type" | "player_id" | "stat" 
   return `${streak.entity_type}-${streak.player_id}-${streak.stat}-${streak.threshold}`;
 }
 
-// Load offline watchlist from localStorage
+// ============================================
+// OFFLINE MODE: localStorage-based storage
+// ============================================
+
 function loadOfflineWatchlist(): string[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -32,7 +36,6 @@ function loadOfflineWatchlist(): string[] {
   }
 }
 
-// Save offline watchlist to localStorage
 function saveOfflineWatchlist(keys: string[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
@@ -41,19 +44,31 @@ function saveOfflineWatchlist(keys: string[]): void {
   }
 }
 
+// ============================================
+// HOOK: useWatchlist
+// ============================================
+
 export function useWatchlist() {
   const queryClient = useQueryClient();
-  const [userId, setUserId] = useState<string | null>(null);
+  
+  // Offline state (localStorage)
   const [offlineKeys, setOfflineKeys] = useState<string[]>(() => loadOfflineWatchlist());
+  
+  // Track auth state changes from Supabase
+  const [userId, setUserId] = useState<string | null>(null);
 
-  // Get current user
+  // Listen to Supabase auth changes and update central auth state
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setUserId(session?.user?.id ?? null);
+      const newUserId = session?.user?.id ?? null;
+      setUserId(newUserId);
+      setAuthState(newUserId); // Update central auth state
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUserId(session?.user?.id ?? null);
+      const newUserId = session?.user?.id ?? null;
+      setUserId(newUserId);
+      setAuthState(newUserId);
     });
 
     return () => subscription.unsubscribe();
@@ -64,58 +79,38 @@ export function useWatchlist() {
     saveOfflineWatchlist(offlineKeys);
   }, [offlineKeys]);
 
-  // Fetch watchlist items for NBA (only when authenticated)
+  // ============================================
+  // AUTHED MODE: Supabase-based storage (future)
+  // ============================================
+
   const { data: watchlistItems = [] } = useQuery({
     queryKey: ["watchlist", userId],
     queryFn: async () => {
-      if (!userId) return [];
+      if (!isLoggedIn()) return [];
+      
+      const currentUserId = getUserId();
+      if (!currentUserId) return [];
       
       const { data, error } = await supabase
         .from("watchlist_items")
         .select("*")
-        .eq("user_id", userId)
+        .eq("user_id", currentUserId)
         .eq("sport", "NBA");
 
       if (error) throw error;
       return data as WatchlistItem[];
     },
-    enabled: !!userId,
+    enabled: isLoggedIn(),
   });
 
-  // Create a Set for fast lookup (combines online and offline)
-  const starredKeys = useMemo(() => {
-    const keys = new Set<string>();
-    
-    // Add authenticated user's items
-    for (const item of watchlistItems) {
-      keys.add(`${item.entity_type}-${item.player_id}-${item.stat}-${item.threshold}`);
-    }
-    
-    // Add offline items (when not authenticated)
-    if (!userId) {
-      for (const key of offlineKeys) {
-        keys.add(key);
-      }
-    }
-    
-    return keys;
-  }, [watchlistItems, offlineKeys, userId]);
-
-  // Check if a streak is starred
-  const isStarred = useCallback(
-    (streak: Pick<Streak, "entity_type" | "player_id" | "stat" | "threshold">): boolean => {
-      return starredKeys.has(getStreakKey(streak));
-    },
-    [starredKeys]
-  );
-
-  // Add to watchlist (authenticated)
+  // Add to watchlist (authed mode)
   const addMutation = useMutation({
     mutationFn: async (streak: Streak) => {
-      if (!userId) throw new Error("Not authenticated");
+      const currentUserId = getUserId();
+      if (!currentUserId) throw new Error("Not authenticated");
 
       const { error } = await supabase.from("watchlist_items").insert({
-        user_id: userId,
+        user_id: currentUserId,
         sport: "NBA",
         entity_type: streak.entity_type,
         player_id: streak.player_id,
@@ -131,15 +126,16 @@ export function useWatchlist() {
     },
   });
 
-  // Remove from watchlist (authenticated)
+  // Remove from watchlist (authed mode)
   const removeMutation = useMutation({
     mutationFn: async (streak: Streak) => {
-      if (!userId) throw new Error("Not authenticated");
+      const currentUserId = getUserId();
+      if (!currentUserId) throw new Error("Not authenticated");
 
       const { error } = await supabase
         .from("watchlist_items")
         .delete()
-        .eq("user_id", userId)
+        .eq("user_id", currentUserId)
         .eq("sport", "NBA")
         .eq("entity_type", streak.entity_type)
         .eq("player_id", streak.player_id)
@@ -153,14 +149,47 @@ export function useWatchlist() {
     },
   });
 
-  // Toggle watchlist status - returns { added: boolean, limitReached: boolean }
+  // ============================================
+  // COMBINED: Mode-aware starred keys
+  // ============================================
+
+  const starredKeys = useMemo(() => {
+    const keys = new Set<string>();
+    
+    if (isLoggedIn()) {
+      // Authed mode: use Supabase items
+      for (const item of watchlistItems) {
+        keys.add(`${item.entity_type}-${item.player_id}-${item.stat}-${item.threshold}`);
+      }
+    } else {
+      // Offline mode: use localStorage
+      for (const key of offlineKeys) {
+        keys.add(key);
+      }
+    }
+    
+    return keys;
+  }, [watchlistItems, offlineKeys]);
+
+  // Check if a streak is starred
+  const isStarred = useCallback(
+    (streak: Pick<Streak, "entity_type" | "player_id" | "stat" | "threshold">): boolean => {
+      return starredKeys.has(getStreakKey(streak));
+    },
+    [starredKeys]
+  );
+
+  // ============================================
+  // TOGGLE: Mode-aware add/remove
+  // ============================================
+
   const toggleWatchlist = useCallback(
     (streak: Streak): { added: boolean; limitReached: boolean } => {
       const key = getStreakKey(streak);
       const currentlyStarred = starredKeys.has(key);
 
-      if (userId) {
-        // Authenticated user - use Supabase
+      if (isLoggedIn()) {
+        // AUTHED MODE: unlimited, use Supabase
         if (currentlyStarred) {
           removeMutation.mutate(streak);
           return { added: false, limitReached: false };
@@ -169,12 +198,11 @@ export function useWatchlist() {
           return { added: true, limitReached: false };
         }
       } else {
-        // Offline mode - use localStorage
+        // OFFLINE MODE: capped at MAX_OFFLINE_STARS
         if (currentlyStarred) {
           setOfflineKeys((prev) => prev.filter((k) => k !== key));
           return { added: false, limitReached: false };
         } else {
-          // Check limit
           if (offlineKeys.length >= MAX_OFFLINE_STARS) {
             return { added: false, limitReached: true };
           }
@@ -183,7 +211,7 @@ export function useWatchlist() {
         }
       }
     },
-    [userId, starredKeys, offlineKeys, addMutation, removeMutation]
+    [starredKeys, offlineKeys, addMutation, removeMutation]
   );
 
   // Remove from offline watchlist by key
@@ -192,13 +220,20 @@ export function useWatchlist() {
   }, []);
 
   return {
-    isAuthenticated: !!userId,
+    // Auth state
+    isAuthenticated: isLoggedIn(),
+    
+    // Watchlist operations
     isStarred,
     toggleWatchlist,
+    removeOfflineKey,
+    
+    // Loading state
     isLoading: addMutation.isPending || removeMutation.isPending,
+    
+    // Offline mode info
     offlineCount: offlineKeys.length,
     maxOfflineStars: MAX_OFFLINE_STARS,
     offlineKeys,
-    removeOfflineKey,
   };
 }
