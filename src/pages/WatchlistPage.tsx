@@ -165,7 +165,7 @@ export default function WatchlistPage() {
 
   const handleLogin = () => {
     setShowLimitModal(false);
-    navigate("/account");
+    navigate("/auth");
   };
 
   // Get bet label for inactive items

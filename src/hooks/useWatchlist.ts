@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { isLoggedIn, getUserId, setAuthState } from "@/lib/auth";
 import type { Streak } from "@/types/streak";
 
 const STORAGE_KEY = "betstreaks_watchlist";
@@ -57,18 +56,14 @@ export function useWatchlist() {
   // Track auth state changes from Supabase
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Listen to Supabase auth changes and update central auth state
+  // Listen to Supabase auth changes
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      const newUserId = session?.user?.id ?? null;
-      setUserId(newUserId);
-      setAuthState(newUserId); // Update central auth state
+      setUserId(session?.user?.id ?? null);
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      const newUserId = session?.user?.id ?? null;
-      setUserId(newUserId);
-      setAuthState(newUserId);
+      setUserId(session?.user?.id ?? null);
     });
 
     return () => subscription.unsubscribe();
@@ -86,31 +81,27 @@ export function useWatchlist() {
   const { data: watchlistItems = [] } = useQuery({
     queryKey: ["watchlist", userId],
     queryFn: async () => {
-      if (!isLoggedIn()) return [];
-      
-      const currentUserId = getUserId();
-      if (!currentUserId) return [];
+      if (!userId) return [];
       
       const { data, error } = await supabase
         .from("watchlist_items")
         .select("*")
-        .eq("user_id", currentUserId)
+        .eq("user_id", userId)
         .eq("sport", "NBA");
 
       if (error) throw error;
       return data as WatchlistItem[];
     },
-    enabled: isLoggedIn(),
+    enabled: !!userId,
   });
 
   // Add to watchlist (authed mode)
   const addMutation = useMutation({
     mutationFn: async (streak: Streak) => {
-      const currentUserId = getUserId();
-      if (!currentUserId) throw new Error("Not authenticated");
+      if (!userId) throw new Error("Not authenticated");
 
       const { error } = await supabase.from("watchlist_items").insert({
-        user_id: currentUserId,
+        user_id: userId,
         sport: "NBA",
         entity_type: streak.entity_type,
         player_id: streak.player_id,
@@ -129,13 +120,12 @@ export function useWatchlist() {
   // Remove from watchlist (authed mode)
   const removeMutation = useMutation({
     mutationFn: async (streak: Streak) => {
-      const currentUserId = getUserId();
-      if (!currentUserId) throw new Error("Not authenticated");
+      if (!userId) throw new Error("Not authenticated");
 
       const { error } = await supabase
         .from("watchlist_items")
         .delete()
-        .eq("user_id", currentUserId)
+        .eq("user_id", userId)
         .eq("sport", "NBA")
         .eq("entity_type", streak.entity_type)
         .eq("player_id", streak.player_id)
@@ -156,7 +146,7 @@ export function useWatchlist() {
   const starredKeys = useMemo(() => {
     const keys = new Set<string>();
     
-    if (isLoggedIn()) {
+    if (userId) {
       // Authed mode: use Supabase items
       for (const item of watchlistItems) {
         keys.add(`${item.entity_type}-${item.player_id}-${item.stat}-${item.threshold}`);
@@ -169,7 +159,7 @@ export function useWatchlist() {
     }
     
     return keys;
-  }, [watchlistItems, offlineKeys]);
+  }, [userId, watchlistItems, offlineKeys]);
 
   // Check if a streak is starred
   const isStarred = useCallback(
@@ -188,7 +178,7 @@ export function useWatchlist() {
       const key = getStreakKey(streak);
       const currentlyStarred = starredKeys.has(key);
 
-      if (isLoggedIn()) {
+      if (userId) {
         // AUTHED MODE: unlimited, use Supabase
         if (currentlyStarred) {
           removeMutation.mutate(streak);
@@ -211,7 +201,7 @@ export function useWatchlist() {
         }
       }
     },
-    [starredKeys, offlineKeys, addMutation, removeMutation]
+    [userId, starredKeys, offlineKeys, addMutation, removeMutation]
   );
 
   // Remove from offline watchlist by key
@@ -221,7 +211,7 @@ export function useWatchlist() {
 
   return {
     // Auth state
-    isAuthenticated: isLoggedIn(),
+    isAuthenticated: !!userId,
     
     // Watchlist operations
     isStarred,
