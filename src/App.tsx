@@ -10,6 +10,7 @@ import WatchlistPage from "./pages/WatchlistPage";
 import BestBetsPage from "./pages/BestBetsPage";
 import AlertsPage from "./pages/AlertsPage";
 import AccountPage from "./pages/AccountPage";
+import PremiumPage from "./pages/PremiumPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 import { BottomNav } from "./components/BottomNav";
@@ -29,6 +30,7 @@ const App = () => (
           <Route path="/streak" element={<StreakDetailPage />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
           <Route path="/account" element={<AccountPage />} />
+          <Route path="/premium" element={<PremiumPage />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/player/:playerId" element={<PlayerPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
