@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Flame, Star, Trophy, Bell, Crown } from "lucide-react";
+import { Flame, Star, Trophy, Bell, Crown, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlerts } from "@/hooks/useAlerts";
 
@@ -9,6 +9,7 @@ const navItems = [
   { path: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
   { path: "/watchlist", label: "Watchlist", icon: Star },
   { path: "/premium", label: "Premium", icon: Crown },
+  { path: "/account", label: "Account", icon: User },
 ];
 
 export function BottomNav() {
