@@ -88,12 +88,10 @@ export default function AuthPage() {
       // Clear localStorage after migration
       localStorage.removeItem(STORAGE_KEY);
       
-      toast({
-        title: "Watchlist synced",
-        description: `${keys.length} saved pick${keys.length > 1 ? 's' : ''} moved to your account.`,
-      });
+      return keys.length;
     } catch (error) {
       console.error("Migration error:", error);
+      return 0;
     }
   };
 
@@ -132,12 +130,18 @@ export default function AuthPage() {
     }
 
     if (data.user && data.session) {
-      await migrateLocalWatchlist(data.user.id);
+      const migratedCount = await migrateLocalWatchlist(data.user.id);
       toast({
         title: "Welcome!",
         description: "Your account has been created.",
       });
-      navigate("/account");
+      if (migratedCount > 0) {
+        toast({
+          title: "Watchlist synced",
+          description: `${migratedCount} saved pick${migratedCount > 1 ? 's' : ''} synced to your account.`,
+        });
+      }
+      navigate("/");
     } else {
       toast({
         title: "Check your email",
@@ -171,12 +175,18 @@ export default function AuthPage() {
     }
 
     if (data.user) {
-      await migrateLocalWatchlist(data.user.id);
+      const migratedCount = await migrateLocalWatchlist(data.user.id);
+      if (migratedCount > 0) {
+        toast({
+          title: "Watchlist synced",
+          description: `${migratedCount} saved pick${migratedCount > 1 ? 's' : ''} synced to your account.`,
+        });
+      }
       toast({
         title: "Welcome back!",
         description: "You're now logged in.",
       });
-      navigate("/account");
+      navigate("/");
     }
   };
 

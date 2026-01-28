@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { StreakCard } from "@/components/StreakCard";
@@ -8,7 +8,8 @@ import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Star, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Star, Trash2, Cloud, LogIn } from "lucide-react";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import type { Streak } from "@/types/streak";
 
@@ -210,9 +211,23 @@ export default function WatchlistPage() {
               Your saved streaks
             </p>
           </div>
-          {!isAuthenticated && (
-            <div className="text-sm font-medium text-muted-foreground bg-muted px-3 py-1.5 rounded-lg">
-              Saved: {offlineCount}/{maxOfflineStars}
+          {isAuthenticated ? (
+            <Badge variant="secondary" className="gap-1.5 py-1 px-2.5">
+              <Cloud className="h-3.5 w-3.5" />
+              Synced
+            </Badge>
+          ) : (
+            <div className="flex flex-col items-end gap-1">
+              <div className="text-sm font-medium text-muted-foreground bg-muted px-3 py-1.5 rounded-lg">
+                Saved {offlineCount}/{maxOfflineStars}
+              </div>
+              <Link
+                to="/auth"
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                <LogIn className="h-3 w-3" />
+                Log in for unlimited
+              </Link>
             </div>
           )}
         </div>
