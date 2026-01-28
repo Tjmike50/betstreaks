@@ -1,9 +1,10 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Flame, Star, User } from "lucide-react";
+import { Flame, Star, User, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { path: "/", label: "Streaks", icon: Flame },
+  { path: "/best-bets", label: "Best Bets", icon: Trophy },
   { path: "/watchlist", label: "Watchlist", icon: Star },
   { path: "/account", label: "Account", icon: User },
 ];
