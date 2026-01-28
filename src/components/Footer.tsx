@@ -10,7 +10,7 @@ export function Footer() {
       <p className="text-xs text-muted-foreground leading-relaxed mt-2">
         BetStreaks is a research tool. No betting advice is provided. Past performance does not guarantee future results.
       </p>
-      <div className="flex items-center justify-center gap-2 mt-3">
+      <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
         <Link 
           to="/terms" 
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
@@ -23,6 +23,13 @@ export function Footer() {
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
         >
           Privacy Policy
+        </Link>
+        <span className="text-xs text-muted-foreground">•</span>
+        <Link 
+          to="/responsible-gambling" 
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+        >
+          Responsible Gambling
         </Link>
       </div>
     </footer>

@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Footer } from "@/components/Footer";
-import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield } from "lucide-react";
+import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
@@ -148,7 +148,7 @@ export default function AccountPage() {
                 </Button>
               </div>
 
-              <div className="flex items-center justify-center gap-4 pt-4">
+              <div className="flex items-center justify-center gap-4 pt-4 flex-wrap">
                 <Link 
                   to="/terms" 
                   className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -162,6 +162,13 @@ export default function AccountPage() {
                 >
                   <Shield className="h-4 w-4" />
                   Privacy
+                </Link>
+                <Link 
+                  to="/responsible-gambling" 
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  Responsible Gambling
                 </Link>
               </div>
             </CardContent>
@@ -248,7 +255,7 @@ export default function AccountPage() {
               </Button>
             </div>
 
-            <div className="flex items-center justify-center gap-4 pt-4">
+            <div className="flex items-center justify-center gap-4 pt-4 flex-wrap">
               <Link 
                 to="/terms" 
                 className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -262,6 +269,13 @@ export default function AccountPage() {
               >
                 <Shield className="h-4 w-4" />
                 Privacy
+              </Link>
+              <Link 
+                to="/responsible-gambling" 
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <AlertTriangle className="h-4 w-4" />
+                Responsible Gambling
               </Link>
             </div>
           </CardContent>
