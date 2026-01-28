@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_feedback: {
+        Row: {
+          app_version: string | null
+          category: string
+          created_at: string
+          email: string | null
+          id: string
+          message: string
+          user_id: string | null
+        }
+        Insert: {
+          app_version?: string | null
+          category: string
+          created_at?: string
+          email?: string | null
+          id?: string
+          message: string
+          user_id?: string | null
+        }
+        Update: {
+          app_version?: string | null
+          category?: string
+          created_at?: string
+          email?: string | null
+          id?: string
+          message?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       player_recent_games: {
         Row: {
           ast: number | null

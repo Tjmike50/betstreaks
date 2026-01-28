@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Footer } from "@/components/Footer";
-import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield, AlertTriangle } from "lucide-react";
+import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield, AlertTriangle, MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
@@ -126,6 +126,18 @@ export default function AccountPage() {
                 </CardContent>
               </Card>
 
+              {/* Feedback Link */}
+              <div 
+                className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
+                onClick={() => navigate("/feedback")}
+              >
+                <MessageSquare className="h-5 w-5 text-muted-foreground" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">Report an issue / Suggest a feature</p>
+                  <p className="text-xs text-muted-foreground">Help us improve BetStreaks</p>
+                </div>
+              </div>
+
               <div className="flex flex-col gap-3 mt-4">
                 <Button 
                   variant="outline"
@@ -243,6 +255,18 @@ export default function AccountPage() {
                 </Button>
               </CardContent>
             </Card>
+
+            {/* Feedback Link */}
+            <div 
+              className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted transition-colors"
+              onClick={() => navigate("/feedback")}
+            >
+              <MessageSquare className="h-5 w-5 text-muted-foreground" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-foreground">Report an issue / Suggest a feature</p>
+                <p className="text-xs text-muted-foreground">Help us improve BetStreaks</p>
+              </div>
+            </div>
 
             <div className="flex flex-col gap-3 mt-4">
               <Button 

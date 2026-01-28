@@ -15,6 +15,7 @@ import AuthPage from "./pages/AuthPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import ResponsibleGamblingPage from "./pages/ResponsibleGamblingPage";
+import FeedbackPage from "./pages/FeedbackPage";
 import NotFound from "./pages/NotFound";
 import { BottomNav } from "./components/BottomNav";
 
@@ -38,6 +39,7 @@ const App = () => (
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/responsible-gambling" element={<ResponsibleGamblingPage />} />
+          <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/player/:playerId" element={<PlayerPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
