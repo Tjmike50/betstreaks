@@ -8,11 +8,11 @@ import type { Streak } from "@/types/streak";
 interface StreakCardProps {
   streak: Streak;
   isStarred?: boolean;
-  onToggleStar?: (streak: Streak) => void;
-  isAuthenticated?: boolean;
+  onToggleStar?: (streak: Streak) => { added: boolean; limitReached: boolean } | void;
+  showStarButton?: boolean;
 }
 
-export function StreakCard({ streak, isStarred, onToggleStar, isAuthenticated }: StreakCardProps) {
+export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = true }: StreakCardProps) {
   const navigate = useNavigate();
   const isTeam = streak.entity_type === "team";
 
@@ -78,7 +78,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, isAuthenticated }:
               Best Bet
             </Badge>
           )}
-          {isAuthenticated && (
+          {showStarButton && (
             <Button
               variant="ghost"
               size="icon"
