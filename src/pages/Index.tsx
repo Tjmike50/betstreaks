@@ -37,7 +37,7 @@ const Index = () => {
 
   const handleLogin = () => {
     setShowLimitModal(false);
-    navigate("/account");
+    navigate("/auth");
   };
 
   return (
