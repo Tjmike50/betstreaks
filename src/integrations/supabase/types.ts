@@ -80,6 +80,54 @@ export type Database = {
         }
         Relationships: []
       }
+      streak_events: {
+        Row: {
+          created_at: string
+          entity_type: string
+          event_type: string
+          id: string
+          last_game: string | null
+          new_streak_len: number | null
+          player_id: number | null
+          player_name: string | null
+          prev_streak_len: number | null
+          sport: string
+          stat: string
+          team_abbr: string | null
+          threshold: number
+        }
+        Insert: {
+          created_at?: string
+          entity_type: string
+          event_type: string
+          id?: string
+          last_game?: string | null
+          new_streak_len?: number | null
+          player_id?: number | null
+          player_name?: string | null
+          prev_streak_len?: number | null
+          sport?: string
+          stat: string
+          team_abbr?: string | null
+          threshold: number
+        }
+        Update: {
+          created_at?: string
+          entity_type?: string
+          event_type?: string
+          id?: string
+          last_game?: string | null
+          new_streak_len?: number | null
+          player_id?: number | null
+          player_name?: string | null
+          prev_streak_len?: number | null
+          sport?: string
+          stat?: string
+          team_abbr?: string | null
+          threshold?: number
+        }
+        Relationships: []
+      }
       streaks: {
         Row: {
           entity_type: string
