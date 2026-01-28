@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import PlayerPage from "./pages/PlayerPage";
+import StreakDetailPage from "./pages/StreakDetailPage";
 import WatchlistPage from "./pages/WatchlistPage";
 import AccountPage from "./pages/AccountPage";
 import AuthPage from "./pages/AuthPage";
@@ -21,6 +22,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/streak" element={<StreakDetailPage />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
           <Route path="/account" element={<AccountPage />} />
           <Route path="/auth" element={<AuthPage />} />
