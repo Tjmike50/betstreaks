@@ -1,12 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { Bell, TrendingUp, TrendingDown, Star, CheckCheck } from "lucide-react";
+import { Bell, TrendingUp, TrendingDown, Star, CheckCheck, BellRing } from "lucide-react";
 import { useAlerts } from "@/hooks/useAlerts";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Footer } from "@/components/Footer";
+import { PremiumBadge } from "@/components/PremiumBadge";
+import { PremiumLockModal } from "@/components/PremiumLockModal";
 import { cn } from "@/lib/utils";
 import { format, isToday, isYesterday, parseISO, formatDistanceToNow } from "date-fns";
 import type { StreakEvent } from "@/hooks/useAlerts";
@@ -48,6 +50,7 @@ const AlertsPage = () => {
   } = useAlerts();
   
   const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
 
   // Mark alerts as seen when page opens
   useEffect(() => {
@@ -128,6 +131,19 @@ const AlertsPage = () => {
             <Switch
               checked={watchlistOnly}
               onCheckedChange={setWatchlistOnly}
+            />
+          </div>
+          
+          {/* Push Notifications - Premium Feature */}
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+            <div className="flex items-center gap-2">
+              <BellRing className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Push notifications</span>
+              <PremiumBadge />
+            </div>
+            <Switch
+              checked={false}
+              onCheckedChange={() => setShowPremiumModal(true)}
             />
           </div>
         </div>
@@ -243,6 +259,11 @@ const AlertsPage = () => {
       </main>
 
       <Footer />
+      
+      <PremiumLockModal 
+        open={showPremiumModal} 
+        onOpenChange={setShowPremiumModal} 
+      />
     </div>
   );
 };
