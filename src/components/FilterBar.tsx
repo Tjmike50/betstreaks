@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { Search, SlidersHorizontal, X, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -14,13 +14,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { StreakFilters, SortOption } from "@/types/streak";
+import { THRESHOLD_RANGES } from "@/types/streak";
+import { ActiveFilterChips } from "@/components/ActiveFilterChips";
 
 interface FilterBarProps {
   filters: StreakFilters;
   onFiltersChange: (filters: StreakFilters) => void;
+  onClearFilters: () => void;
   entityType: "player" | "team";
   isExpanded: boolean;
   onToggleExpanded: () => void;
+  teamOptions: string[];
 }
 
 const PLAYER_STAT_OPTIONS = ["All", "PTS", "AST", "REB", "3PM"];
@@ -32,12 +36,14 @@ const TEAM_STAT_OPTIONS = [
   { label: "Team PTS Over", value: "PTS" },
   { label: "Team PTS Under", value: "PTS_U" },
 ];
-const STREAK_OPTIONS = [2, 3, 5, 7, 10];
+const STREAK_OPTIONS = [2, 3, 4, 5, 6, 7, 10];
 
 const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: "Longest streak", value: "streak" },
   { label: "Best season hit%", value: "season" },
   { label: "Best L10 hit%", value: "l10" },
+  { label: "Highest threshold", value: "threshold" },
+  { label: "Best Bets score", value: "bestBetsScore" },
   { label: "Most recent", value: "recent" },
 ];
 
@@ -50,20 +56,31 @@ function getActiveFilterCount(filters: StreakFilters, entityType: "player" | "te
   if (entityType === "player" && filters.advanced) count++;
   if (filters.sortBy !== "streak") count++;
   if (filters.bestBets) count++;
+  if (filters.thresholdMin !== null) count++;
+  if (filters.thresholdMax !== null) count++;
+  if (filters.teamFilter !== "All") count++;
+  if (filters.recentOnly) count++;
   return count;
 }
 
 export function FilterBar({ 
   filters, 
-  onFiltersChange, 
+  onFiltersChange,
+  onClearFilters,
   entityType, 
   isExpanded, 
-  onToggleExpanded 
+  onToggleExpanded,
+  teamOptions,
 }: FilterBarProps) {
   const isTeam = entityType === "team";
   const searchPlaceholder = isTeam ? "Search team..." : "Search player...";
   const activeFilterCount = getActiveFilterCount(filters, entityType);
   const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Get threshold range for current stat
+  const currentThresholdRange = filters.stat !== "All" && filters.stat !== "ML" 
+    ? THRESHOLD_RANGES[filters.stat] 
+    : null;
 
   // Close on scroll
   useEffect(() => {
@@ -138,6 +155,16 @@ export function FilterBar({
         </Button>
       </div>
 
+      {/* Active Filter Chips (always visible when filters are applied) */}
+      {activeFilterCount > 0 && !isExpanded && (
+        <ActiveFilterChips 
+          filters={filters} 
+          onFiltersChange={onFiltersChange}
+          onClearAll={onClearFilters}
+          entityType={entityType}
+        />
+      )}
+
       {/* Expandable Filters Drawer */}
       {isExpanded && (
         <div className="px-4 pb-4 space-y-4 animate-in slide-in-from-top-2 duration-200">
@@ -146,7 +173,13 @@ export function FilterBar({
             <span className="text-sm text-muted-foreground whitespace-nowrap">Stat:</span>
             <Select
               value={filters.stat}
-              onValueChange={(value) => onFiltersChange({ ...filters, stat: value })}
+              onValueChange={(value) => onFiltersChange({ 
+                ...filters, 
+                stat: value,
+                // Reset threshold range when stat changes
+                thresholdMin: null,
+                thresholdMax: null,
+              })}
             >
               <SelectTrigger className="h-10 bg-card border-border flex-1">
                 <SelectValue placeholder="All" />
@@ -169,15 +202,70 @@ export function FilterBar({
             </Select>
           </div>
 
+          {/* Threshold Range Inputs (only show when a specific stat is selected) */}
+          {currentThresholdRange && (
+            <div className="space-y-2">
+              <span className="text-sm text-muted-foreground">Threshold range:</span>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  placeholder={`Min (${currentThresholdRange.min})`}
+                  value={filters.thresholdMin ?? ""}
+                  onChange={(e) => onFiltersChange({ 
+                    ...filters, 
+                    thresholdMin: e.target.value ? Number(e.target.value) : null 
+                  })}
+                  min={currentThresholdRange.min}
+                  max={currentThresholdRange.max}
+                  className="h-10 bg-card border-border flex-1"
+                />
+                <span className="text-muted-foreground">to</span>
+                <Input
+                  type="number"
+                  placeholder={`Max (${currentThresholdRange.max})`}
+                  value={filters.thresholdMax ?? ""}
+                  onChange={(e) => onFiltersChange({ 
+                    ...filters, 
+                    thresholdMax: e.target.value ? Number(e.target.value) : null 
+                  })}
+                  min={currentThresholdRange.min}
+                  max={currentThresholdRange.max}
+                  className="h-10 bg-card border-border flex-1"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Team Filter Dropdown */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">Team:</span>
+            <Select
+              value={filters.teamFilter}
+              onValueChange={(value) => onFiltersChange({ ...filters, teamFilter: value })}
+            >
+              <SelectTrigger className="h-10 bg-card border-border flex-1">
+                <SelectValue placeholder="All teams" />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border max-h-60">
+                <SelectItem value="All" className="text-foreground">All teams</SelectItem>
+                {teamOptions.map((team) => (
+                  <SelectItem key={team} value={team} className="text-foreground">
+                    {team}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Min Streak Buttons */}
           <div className="space-y-2">
             <span className="text-sm text-muted-foreground">Min streak:</span>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {STREAK_OPTIONS.map((num) => (
                 <button
                   key={num}
                   onClick={() => onFiltersChange({ ...filters, minStreak: num })}
-                  className={`flex-1 h-10 rounded-lg font-medium transition-colors ${
+                  className={`px-3 h-10 rounded-lg font-medium transition-colors ${
                     filters.minStreak === num
                       ? "bg-primary text-primary-foreground"
                       : "bg-card text-foreground hover:bg-secondary"
@@ -231,6 +319,24 @@ export function FilterBar({
 
           {/* Toggles Section */}
           <div className="space-y-3 pt-2 border-t border-border">
+            {/* Recent Only Toggle */}
+            <div className="flex items-center justify-between">
+              <Label
+                htmlFor="recent-toggle"
+                className="text-sm text-muted-foreground cursor-pointer flex items-center gap-2"
+              >
+                <Clock className="h-4 w-4" />
+                Only last 3 days
+              </Label>
+              <Switch
+                id="recent-toggle"
+                checked={filters.recentOnly}
+                onCheckedChange={(checked) =>
+                  onFiltersChange({ ...filters, recentOnly: checked })
+                }
+              />
+            </div>
+
             {/* Best Bets Toggle */}
             <div className="flex items-center justify-between">
               <Label
@@ -267,6 +373,17 @@ export function FilterBar({
               </div>
             )}
           </div>
+
+          {/* Clear All Button */}
+          {activeFilterCount > 0 && (
+            <Button 
+              variant="outline" 
+              onClick={onClearFilters}
+              className="w-full"
+            >
+              Clear all filters
+            </Button>
+          )}
         </div>
       )}
     </div>

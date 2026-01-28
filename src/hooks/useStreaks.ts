@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Streak, StreakFilters } from "@/types/streak";
+import { calculateBestBetsScore } from "@/types/streak";
 
 // Minimum thresholds to hide spam (when advanced mode is OFF)
 const MIN_THRESHOLDS: Record<string, number> = {
@@ -95,6 +96,27 @@ export function useStreaks(filters: StreakFilters) {
         );
       }
 
+      // Apply threshold range filter (client-side)
+      if (filters.thresholdMin !== null) {
+        streaks = streaks.filter((s) => s.threshold >= filters.thresholdMin!);
+      }
+      if (filters.thresholdMax !== null) {
+        streaks = streaks.filter((s) => s.threshold <= filters.thresholdMax!);
+      }
+
+      // Apply team filter (client-side)
+      if (filters.teamFilter && filters.teamFilter !== "All") {
+        streaks = streaks.filter((s) => s.team_abbr === filters.teamFilter);
+      }
+
+      // Apply recent only filter (last 3 days)
+      if (filters.recentOnly) {
+        const threeDaysAgo = new Date();
+        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+        const threeDaysAgoStr = threeDaysAgo.toISOString().split("T")[0];
+        streaks = streaks.filter((s) => s.last_game >= threeDaysAgoStr);
+      }
+
       // Sort based on selected option
       streaks.sort((a, b) => {
         switch (filters.sortBy) {
@@ -109,6 +131,14 @@ export function useStreaks(filters: StreakFilters) {
             return b.streak_len - a.streak_len;
           case "recent":
             return b.last_game.localeCompare(a.last_game);
+          case "threshold":
+            if (b.threshold !== a.threshold) return b.threshold - a.threshold;
+            return b.streak_len - a.streak_len;
+          case "bestBetsScore":
+            const aScore = calculateBestBetsScore(a);
+            const bScore = calculateBestBetsScore(b);
+            if (bScore !== aScore) return bScore - aScore;
+            return b.streak_len - a.streak_len;
           case "streak":
           default:
             if (b.streak_len !== a.streak_len) return b.streak_len - a.streak_len;

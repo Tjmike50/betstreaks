@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FilterBar } from "@/components/FilterBar";
 import { StreakCard } from "@/components/StreakCard";
@@ -10,23 +10,72 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { StreakFilters, Streak } from "@/types/streak";
 
+const STORAGE_KEY = "betstreaks-filters";
+
+const DEFAULT_FILTERS: StreakFilters = {
+  stat: "All",
+  minStreak: 2,
+  minSeasonWinPct: 0,
+  playerSearch: "",
+  advanced: false,
+  entityType: "player",
+  sortBy: "streak",
+  bestBets: false,
+  thresholdMin: null,
+  thresholdMax: null,
+  teamFilter: "All",
+  recentOnly: false,
+};
+
+// Load filters from localStorage
+function loadFilters(): StreakFilters {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return { ...DEFAULT_FILTERS, ...parsed };
+    }
+  } catch (e) {
+    console.error("Failed to load filters from localStorage", e);
+  }
+  return DEFAULT_FILTERS;
+}
+
+// Save filters to localStorage
+function saveFilters(filters: StreakFilters) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filters));
+  } catch (e) {
+    console.error("Failed to save filters to localStorage", e);
+  }
+}
+
 const Index = () => {
   const navigate = useNavigate();
-  const [filters, setFilters] = useState<StreakFilters>({
-    stat: "All",
-    minStreak: 2,
-    minSeasonWinPct: 0,
-    playerSearch: "",
-    advanced: false,
-    entityType: "player",
-    sortBy: "streak",
-    bestBets: false,
-  });
+  const [filters, setFilters] = useState<StreakFilters>(loadFilters);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
 
   const { data: streaks, isLoading, error } = useStreaks(filters);
   const { isStarred, toggleWatchlist } = useWatchlist();
+
+  // Persist filters to localStorage whenever they change
+  useEffect(() => {
+    saveFilters(filters);
+  }, [filters]);
+
+  // Get unique team abbreviations for team filter dropdown
+  const teamOptions = streaks
+    ? Array.from(new Set(streaks.map((s) => s.team_abbr).filter(Boolean) as string[])).sort()
+    : [];
+
+  const handleFiltersChange = (newFilters: StreakFilters) => {
+    setFilters(newFilters);
+  };
+
+  const handleClearFilters = () => {
+    setFilters({ ...DEFAULT_FILTERS, entityType: filters.entityType });
+  };
 
   const handleToggleStar = (streak: Streak) => {
     const result = toggleWatchlist(streak);
@@ -89,10 +138,12 @@ const Index = () => {
         {/* Filters */}
         <FilterBar 
           filters={filters} 
-          onFiltersChange={setFilters} 
+          onFiltersChange={handleFiltersChange}
+          onClearFilters={handleClearFilters}
           entityType={filters.entityType}
           isExpanded={filtersExpanded}
           onToggleExpanded={() => setFiltersExpanded(!filtersExpanded)}
+          teamOptions={teamOptions}
         />
       </div>
 
