@@ -108,17 +108,17 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
       </div>
 
       {/* Bottom section: dots + button */}
-      <div className="px-8 pb-12 pt-4 space-y-6">
+      <div className="px-8 pb-24 pt-4 space-y-6">
         {/* Dots indicator */}
         <div className="flex justify-center gap-2">
           {slides.map((_, index) => (
             <button
               key={index}
               onClick={() => scrollTo(index)}
-              className={`w-2 h-2 rounded-full transition-all duration-300 ${
+              className={`h-2 rounded-full transition-all duration-300 ${
                 index === selectedIndex
                   ? "w-6 bg-primary"
-                  : "bg-muted-foreground/30"
+                  : "w-2 bg-muted-foreground/30"
               }`}
               aria-label={`Go to slide ${index + 1}`}
             />
