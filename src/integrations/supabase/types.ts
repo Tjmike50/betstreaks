@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      player_recent_games: {
+        Row: {
+          ast: number | null
+          fg3m: number | null
+          game_date: string
+          game_id: string
+          matchup: string | null
+          player_id: number
+          player_name: string | null
+          pts: number | null
+          reb: number | null
+          sport: string
+          team_abbr: string | null
+          updated_at: string
+          wl: string | null
+        }
+        Insert: {
+          ast?: number | null
+          fg3m?: number | null
+          game_date: string
+          game_id: string
+          matchup?: string | null
+          player_id: number
+          player_name?: string | null
+          pts?: number | null
+          reb?: number | null
+          sport?: string
+          team_abbr?: string | null
+          updated_at?: string
+          wl?: string | null
+        }
+        Update: {
+          ast?: number | null
+          fg3m?: number | null
+          game_date?: string
+          game_id?: string
+          matchup?: string | null
+          player_id?: number
+          player_name?: string | null
+          pts?: number | null
+          reb?: number | null
+          sport?: string
+          team_abbr?: string | null
+          updated_at?: string
+          wl?: string | null
+        }
+        Relationships: []
+      }
       refresh_status: {
         Row: {
           id: number
@@ -104,6 +152,42 @@ export type Database = {
           team_abbr?: string | null
           threshold?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      team_recent_games: {
+        Row: {
+          game_date: string
+          game_id: string
+          matchup: string | null
+          pts: number | null
+          sport: string
+          team_abbr: string | null
+          team_id: number
+          updated_at: string
+          wl: string | null
+        }
+        Insert: {
+          game_date: string
+          game_id: string
+          matchup?: string | null
+          pts?: number | null
+          sport?: string
+          team_abbr?: string | null
+          team_id: number
+          updated_at?: string
+          wl?: string | null
+        }
+        Update: {
+          game_date?: string
+          game_id?: string
+          matchup?: string | null
+          pts?: number | null
+          sport?: string
+          team_abbr?: string | null
+          team_id?: number
+          updated_at?: string
+          wl?: string | null
         }
         Relationships: []
       }
