@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, SlidersHorizontal, X, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -16,6 +16,8 @@ import {
 import type { StreakFilters, SortOption } from "@/types/streak";
 import { THRESHOLD_RANGES } from "@/types/streak";
 import { ActiveFilterChips } from "@/components/ActiveFilterChips";
+import { PremiumBadge } from "@/components/PremiumBadge";
+import { PremiumLockModal } from "@/components/PremiumLockModal";
 
 interface FilterBarProps {
   filters: StreakFilters;
@@ -47,6 +49,9 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: "Most recent", value: "recent" },
 ];
 
+// Premium-only sort options (future)
+const PREMIUM_SORT_OPTIONS = ["ROI"];
+
 // Calculate active filter count
 function getActiveFilterCount(filters: StreakFilters, entityType: "player" | "team"): number {
   let count = 0;
@@ -76,6 +81,7 @@ export function FilterBar({
   const searchPlaceholder = isTeam ? "Search team..." : "Search player...";
   const activeFilterCount = getActiveFilterCount(filters, entityType);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
 
   // Get threshold range for current stat
   const currentThresholdRange = filters.stat !== "All" && filters.stat !== "ML" 
@@ -374,6 +380,20 @@ export function FilterBar({
             )}
           </div>
 
+          {/* Premium Advanced Filters Teaser */}
+          <div className="pt-3 border-t border-border">
+            <button
+              onClick={() => setShowPremiumModal(true)}
+              className="w-full flex items-center justify-between p-3 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/15 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Advanced filters</span>
+                <PremiumBadge />
+              </div>
+              <span className="text-xs text-muted-foreground">Sort by ROI, exclude low-sample...</span>
+            </button>
+          </div>
+
           {/* Clear All Button */}
           {activeFilterCount > 0 && (
             <Button 
@@ -386,6 +406,11 @@ export function FilterBar({
           )}
         </div>
       )}
+      
+      <PremiumLockModal
+        open={showPremiumModal}
+        onOpenChange={setShowPremiumModal}
+      />
     </div>
   );
 }

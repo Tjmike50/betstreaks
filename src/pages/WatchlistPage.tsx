@@ -9,8 +9,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Star, Trash2, Cloud, LogIn } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Star, Trash2, Cloud, LogIn, BellRing } from "lucide-react";
 import { useWatchlist } from "@/hooks/useWatchlist";
+import { PremiumBadge } from "@/components/PremiumBadge";
+import { PremiumLockModal } from "@/components/PremiumLockModal";
 import type { Streak } from "@/types/streak";
 
 interface WatchlistItem {
@@ -40,6 +43,7 @@ export default function WatchlistPage() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
   const [showLimitModal, setShowLimitModal] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
   
   const { 
     isAuthenticated, 
@@ -245,6 +249,19 @@ export default function WatchlistPage() {
             </div>
           )}
         </div>
+        
+        {/* Instant Alerts - Premium Feature */}
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+          <div className="flex items-center gap-2">
+            <BellRing className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Instant alerts</span>
+            <PremiumBadge />
+          </div>
+          <Switch
+            checked={false}
+            onCheckedChange={() => setShowPremiumModal(true)}
+          />
+        </div>
       </header>
 
       <main className="flex-1 px-4 py-4 pb-20">
@@ -344,6 +361,11 @@ export default function WatchlistPage() {
         open={showLimitModal}
         onOpenChange={setShowLimitModal}
         onLogin={handleLogin}
+      />
+      
+      <PremiumLockModal
+        open={showPremiumModal}
+        onOpenChange={setShowPremiumModal}
       />
     </div>
   );

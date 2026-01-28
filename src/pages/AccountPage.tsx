@@ -105,17 +105,28 @@ export default function AccountPage() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 mt-4">
-                <Button 
-                  variant="default"
-                  className="w-full" 
-                  size="lg"
-                  onClick={() => navigate("/premium")}
-                >
-                  <Crown className="h-4 w-4 mr-2" />
-                  Premium
-                </Button>
+              {/* Premium Teaser Card */}
+              <Card 
+                className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
+                onClick={() => navigate("/premium")}
+              >
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
+                      <Crown className="h-5 w-5 text-yellow-500" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-foreground">Go Premium</h3>
+                      <p className="text-xs text-muted-foreground">Coming Soon</p>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
+                    Join waitlist
+                  </Button>
+                </CardContent>
+              </Card>
 
+              <div className="flex flex-col gap-3 mt-4">
                 <Button 
                   variant="outline"
                   className="w-full" 
@@ -188,6 +199,27 @@ export default function AccountPage() {
               </div>
             </div>
 
+            {/* Premium Teaser Card */}
+            <Card 
+              className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
+              onClick={() => navigate("/premium")}
+            >
+              <CardContent className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
+                    <Crown className="h-5 w-5 text-yellow-500" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-foreground">Go Premium</h3>
+                    <p className="text-xs text-muted-foreground">Coming Soon</p>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
+                  Join waitlist
+                </Button>
+              </CardContent>
+            </Card>
+
             <div className="flex flex-col gap-3 mt-4">
               <Button 
                 className="w-full" 
@@ -196,16 +228,6 @@ export default function AccountPage() {
               >
                 <LogIn className="h-4 w-4 mr-2" />
                 Log in
-              </Button>
-
-              <Button 
-                variant="outline"
-                className="w-full" 
-                size="lg"
-                onClick={() => navigate("/premium")}
-              >
-                <Crown className="h-4 w-4 mr-2" />
-                Premium
               </Button>
             </div>
           </CardContent>

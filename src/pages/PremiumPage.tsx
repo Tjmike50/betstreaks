@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Footer } from "@/components/Footer";
 import { ArrowLeft, Crown, Check, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { usePremiumWaitlist } from "@/hooks/usePremiumWaitlist";
 
 const FEATURES = [
   "Unlimited watchlist across devices",
@@ -17,6 +18,7 @@ const FEATURES = [
 export default function PremiumPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { markAsJoined } = usePremiumWaitlist();
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -55,6 +57,7 @@ export default function PremiumPage() {
             title: "You're already on the list ✅",
             description: "We'll notify you when Premium launches.",
           });
+          markAsJoined();
           setEmail("");
         } else {
           throw error;
@@ -64,6 +67,7 @@ export default function PremiumPage() {
           title: "You're on the list ✅",
           description: "We'll notify you when Premium launches.",
         });
+        markAsJoined();
         setEmail("");
       }
     } catch (error) {
