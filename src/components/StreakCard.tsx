@@ -17,7 +17,15 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
   const isTeam = streak.entity_type === "team";
 
   const handleClick = () => {
-    navigate(`/player/${streak.player_id}`);
+    const params = new URLSearchParams({
+      sport: streak.sport,
+      entity_type: streak.entity_type,
+      stat: streak.stat,
+      threshold: streak.threshold.toString(),
+    });
+    if (streak.player_id) params.set("player_id", streak.player_id.toString());
+    if (streak.team_abbr) params.set("team_abbr", streak.team_abbr);
+    navigate(`/streak?${params.toString()}`);
   };
 
   const handleStarClick = (e: React.MouseEvent) => {
