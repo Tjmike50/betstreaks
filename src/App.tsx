@@ -12,6 +12,7 @@ import AlertsPage from "./pages/AlertsPage";
 import AccountPage from "./pages/AccountPage";
 import PremiumPage from "./pages/PremiumPage";
 import AuthPage from "./pages/AuthPage";
+import TermsPage from "./pages/TermsPage";
 import NotFound from "./pages/NotFound";
 import { BottomNav } from "./components/BottomNav";
 
@@ -32,6 +33,7 @@ const App = () => (
           <Route path="/account" element={<AccountPage />} />
           <Route path="/premium" element={<PremiumPage />} />
           <Route path="/auth" element={<AuthPage />} />
+          <Route path="/terms" element={<TermsPage />} />
           <Route path="/player/:playerId" element={<PlayerPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />

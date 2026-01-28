@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Footer } from "@/components/Footer";
-import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown } from "lucide-react";
+import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
@@ -147,6 +147,14 @@ export default function AccountPage() {
                   )}
                 </Button>
               </div>
+
+              <Link 
+                to="/terms" 
+                className="flex items-center justify-center gap-2 pt-4 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <FileText className="h-4 w-4" />
+                Terms of Service
+              </Link>
             </CardContent>
           </Card>
         </main>
@@ -230,6 +238,14 @@ export default function AccountPage() {
                 Log in
               </Button>
             </div>
+
+            <Link 
+              to="/terms" 
+              className="flex items-center justify-center gap-2 pt-4 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <FileText className="h-4 w-4" />
+              Terms of Service
+            </Link>
           </CardContent>
         </Card>
       </main>
