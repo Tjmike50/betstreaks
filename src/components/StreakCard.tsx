@@ -1,19 +1,28 @@
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Flame, TrendingUp, Calendar, Star } from "lucide-react";
 import type { Streak } from "@/types/streak";
 
 interface StreakCardProps {
   streak: Streak;
+  isStarred?: boolean;
+  onToggleStar?: (streak: Streak) => void;
+  isAuthenticated?: boolean;
 }
 
-export function StreakCard({ streak }: StreakCardProps) {
+export function StreakCard({ streak, isStarred, onToggleStar, isAuthenticated }: StreakCardProps) {
   const navigate = useNavigate();
   const isTeam = streak.entity_type === "team";
 
   const handleClick = () => {
     navigate(`/player/${streak.player_id}`);
+  };
+
+  const handleStarClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card navigation
+    onToggleStar?.(streak);
   };
 
   const formatDate = (dateStr: string) => {
@@ -50,9 +59,9 @@ export function StreakCard({ streak }: StreakCardProps) {
       className="bg-card border-border hover:border-primary/50 transition-all duration-200 cursor-pointer active:scale-[0.98]"
     >
       <CardContent className="p-4 space-y-3">
-        {/* Header: Name + Team Badge (only for players) + Best Bet Badge */}
+        {/* Header: Name + Team Badge (only for players) + Best Bet Badge + Star */}
         <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="text-lg font-bold text-foreground truncate">
+          <h3 className="text-lg font-bold text-foreground truncate flex-1">
             {displayName}
           </h3>
           {!isTeam && streak.team_abbr && (
@@ -68,6 +77,23 @@ export function StreakCard({ streak }: StreakCardProps) {
               <Star className="h-3 w-3 fill-current" />
               Best Bet
             </Badge>
+          )}
+          {isAuthenticated && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={handleStarClick}
+              aria-label={isStarred ? "Remove from watchlist" : "Add to watchlist"}
+            >
+              <Star
+                className={`h-5 w-5 transition-colors ${
+                  isStarred
+                    ? "fill-streak-gold text-streak-gold"
+                    : "text-muted-foreground hover:text-streak-gold"
+                }`}
+              />
+            </Button>
           )}
         </div>
 
