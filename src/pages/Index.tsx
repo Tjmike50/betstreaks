@@ -1,14 +1,17 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { FilterBar } from "@/components/FilterBar";
 import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
+import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { StreakFilters } from "@/types/streak";
+import type { StreakFilters, Streak } from "@/types/streak";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [filters, setFilters] = useState<StreakFilters>({
     stat: "All",
     minStreak: 2,
@@ -20,9 +23,22 @@ const Index = () => {
     bestBets: false,
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
 
   const { data: streaks, isLoading, error } = useStreaks(filters);
-  const { isAuthenticated, isStarred, toggleWatchlist } = useWatchlist();
+  const { isStarred, toggleWatchlist } = useWatchlist();
+
+  const handleToggleStar = (streak: Streak) => {
+    const result = toggleWatchlist(streak);
+    if (result.limitReached) {
+      setShowLimitModal(true);
+    }
+  };
+
+  const handleLogin = () => {
+    setShowLimitModal(false);
+    navigate("/auth");
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -102,8 +118,7 @@ const Index = () => {
                 key={streak.id}
                 streak={streak}
                 isStarred={isStarred(streak)}
-                onToggleStar={toggleWatchlist}
-                isAuthenticated={isAuthenticated}
+                onToggleStar={handleToggleStar}
               />
             ))}
           </div>
@@ -119,6 +134,13 @@ const Index = () => {
 
       {/* Footer */}
       <Footer />
+
+      {/* Save More Picks Modal */}
+      <SaveMorePicksModal
+        open={showLimitModal}
+        onOpenChange={setShowLimitModal}
+        onLogin={handleLogin}
+      />
     </div>
   );
 };
