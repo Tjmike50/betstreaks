@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Footer } from "@/components/Footer";
-import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2 } from "lucide-react";
+import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
@@ -105,25 +105,37 @@ export default function AccountPage() {
                 </div>
               </div>
 
-              <Button 
-                variant="outline"
-                className="w-full mt-4" 
-                size="lg"
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-              >
-                {isLoggingOut ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Logging out...
-                  </>
-                ) : (
-                  <>
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Log out
-                  </>
-                )}
-              </Button>
+              <div className="flex flex-col gap-3 mt-4">
+                <Button 
+                  variant="default"
+                  className="w-full" 
+                  size="lg"
+                  onClick={() => navigate("/premium")}
+                >
+                  <Crown className="h-4 w-4 mr-2" />
+                  Premium
+                </Button>
+
+                <Button 
+                  variant="outline"
+                  className="w-full" 
+                  size="lg"
+                  onClick={handleLogout}
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Logging out...
+                    </>
+                  ) : (
+                    <>
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Log out
+                    </>
+                  )}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </main>
@@ -176,14 +188,26 @@ export default function AccountPage() {
               </div>
             </div>
 
-            <Button 
-              className="w-full mt-4" 
-              size="lg"
-              onClick={() => navigate("/auth")}
-            >
-              <LogIn className="h-4 w-4 mr-2" />
-              Log in
-            </Button>
+            <div className="flex flex-col gap-3 mt-4">
+              <Button 
+                className="w-full" 
+                size="lg"
+                onClick={() => navigate("/auth")}
+              >
+                <LogIn className="h-4 w-4 mr-2" />
+                Log in
+              </Button>
+
+              <Button 
+                variant="outline"
+                className="w-full" 
+                size="lg"
+                onClick={() => navigate("/premium")}
+              >
+                <Crown className="h-4 w-4 mr-2" />
+                Premium
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </main>

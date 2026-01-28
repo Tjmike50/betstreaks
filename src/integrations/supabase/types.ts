@@ -62,6 +62,30 @@ export type Database = {
         }
         Relationships: []
       }
+      premium_waitlist: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          source: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          source?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          source?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       refresh_status: {
         Row: {
           id: number
