@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import PlayerPage from "./pages/PlayerPage";
 import StreakDetailPage from "./pages/StreakDetailPage";
 import WatchlistPage from "./pages/WatchlistPage";
+import BestBetsPage from "./pages/BestBetsPage";
 import AccountPage from "./pages/AccountPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
@@ -22,6 +23,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/best-bets" element={<BestBetsPage />} />
           <Route path="/streak" element={<StreakDetailPage />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
           <Route path="/account" element={<AccountPage />} />
