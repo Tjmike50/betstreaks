@@ -3,6 +3,7 @@ import { FilterBar } from "@/components/FilterBar";
 import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
 import { useStreaks } from "@/hooks/useStreaks";
+import { useWatchlist } from "@/hooks/useWatchlist";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { StreakFilters } from "@/types/streak";
@@ -21,6 +22,7 @@ const Index = () => {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   const { data: streaks, isLoading, error } = useStreaks(filters);
+  const { isAuthenticated, isStarred, toggleWatchlist } = useWatchlist();
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -96,7 +98,13 @@ const Index = () => {
         ) : streaks && streaks.length > 0 ? (
           <div className="space-y-3">
             {streaks.map((streak) => (
-              <StreakCard key={streak.id} streak={streak} />
+              <StreakCard
+                key={streak.id}
+                streak={streak}
+                isStarred={isStarred(streak)}
+                onToggleStar={toggleWatchlist}
+                isAuthenticated={isAuthenticated}
+              />
             ))}
           </div>
         ) : (
