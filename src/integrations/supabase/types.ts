@@ -14,6 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      refresh_status: {
+        Row: {
+          id: number
+          last_run: string | null
+          sport: string | null
+        }
+        Insert: {
+          id: number
+          last_run?: string | null
+          sport?: string | null
+        }
+        Update: {
+          id?: number
+          last_run?: string | null
+          sport?: string | null
+        }
+        Relationships: []
+      }
       streaks: {
         Row: {
           entity_type: string
@@ -86,6 +104,42 @@ export type Database = {
           team_abbr?: string | null
           threshold?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      watchlist_items: {
+        Row: {
+          created_at: string
+          entity_type: string
+          id: string
+          player_id: number | null
+          sport: string
+          stat: string
+          team_abbr: string | null
+          threshold: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entity_type: string
+          id?: string
+          player_id?: number | null
+          sport?: string
+          stat: string
+          team_abbr?: string | null
+          threshold: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entity_type?: string
+          id?: string
+          player_id?: number | null
+          sport?: string
+          stat?: string
+          team_abbr?: string | null
+          threshold?: number
+          user_id?: string
         }
         Relationships: []
       }
