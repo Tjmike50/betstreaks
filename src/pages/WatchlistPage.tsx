@@ -25,9 +25,14 @@ interface WatchlistItem {
   created_at: string;
 }
 
-interface WatchlistWithStreak {
-  watchlistItem: WatchlistItem;
-  streak: Streak | null;
+// Create a match key for comparing watchlist items to streaks
+function getMatchKey(item: { entity_type: string; player_id: number | null; stat: string; threshold: number }): string {
+  return `${item.entity_type}-${item.player_id}-${item.stat}-${item.threshold}`;
+}
+
+interface WatchlistData {
+  activeItems: { watchlistItem: WatchlistItem; streak: Streak }[];
+  inactiveItems: WatchlistItem[];
 }
 
 export default function WatchlistPage() {
@@ -58,82 +63,105 @@ export default function WatchlistPage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch authenticated user's watchlist with streaks
-  const { data: watchlistWithStreaks, isLoading, error } = useQuery({
-    queryKey: ["watchlist-with-streaks", userId],
-    queryFn: async (): Promise<WatchlistWithStreak[]> => {
-      if (!userId) return [];
+  // Optimized: Fetch watchlist items and all NBA streaks in parallel, then match client-side
+  const { data: watchlistData, isLoading, error } = useQuery({
+    queryKey: ["watchlist-optimized", userId],
+    queryFn: async (): Promise<WatchlistData> => {
+      if (!userId) return { activeItems: [], inactiveItems: [] };
 
-      const { data: watchlistItems, error: watchlistError } = await supabase
-        .from("watchlist_items")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("sport", "NBA")
-        .order("created_at", { ascending: false });
-
-      if (watchlistError) throw watchlistError;
-      if (!watchlistItems || watchlistItems.length === 0) return [];
-
-      const results: WatchlistWithStreak[] = [];
-
-      for (const item of watchlistItems) {
-        let query = supabase
+      // Fetch watchlist items and all NBA streaks in parallel
+      const [watchlistResult, streaksResult] = await Promise.all([
+        supabase
+          .from("watchlist_items")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("sport", "NBA")
+          .order("created_at", { ascending: false }),
+        supabase
           .from("streaks")
           .select("*")
           .eq("sport", "NBA")
-          .eq("entity_type", item.entity_type)
-          .eq("stat", item.stat)
-          .eq("threshold", item.threshold);
+      ]);
 
-        if (item.player_id) {
-          query = query.eq("player_id", item.player_id);
-        }
-        if (item.team_abbr) {
-          query = query.eq("team_abbr", item.team_abbr);
-        }
-
-        const { data: streaks } = await query.limit(1);
-
-        results.push({
-          watchlistItem: item as WatchlistItem,
-          streak: streaks && streaks.length > 0 ? (streaks[0] as Streak) : null,
-        });
+      if (watchlistResult.error) throw watchlistResult.error;
+      if (!watchlistResult.data || watchlistResult.data.length === 0) {
+        return { activeItems: [], inactiveItems: [] };
       }
 
-      return results;
+      const watchlistItems = watchlistResult.data as WatchlistItem[];
+      const allStreaks = (streaksResult.data || []) as Streak[];
+
+      // Build a lookup map of streaks by match key
+      const streakMap = new Map<string, Streak>();
+      for (const streak of allStreaks) {
+        const key = getMatchKey(streak);
+        streakMap.set(key, streak);
+      }
+
+      // Match watchlist items to streaks
+      const activeItems: { watchlistItem: WatchlistItem; streak: Streak }[] = [];
+      const inactiveItems: WatchlistItem[] = [];
+
+      for (const item of watchlistItems) {
+        const key = getMatchKey(item);
+        const matchingStreak = streakMap.get(key);
+        
+        if (matchingStreak) {
+          activeItems.push({ watchlistItem: item, streak: matchingStreak });
+        } else {
+          inactiveItems.push(item);
+        }
+      }
+
+      return { activeItems, inactiveItems };
     },
     enabled: !!userId,
   });
 
-  // Fetch offline watchlist streaks
-  const { data: offlineStreaks = [] } = useQuery({
-    queryKey: ["offline-watchlist-streaks", offlineKeys],
-    queryFn: async (): Promise<{ key: string; streak: Streak | null }[]> => {
-      if (userId || offlineKeys.length === 0) return [];
+  // Optimized: Fetch offline watchlist streaks with batch query
+  const { data: offlineData } = useQuery({
+    queryKey: ["offline-watchlist-optimized", offlineKeys],
+    queryFn: async (): Promise<WatchlistData> => {
+      if (userId || offlineKeys.length === 0) return { activeItems: [], inactiveItems: [] };
 
-      const results: { key: string; streak: Streak | null }[] = [];
+      // Fetch all NBA streaks in one query
+      const { data: allStreaks } = await supabase
+        .from("streaks")
+        .select("*")
+        .eq("sport", "NBA");
+
+      const streakMap = new Map<string, Streak>();
+      for (const streak of (allStreaks || []) as Streak[]) {
+        const key = getMatchKey(streak);
+        streakMap.set(key, streak);
+      }
+
+      const activeItems: { watchlistItem: WatchlistItem; streak: Streak }[] = [];
+      const inactiveItems: WatchlistItem[] = [];
 
       for (const key of offlineKeys) {
         const [entity_type, player_id, stat, threshold] = key.split("-");
-        
-        let query = supabase
-          .from("streaks")
-          .select("*")
-          .eq("sport", "NBA")
-          .eq("entity_type", entity_type)
-          .eq("stat", stat)
-          .eq("threshold", Number(threshold))
-          .eq("player_id", Number(player_id));
+        const item: WatchlistItem = {
+          id: key,
+          user_id: "",
+          sport: "NBA",
+          entity_type,
+          player_id: Number(player_id),
+          team_abbr: null,
+          stat,
+          threshold: Number(threshold),
+          created_at: "",
+        };
 
-        const { data: streaks } = await query.limit(1);
-
-        results.push({
-          key,
-          streak: streaks && streaks.length > 0 ? (streaks[0] as Streak) : null,
-        });
+        const matchingStreak = streakMap.get(key);
+        if (matchingStreak) {
+          activeItems.push({ watchlistItem: item, streak: matchingStreak });
+        } else {
+          inactiveItems.push(item);
+        }
       }
 
-      return results;
+      return { activeItems, inactiveItems };
     },
     enabled: !userId && offlineKeys.length > 0,
   });
@@ -148,7 +176,7 @@ export default function WatchlistPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["watchlist-with-streaks", userId] });
+      queryClient.invalidateQueries({ queryKey: ["watchlist-optimized", userId] });
       queryClient.invalidateQueries({ queryKey: ["watchlist", userId] });
     },
   });
@@ -179,25 +207,11 @@ export default function WatchlistPage() {
     return `${item.stat} ≥ ${item.threshold}`;
   };
 
-  const parseKeyToItem = (key: string) => {
-    const [entity_type, player_id, stat, threshold] = key.split("-");
-    return { entity_type, player_id: Number(player_id), stat, threshold: Number(threshold) };
-  };
-
-  // Combine data for display
-  const displayItems = isAuthenticated 
-    ? (watchlistWithStreaks || [])
-    : offlineStreaks.map(os => ({
-        watchlistItem: { 
-          id: os.key, 
-          ...parseKeyToItem(os.key),
-          user_id: "",
-          sport: "NBA",
-          team_abbr: null,
-          created_at: ""
-        } as WatchlistItem,
-        streak: os.streak
-      }));
+  // Use optimized data structure
+  const currentData = isAuthenticated ? watchlistData : offlineData;
+  const activeItems = currentData?.activeItems || [];
+  const inactiveItems = currentData?.inactiveItems || [];
+  const hasItems = activeItems.length > 0 || inactiveItems.length > 0;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -247,56 +261,70 @@ export default function WatchlistPage() {
               Please try again later
             </p>
           </div>
-        ) : displayItems.length > 0 ? (
-          <div className="space-y-3">
-            {displayItems.map(({ watchlistItem, streak }) =>
-              streak ? (
-                <StreakCard
-                  key={watchlistItem.id}
-                  streak={streak}
-                  isStarred={true}
-                  onToggleStar={handleToggleStar}
-                />
-              ) : (
-                <Card
-                  key={watchlistItem.id}
-                  className="bg-card/50 border-border opacity-60"
-                >
-                  <CardContent className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-1">
-                        <h3 className="text-lg font-bold text-muted-foreground">
-                          {watchlistItem.entity_type === "team"
-                            ? watchlistItem.team_abbr
-                            : `Player #${watchlistItem.player_id}`}
-                        </h3>
-                        <div className="inline-flex items-center gap-2 bg-muted text-muted-foreground px-3 py-1.5 rounded-lg">
-                          <span className="font-semibold">
-                            {getBetLabel(watchlistItem)}
-                          </span>
+        ) : hasItems ? (
+          <div className="space-y-6">
+            {/* Active Streaks */}
+            {activeItems.length > 0 && (
+              <div className="space-y-3">
+                {activeItems.map(({ watchlistItem, streak }) => (
+                  <StreakCard
+                    key={watchlistItem.id}
+                    streak={streak}
+                    isStarred={true}
+                    onToggleStar={handleToggleStar}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Inactive Saved Picks */}
+            {inactiveItems.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Inactive saved picks
+                </h2>
+                {inactiveItems.map((item) => (
+                  <Card
+                    key={item.id}
+                    className="bg-card/50 border-border"
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1.5">
+                          <h3 className="text-base font-semibold text-muted-foreground">
+                            {item.entity_type === "team"
+                              ? item.team_abbr || "Team"
+                              : `Player #${item.player_id}`}
+                          </h3>
+                          <div className="inline-flex items-center gap-2 bg-muted text-muted-foreground px-2.5 py-1 rounded-md text-sm">
+                            <span className="font-medium">
+                              {getBetLabel(item)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground italic">
+                            Streak no longer active
+                          </p>
                         </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5"
+                          onClick={() => {
+                            if (isAuthenticated) {
+                              handleRemove(item.id);
+                            } else {
+                              removeOfflineKey(item.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Remove
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => {
-                          if (isAuthenticated) {
-                            handleRemove(watchlistItem.id);
-                          } else {
-                            removeOfflineKey(watchlistItem.id);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-5 w-5" />
-                      </Button>
-                    </div>
-                    <p className="text-sm text-muted-foreground italic">
-                      Streak no longer active
-                    </p>
-                  </CardContent>
-                </Card>
-              )
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             )}
           </div>
         ) : (
