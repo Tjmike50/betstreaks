@@ -81,7 +81,7 @@ const Index = () => {
       </div>
 
       {/* Content */}
-      <main className="flex-1 px-4 py-4">
+      <main className="flex-1 px-4 py-4 pb-20">
         {isLoading ? (
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
