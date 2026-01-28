@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import PlayerPage from "./pages/PlayerPage";
 import WatchlistPage from "./pages/WatchlistPage";
+import AccountPage from "./pages/AccountPage";
 import NotFound from "./pages/NotFound";
 import { BottomNav } from "./components/BottomNav";
 
@@ -20,6 +21,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
+          <Route path="/account" element={<AccountPage />} />
           <Route path="/player/:playerId" element={<PlayerPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />

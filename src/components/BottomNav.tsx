@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { path: "/", label: "Streaks", icon: Flame },
   { path: "/watchlist", label: "Watchlist", icon: Star },
+  { path: "/account", label: "Account", icon: User },
 ];
 
 export function BottomNav() {
