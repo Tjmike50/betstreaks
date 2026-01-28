@@ -4,11 +4,14 @@ import { FilterBar } from "@/components/FilterBar";
 import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
 import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
+import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { StreakFilters, Streak } from "@/types/streak";
+
+const ONBOARDING_KEY = "onboarding_complete";
 
 const STORAGE_KEY = "betstreaks-filters";
 
@@ -55,9 +58,17 @@ const Index = () => {
   const [filters, setFilters] = useState<StreakFilters>(loadFilters);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return localStorage.getItem(ONBOARDING_KEY) !== "true";
+  });
 
   const { data: streaks, isLoading, error } = useStreaks(filters);
   const { isStarred, toggleWatchlist } = useWatchlist();
+
+  const handleOnboardingComplete = () => {
+    localStorage.setItem(ONBOARDING_KEY, "true");
+    setShowOnboarding(false);
+  };
 
   // Persist filters to localStorage whenever they change
   useEffect(() => {
@@ -88,6 +99,11 @@ const Index = () => {
     setShowLimitModal(false);
     navigate("/auth");
   };
+
+  // Show onboarding if not completed
+  if (showOnboarding) {
+    return <OnboardingFlow onComplete={handleOnboardingComplete} />;
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
