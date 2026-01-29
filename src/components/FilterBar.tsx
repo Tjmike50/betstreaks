@@ -107,9 +107,20 @@ export function FilterBar({
     if (!isExpanded) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (drawerRef.current && !drawerRef.current.contains(event.target as Node)) {
-        onToggleExpanded();
+      const target = event.target as Node;
+      
+      // Check if click is inside the drawer
+      if (drawerRef.current?.contains(target)) {
+        return;
       }
+      
+      // Check if click is inside a Radix portal (dropdowns, etc.)
+      const radixPortal = (target as Element).closest?.('[data-radix-popper-content-wrapper]');
+      if (radixPortal) {
+        return;
+      }
+      
+      onToggleExpanded();
     };
 
     // Delay to prevent immediate close on button click
