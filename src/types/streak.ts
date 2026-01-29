@@ -47,6 +47,8 @@ export const THRESHOLD_RANGES: Record<string, { min: number; max: number }> = {
   REB: { min: 1, max: 25 },
   AST: { min: 1, max: 20 },
   "3PM": { min: 1, max: 10 },
+  BLK: { min: 1, max: 10 },
+  STL: { min: 1, max: 10 },
   PTS_U: { min: 10, max: 50 },
   ML: { min: 0, max: 0 }, // ML doesn't use threshold
 };

@@ -45,7 +45,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
   // Check if qualifies as "Best Bet"
   const isBestBet = streak.season_win_pct >= 55 && streak.streak_len >= 3;
 
-  // Get bet label: special formatting for teams
+  // Get bet label: special formatting for teams and stats
   const getBetLabel = () => {
     if (isTeam) {
       if (streak.stat === "ML") {
@@ -58,7 +58,8 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
         return `Team PTS ≤ ${streak.threshold}`;
       }
     }
-    return `${streak.stat} ≥ ${streak.threshold}`;
+    // Format as "STAT X+" for player stats
+    return `${streak.stat} ${streak.threshold}+`;
   };
 
   return (

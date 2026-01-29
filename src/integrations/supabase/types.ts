@@ -47,6 +47,7 @@ export type Database = {
       player_recent_games: {
         Row: {
           ast: number | null
+          blk: number | null
           fg3m: number | null
           game_date: string
           game_id: string
@@ -56,12 +57,14 @@ export type Database = {
           pts: number | null
           reb: number | null
           sport: string
+          stl: number | null
           team_abbr: string | null
           updated_at: string
           wl: string | null
         }
         Insert: {
           ast?: number | null
+          blk?: number | null
           fg3m?: number | null
           game_date: string
           game_id: string
@@ -71,12 +74,14 @@ export type Database = {
           pts?: number | null
           reb?: number | null
           sport?: string
+          stl?: number | null
           team_abbr?: string | null
           updated_at?: string
           wl?: string | null
         }
         Update: {
           ast?: number | null
+          blk?: number | null
           fg3m?: number | null
           game_date?: string
           game_id?: string
@@ -86,6 +91,7 @@ export type Database = {
           pts?: number | null
           reb?: number | null
           sport?: string
+          stl?: number | null
           team_abbr?: string | null
           updated_at?: string
           wl?: string | null

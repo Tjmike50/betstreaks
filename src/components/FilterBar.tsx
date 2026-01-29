@@ -29,7 +29,7 @@ interface FilterBarProps {
   teamOptions: string[];
 }
 
-const PLAYER_STAT_OPTIONS = ["All", "PTS", "AST", "REB", "3PM"];
+const PLAYER_STAT_OPTIONS = ["All", "PTS", "AST", "REB", "3PM", "BLK", "STL"];
 
 // Team stat options with display labels mapped to DB values
 const TEAM_STAT_OPTIONS = [

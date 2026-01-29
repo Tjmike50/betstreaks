@@ -8,6 +8,8 @@ interface PlayerGame {
   reb: number | null;
   ast: number | null;
   fg3m: number | null;
+  blk: number | null;
+  stl: number | null;
 }
 
 interface TeamGame {
@@ -38,6 +40,10 @@ function isHit(game: PlayerGame | TeamGame, stat: string, threshold: number): bo
       return ((game as PlayerGame).ast ?? 0) >= threshold;
     case "3PM":
       return ((game as PlayerGame).fg3m ?? 0) >= threshold;
+    case "BLK":
+      return ((game as PlayerGame).blk ?? 0) >= threshold;
+    case "STL":
+      return ((game as PlayerGame).stl ?? 0) >= threshold;
     case "ML":
       // For ML (moneyline), we'd need win/loss info - not stat based
       return true;
@@ -58,6 +64,10 @@ function getStatValue(game: PlayerGame | TeamGame, stat: string): number {
       return (game as PlayerGame).ast ?? 0;
     case "3PM":
       return (game as PlayerGame).fg3m ?? 0;
+    case "BLK":
+      return (game as PlayerGame).blk ?? 0;
+    case "STL":
+      return (game as PlayerGame).stl ?? 0;
     default:
       return game.pts ?? 0;
   }

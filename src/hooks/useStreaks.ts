@@ -9,6 +9,8 @@ const MIN_THRESHOLDS: Record<string, number> = {
   REB: 4,
   AST: 2,
   "3PM": 1,
+  BLK: 1,
+  STL: 1,
 };
 
 // De-duplicate: for each player+stat, keep only the best card
