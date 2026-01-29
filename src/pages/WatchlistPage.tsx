@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
 import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
+import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -261,6 +262,11 @@ export default function WatchlistPage() {
             checked={false}
             onCheckedChange={() => setShowPremiumModal(true)}
           />
+          
+          {/* Data Freshness Indicator */}
+          <div className="mt-3 pt-3 border-t border-border">
+            <DataFreshnessIndicator />
+          </div>
         </div>
       </header>
 
