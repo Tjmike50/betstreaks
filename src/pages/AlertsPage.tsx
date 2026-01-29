@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Footer } from "@/components/Footer";
 import { PremiumBadge } from "@/components/PremiumBadge";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
+import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 import { cn } from "@/lib/utils";
 import { format, isToday, isYesterday, parseISO, formatDistanceToNow } from "date-fns";
 import type { StreakEvent } from "@/hooks/useAlerts";
@@ -145,6 +146,11 @@ const AlertsPage = () => {
               checked={false}
               onCheckedChange={() => setShowPremiumModal(true)}
             />
+          </div>
+          
+          {/* Data Freshness Indicator */}
+          <div className="mt-3 pt-3 border-t border-border">
+            <DataFreshnessIndicator />
           </div>
         </div>
       </header>

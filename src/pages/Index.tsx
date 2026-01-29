@@ -5,6 +5,7 @@ import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
 import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -119,6 +120,11 @@ const Index = () => {
           Use streaks to identify consistency — always compare with sportsbook lines before betting.
         </p>
       </header>
+
+      {/* Data Freshness Indicator */}
+      <div className="px-4 pt-3">
+        <DataFreshnessIndicator />
+      </div>
 
       {/* Sticky Section: Entity Type Tabs + Filters */}
       <div className="sticky top-0 z-20 bg-background">
