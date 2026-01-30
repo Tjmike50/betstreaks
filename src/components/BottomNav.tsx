@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Flame, Star, Trophy, Bell, Crown, User, Calendar } from "lucide-react";
+import { Flame, Star, Bell, User, Calendar, Heart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlerts } from "@/hooks/useAlerts";
 
@@ -7,7 +7,7 @@ const navItems = [
   { path: "/", label: "Streaks", icon: Flame },
   { path: "/today", label: "Today", icon: Calendar },
   { path: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
-  { path: "/watchlist", label: "Watchlist", icon: Star },
+  { path: "/favorites", label: "Favorites", icon: Heart },
   { path: "/account", label: "Account", icon: User },
 ];
 
