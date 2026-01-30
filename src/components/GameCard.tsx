@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 interface GameCardProps {
@@ -15,8 +16,20 @@ interface GameCardProps {
 
 const getTeamLogoUrl = (teamAbbr: string | null) => {
   if (!teamAbbr) return null;
-  // ESPN CDN for NBA team logos
   return `https://a.espncdn.com/i/teamlogos/nba/500/${teamAbbr.toLowerCase()}.png`;
+};
+
+type GameStatus = "final" | "live" | "scheduled";
+
+const getGameStatus = (status: string | null, hasScores: boolean): GameStatus => {
+  if (!status) return "scheduled";
+  const statusLower = status.toLowerCase();
+  
+  if (statusLower.includes("final")) return "final";
+  if (status.includes("ET") || status.includes(":")) return "scheduled";
+  if (hasScores) return "live";
+  
+  return "scheduled";
 };
 
 export function GameCard({
@@ -36,10 +49,11 @@ export function GameCard({
   };
 
   const hasScores = homeScore !== null && awayScore !== null;
-  const displayStatus = status || gameTime || "TBD";
+  const gameStatus = getGameStatus(status, hasScores);
+  const displayTime = gameTime || status || "TBD";
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden transition-colors hover:bg-accent/50 active:bg-accent/70 cursor-pointer">
       <CardContent className="p-4">
         <div className="flex items-center justify-between">
           {/* Teams */}
@@ -88,16 +102,29 @@ export function GameCard({
           </div>
 
           {/* Score or Status */}
-          <div className="text-right">
-            {hasScores ? (
+          <div className="text-right flex flex-col items-end gap-1">
+            {gameStatus === "live" && (
+              <Badge variant="destructive" className="text-xs px-2 py-0.5 animate-pulse">
+                Live
+              </Badge>
+            )}
+            
+            {gameStatus === "final" && hasScores ? (
               <div className="flex flex-col items-end">
-                <span className="text-lg font-bold tabular-nums">
+                <span className="text-xl font-bold tabular-nums">
                   {awayScore} - {homeScore}
                 </span>
-                <span className="text-xs text-muted-foreground">{displayStatus}</span>
+                <span className="text-xs text-muted-foreground font-medium">Final</span>
+              </div>
+            ) : gameStatus === "live" && hasScores ? (
+              <div className="flex flex-col items-end">
+                <span className="text-xl font-bold tabular-nums text-destructive">
+                  {awayScore} - {homeScore}
+                </span>
+                <span className="text-xs text-muted-foreground">{status}</span>
               </div>
             ) : (
-              <span className="text-sm text-muted-foreground">{displayStatus}</span>
+              <span className="text-sm text-muted-foreground">{displayTime}</span>
             )}
           </div>
         </div>

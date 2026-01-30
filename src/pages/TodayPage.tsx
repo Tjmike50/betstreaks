@@ -66,7 +66,7 @@ export default function TodayPage() {
             </Button>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="divide-y divide-border rounded-lg overflow-hidden border border-border">
             {games.map((game) => (
               <GameCard
                 key={game.id}
