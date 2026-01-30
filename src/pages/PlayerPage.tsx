@@ -1,21 +1,46 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Flame, TrendingUp, Calendar } from "lucide-react";
+import { ArrowLeft, Flame, TrendingUp, Calendar, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Footer } from "@/components/Footer";
 import { usePlayerStreaks } from "@/hooks/useStreaks";
+import { useFavorites } from "@/hooks/useFavorites";
+import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { PremiumLockModal } from "@/components/PremiumLockModal";
+import { cn } from "@/lib/utils";
 
 const PlayerPage = () => {
   const { playerId } = useParams<{ playerId: string }>();
   const navigate = useNavigate();
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  
   const { data: streaks, isLoading, error } = usePlayerStreaks(
     playerId ? parseInt(playerId, 10) : 0
   );
+  const { isFavorite, toggleFavorite, isAuthenticated } = useFavorites();
+  const { isPremium } = usePremiumStatus();
 
+  const playerIdNum = playerId ? parseInt(playerId, 10) : 0;
   const playerName = streaks?.[0]?.player_name ?? "Player";
   const teamAbbr = streaks?.[0]?.team_abbr;
+  const favorited = isFavorite(playerIdNum);
+
+  const handleFavoriteClick = () => {
+    if (!isAuthenticated) {
+      navigate("/auth");
+      return;
+    }
+    
+    if (!isPremium) {
+      setShowPremiumModal(true);
+      return;
+    }
+    
+    toggleFavorite(playerIdNum, playerName);
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -31,13 +56,30 @@ const PlayerPage = () => {
           Back
         </Button>
 
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-foreground">{playerName}</h1>
-          {teamAbbr && (
-            <Badge variant="secondary" className="bg-secondary text-secondary-foreground">
-              {teamAbbr}
-            </Badge>
-          )}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-foreground">{playerName}</h1>
+            {teamAbbr && (
+              <Badge variant="secondary" className="bg-secondary text-secondary-foreground">
+                {teamAbbr}
+              </Badge>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleFavoriteClick}
+            className="h-10 w-10"
+          >
+            <Star
+              className={cn(
+                "h-6 w-6 transition-colors",
+                favorited && isPremium
+                  ? "text-yellow-500 fill-yellow-500"
+                  : "text-muted-foreground"
+              )}
+            />
+          </Button>
         </div>
       </header>
 
@@ -106,6 +148,9 @@ const PlayerPage = () => {
 
       {/* Footer */}
       <Footer />
+
+      {/* Premium Upsell Modal */}
+      <PremiumLockModal open={showPremiumModal} onOpenChange={setShowPremiumModal} />
     </div>
   );
 };
