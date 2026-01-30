@@ -1,7 +1,10 @@
-import { Flame, TrendingUp, Calendar, Clock } from "lucide-react";
+import { useState } from "react";
+import { Flame, TrendingUp, Calendar, Clock, Lock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import type { Streak } from "@/types/streak";
 import { formatDistanceToNow } from "date-fns";
+import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { PremiumLockModal } from "@/components/PremiumLockModal";
 
 interface StreakStatsProps {
   streak: Streak;
@@ -9,6 +12,8 @@ interface StreakStatsProps {
 }
 
 export function StreakStats({ streak, lastUpdated }: StreakStatsProps) {
+  const { isPremium } = usePremiumStatus();
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
   const isTeam = streak.entity_type === "team";
 
   // Build bet label
@@ -43,6 +48,14 @@ export function StreakStats({ streak, lastUpdated }: StreakStatsProps) {
   };
 
   // Calculate hit rates
+  const getL5Pct = () => {
+    if (streak.last5_hit_pct != null) return Math.round(streak.last5_hit_pct);
+    if (streak.last5_games && streak.last5_games > 0) {
+      return Math.round(((streak.last5_hits ?? 0) / streak.last5_games) * 100);
+    }
+    return null;
+  };
+
   const getL10Pct = () => {
     if (streak.last10_hit_pct != null) return Math.round(streak.last10_hit_pct);
     if (streak.last10_games && streak.last10_games > 0) {
@@ -51,13 +64,20 @@ export function StreakStats({ streak, lastUpdated }: StreakStatsProps) {
     return null;
   };
 
-  const getL5Pct = () => {
-    if (streak.last5_hit_pct != null) return Math.round(streak.last5_hit_pct);
-    if (streak.last5_games && streak.last5_games > 0) {
-      return Math.round(((streak.last5_hits ?? 0) / streak.last5_games) * 100);
-    }
-    return null;
+  const handleLockedClick = () => {
+    setShowPremiumModal(true);
   };
+
+  // Locked placeholder component
+  const LockedSplit = ({ label }: { label: string }) => (
+    <button
+      onClick={handleLockedClick}
+      className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/50 hover:bg-muted transition-colors w-full text-left"
+    >
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <Lock className="h-4 w-4 text-muted-foreground" />
+    </button>
+  );
 
   return (
     <>
@@ -76,41 +96,67 @@ export function StreakStats({ streak, lastUpdated }: StreakStatsProps) {
         </CardContent>
       </Card>
 
-      {/* Hit Rates Card */}
+      {/* Hit Rates / Splits Card */}
       <Card className="bg-card border-border">
         <CardContent className="p-4">
           <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
             <TrendingUp className="h-4 w-4" />
             Hit Rates
           </h3>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-streak-blue">
-                {Math.round(streak.season_win_pct)}%
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Season ({streak.season_wins}/{streak.season_games})
-              </div>
+          <div className="space-y-2">
+            {/* Season - always visible */}
+            <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/30">
+              <span className="text-sm text-muted-foreground">Season</span>
+              <span className="text-sm font-semibold text-streak-blue">
+                {streak.season_wins}/{streak.season_games} ({Math.round(streak.season_win_pct)}%)
+              </span>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-streak-blue">
-                {getL10Pct() ?? "—"}%
-              </div>
-              <div className="text-xs text-muted-foreground">
-                L10 ({streak.last10_hits ?? 0}/{streak.last10_games ?? 0})
-              </div>
+
+            {/* L5 - FREE */}
+            <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/30">
+              <span className="text-sm text-muted-foreground">Last 5</span>
+              <span className="text-sm font-semibold text-streak-blue">
+                {streak.last5_hits ?? 0}/{streak.last5_games ?? 0} ({getL5Pct() ?? 0}%)
+              </span>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-streak-blue">
-                {getL5Pct() ?? "—"}%
+
+            {/* L10 - PREMIUM */}
+            {isPremium ? (
+              <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/30">
+                <span className="text-sm text-muted-foreground">Last 10</span>
+                <span className="text-sm font-semibold text-streak-blue">
+                  {streak.last10_hits ?? 0}/{streak.last10_games ?? 0} ({getL10Pct() ?? 0}%)
+                </span>
               </div>
-              <div className="text-xs text-muted-foreground">
-                L5 ({streak.last5_hits ?? 0}/{streak.last5_games ?? 0})
+            ) : (
+              <LockedSplit label="Last 10" />
+            )}
+
+            {/* L15 - PREMIUM */}
+            {isPremium ? (
+              <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/30">
+                <span className="text-sm text-muted-foreground">Last 15</span>
+                <span className="text-sm font-semibold text-streak-blue">—</span>
               </div>
-            </div>
+            ) : (
+              <LockedSplit label="Last 15" />
+            )}
+
+            {/* L20 - PREMIUM */}
+            {isPremium ? (
+              <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/30">
+                <span className="text-sm text-muted-foreground">Last 20</span>
+                <span className="text-sm font-semibold text-streak-blue">—</span>
+              </div>
+            ) : (
+              <LockedSplit label="Last 20" />
+            )}
           </div>
         </CardContent>
       </Card>
+
+      {/* Premium Modal */}
+      <PremiumLockModal open={showPremiumModal} onOpenChange={setShowPremiumModal} />
 
       {/* Dates Card */}
       <Card className="bg-card border-border">
