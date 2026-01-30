@@ -44,6 +44,45 @@ export type Database = {
         }
         Relationships: []
       }
+      games_today: {
+        Row: {
+          away_score: number | null
+          away_team_abbr: string | null
+          game_date: string
+          game_time: string | null
+          home_score: number | null
+          home_team_abbr: string | null
+          id: string
+          sport: string
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          away_score?: number | null
+          away_team_abbr?: string | null
+          game_date: string
+          game_time?: string | null
+          home_score?: number | null
+          home_team_abbr?: string | null
+          id: string
+          sport?: string
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          away_score?: number | null
+          away_team_abbr?: string | null
+          game_date?: string
+          game_time?: string | null
+          home_score?: number | null
+          home_team_abbr?: string | null
+          id?: string
+          sport?: string
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       player_recent_games: {
         Row: {
           ast: number | null
