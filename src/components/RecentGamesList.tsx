@@ -1,5 +1,9 @@
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Lock } from "lucide-react";
+import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { PremiumLockModal } from "@/components/PremiumLockModal";
 
 interface PlayerGame {
   game_date: string;
@@ -82,12 +86,20 @@ function formatGameDate(dateStr: string): string {
 }
 
 export function RecentGamesList({ games, stat, threshold, isLoading }: RecentGamesListProps) {
+  const { isPremium } = usePremiumStatus();
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+
+  // Free users see 5 games, Premium users see 10
+  const maxGames = isPremium ? 10 : 5;
+  const visibleGames = games.slice(0, maxGames);
+  const hasLockedGames = !isPremium && games.length > 5;
+
   if (isLoading) {
     return (
       <Card className="bg-card border-border">
         <CardContent className="p-4">
           <h3 className="text-sm font-medium text-muted-foreground mb-3">
-            Recent Games (Last 10)
+            Recent Games (Last {maxGames})
           </h3>
           <div className="space-y-2">
             {[...Array(5)].map((_, i) => (
@@ -104,7 +116,7 @@ export function RecentGamesList({ games, stat, threshold, isLoading }: RecentGam
       <Card className="bg-card border-border">
         <CardContent className="p-4">
           <h3 className="text-sm font-medium text-muted-foreground mb-3">
-            Recent Games (Last 10)
+            Recent Games (Last {maxGames})
           </h3>
           <div className="py-6 text-center">
             <p className="text-muted-foreground text-sm">
@@ -117,50 +129,65 @@ export function RecentGamesList({ games, stat, threshold, isLoading }: RecentGam
   }
 
   return (
-    <Card className="bg-card border-border">
-      <CardContent className="p-4">
-        <h3 className="text-sm font-medium text-muted-foreground mb-3">
-          Recent Games (Last 10)
-        </h3>
-        <div className="space-y-2">
-          {games.map((game, index) => {
-            const hit = isHit(game, stat, threshold);
-            const statValue = getStatValue(game, stat);
-            
-            return (
-              <div
-                key={`${game.game_date}-${index}`}
-                className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/50"
+    <>
+      <Card className="bg-card border-border">
+        <CardContent className="p-4">
+          <h3 className="text-sm font-medium text-muted-foreground mb-3">
+            Recent Games (Last {isPremium ? 10 : 5})
+          </h3>
+          <div className="space-y-2">
+            {visibleGames.map((game, index) => {
+              const hit = isHit(game, stat, threshold);
+              const statValue = getStatValue(game, stat);
+              
+              return (
+                <div
+                  key={`${game.game_date}-${index}`}
+                  className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/50"
+                >
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium text-foreground">
+                      {formatGameDate(game.game_date)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {game.matchup || "—"}
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-foreground min-w-[2rem] text-right">
+                      {statValue}
+                    </span>
+                    <Badge
+                      className={`min-w-[3.5rem] justify-center ${
+                        hit
+                          ? "bg-streak-green/20 text-streak-green border-streak-green/30"
+                          : "bg-destructive/20 text-destructive border-destructive/30"
+                      }`}
+                      variant="outline"
+                    >
+                      {hit ? "Hit" : "Miss"}
+                    </Badge>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Locked games placeholder for non-premium users */}
+            {hasLockedGames && (
+              <button
+                onClick={() => setShowPremiumModal(true)}
+                className="flex items-center justify-center gap-2 py-3 px-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors w-full text-muted-foreground"
               >
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-sm font-medium text-foreground">
-                    {formatGameDate(game.game_date)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {game.matchup || "—"}
-                  </span>
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-semibold text-foreground min-w-[2rem] text-right">
-                    {statValue}
-                  </span>
-                  <Badge
-                    className={`min-w-[3.5rem] justify-center ${
-                      hit
-                        ? "bg-streak-green/20 text-streak-green border-streak-green/30"
-                        : "bg-destructive/20 text-destructive border-destructive/30"
-                    }`}
-                    variant="outline"
-                  >
-                    {hit ? "Hit" : "Miss"}
-                  </Badge>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+                <Lock className="h-4 w-4" />
+                <span className="text-sm">+{games.length - 5} more games (Premium)</span>
+              </button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <PremiumLockModal open={showPremiumModal} onOpenChange={setShowPremiumModal} />
+    </>
   );
 }
