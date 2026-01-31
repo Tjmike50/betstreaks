@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Flame, TrendingUp, Calendar, Star } from "lucide-react";
 import type { Streak } from "@/types/streak";
+import { getStatFriendlyLabel, isComboStat } from "@/lib/comboStats";
 
 interface StreakCardProps {
   streak: Streak;
@@ -45,7 +46,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
   // Check if qualifies as "Best Bet"
   const isBestBet = streak.season_win_pct >= 55 && streak.streak_len >= 3;
 
-  // Get bet label: special formatting for teams and stats
+  // Get bet label: special formatting for teams, combos, and stats
   const getBetLabel = () => {
     if (isTeam) {
       if (streak.stat === "ML") {
@@ -58,8 +59,10 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
         return `Team PTS ≤ ${streak.threshold}`;
       }
     }
-    // Format as "STAT X+" for player stats
-    return `${streak.stat} ${streak.threshold}+`;
+    
+    // Use friendly label for combos (e.g., "PTS+AST 18+") or regular stats
+    const statLabel = getStatFriendlyLabel(streak.stat);
+    return `${statLabel} ${streak.threshold}+`;
   };
 
   return (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, SlidersHorizontal, X, Clock } from "lucide-react";
+import { Search, SlidersHorizontal, X, Clock, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -18,7 +18,8 @@ import { THRESHOLD_RANGES } from "@/types/streak";
 import { ActiveFilterChips } from "@/components/ActiveFilterChips";
 import { PremiumBadge } from "@/components/PremiumBadge";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
-
+import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { COMBO_STAT_OPTIONS, isComboStat } from "@/lib/comboStats";
 interface FilterBarProps {
   filters: StreakFilters;
   onFiltersChange: (filters: StreakFilters) => void;
@@ -82,6 +83,21 @@ export function FilterBar({
   const activeFilterCount = getActiveFilterCount(filters, entityType);
   const drawerRef = useRef<HTMLDivElement>(null);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const { isPremium } = usePremiumStatus();
+
+  // Handle combo stat selection with premium gating
+  const handleComboSelect = (value: string) => {
+    if (!isPremium) {
+      setShowPremiumModal(true);
+      return;
+    }
+    onFiltersChange({
+      ...filters,
+      stat: value,
+      thresholdMin: null,
+      thresholdMax: null,
+    });
+  };
 
   // Get threshold range for current stat
   const currentThresholdRange = filters.stat !== "All" && filters.stat !== "ML" 
@@ -218,6 +234,35 @@ export function FilterBar({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Combos (Premium) Section - Players only */}
+          {!isTeam && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Combos</span>
+                <PremiumBadge />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {COMBO_STAT_OPTIONS.map((opt) => {
+                  const isSelected = filters.stat === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => handleComboSelect(opt.value)}
+                      className={`px-3 h-9 rounded-lg font-medium transition-colors flex items-center gap-1.5 text-sm ${
+                        isSelected
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-card text-foreground hover:bg-secondary border border-border"
+                      }`}
+                    >
+                      {opt.label}
+                      {!isPremium && <Lock className="h-3 w-3 text-muted-foreground" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Threshold Range Inputs (only show when a specific stat is selected) */}
           {currentThresholdRange && (

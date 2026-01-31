@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Lock } from "lucide-react";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
+import { calculateComboValue, isComboStat } from "@/lib/comboStats";
 
 interface PlayerGame {
   game_date: string;
@@ -35,6 +36,12 @@ function isHit(game: PlayerGame | TeamGame, stat: string, threshold: number): bo
     return (game.pts ?? 0) <= threshold;
   }
   
+  // Handle combo stats (PA, PR, RA, PRA)
+  if (isComboStat(stat)) {
+    const comboValue = calculateComboValue(stat, game as PlayerGame);
+    return (comboValue ?? 0) >= threshold;
+  }
+  
   switch (stat) {
     case "PTS":
       return (game.pts ?? 0) >= threshold;
@@ -58,6 +65,11 @@ function isHit(game: PlayerGame | TeamGame, stat: string, threshold: number): bo
 
 // Get the relevant stat value to display
 function getStatValue(game: PlayerGame | TeamGame, stat: string): number {
+  // Handle combo stats (PA, PR, RA, PRA)
+  if (isComboStat(stat)) {
+    return calculateComboValue(stat, game as PlayerGame) ?? 0;
+  }
+  
   switch (stat) {
     case "PTS":
     case "PTS_U":

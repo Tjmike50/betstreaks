@@ -3,6 +3,7 @@ import { ArrowLeft, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Streak } from "@/types/streak";
+import { getStatFriendlyLabel } from "@/lib/comboStats";
 
 interface StreakDetailHeaderProps {
   streak: Streak | null;
@@ -24,7 +25,8 @@ export function StreakDetailHeader({
     const isTeam = streak.entity_type === "team";
     const name = isTeam ? streak.team_abbr || streak.player_name : streak.player_name;
     const operator = streak.stat === "PTS_U" ? "≤" : "≥";
-    return `${name} — ${streak.stat} ${operator} ${streak.threshold}`;
+    const statLabel = getStatFriendlyLabel(streak.stat);
+    return `${name} — ${statLabel} ${operator} ${streak.threshold}`;
   };
 
   return (
