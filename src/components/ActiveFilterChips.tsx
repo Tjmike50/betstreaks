@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StreakFilters } from "@/types/streak";
+import { getStatFriendlyLabel } from "@/lib/comboStats";
 
 interface ActiveFilterChipsProps {
   filters: StreakFilters;
@@ -23,10 +24,11 @@ export function ActiveFilterChips({
 }: ActiveFilterChipsProps) {
   const chips: FilterChip[] = [];
 
-  // Stat filter
+  // Stat filter (including combos)
   if (filters.stat !== "All") {
+    const statLabel = getStatFriendlyLabel(filters.stat);
     chips.push({
-      label: `Stat: ${filters.stat}`,
+      label: `Stat: ${statLabel}`,
       onRemove: () => onFiltersChange({ ...filters, stat: "All", thresholdMin: null, thresholdMax: null }),
     });
   }

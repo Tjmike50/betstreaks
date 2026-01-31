@@ -259,6 +259,12 @@ export type Database = {
           last10_games: number | null
           last10_hit_pct: number | null
           last10_hits: number | null
+          last15_games: number | null
+          last15_hit_pct: number | null
+          last15_hits: number | null
+          last20_games: number | null
+          last20_hit_pct: number | null
+          last20_hits: number | null
           last5_games: number | null
           last5_hit_pct: number | null
           last5_hits: number | null
@@ -283,6 +289,12 @@ export type Database = {
           last10_games?: number | null
           last10_hit_pct?: number | null
           last10_hits?: number | null
+          last15_games?: number | null
+          last15_hit_pct?: number | null
+          last15_hits?: number | null
+          last20_games?: number | null
+          last20_hit_pct?: number | null
+          last20_hits?: number | null
           last5_games?: number | null
           last5_hit_pct?: number | null
           last5_hits?: number | null
@@ -307,6 +319,12 @@ export type Database = {
           last10_games?: number | null
           last10_hit_pct?: number | null
           last10_hits?: number | null
+          last15_games?: number | null
+          last15_hit_pct?: number | null
+          last15_hits?: number | null
+          last20_games?: number | null
+          last20_hit_pct?: number | null
+          last20_hits?: number | null
           last5_games?: number | null
           last5_hit_pct?: number | null
           last5_hits?: number | null
