@@ -4,6 +4,7 @@ import { useGamesToday } from "@/hooks/useGamesToday";
 import { GameCard } from "@/components/GameCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
 
 export default function TodayPage() {
   const { games, isLoading, isFetching, lastUpdated, refetch } = useGamesToday();
@@ -39,6 +40,9 @@ export default function TodayPage() {
           )}
         </div>
       </header>
+
+      {/* Early Access Banner */}
+      <EarlyAccessBanner />
 
       {/* Content */}
       <main className="px-4 py-4">

@@ -6,6 +6,7 @@ import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
 import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
+import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -269,6 +270,9 @@ export default function WatchlistPage() {
           </div>
         </div>
       </header>
+
+      {/* Early Access Banner */}
+      <EarlyAccessBanner />
 
       <main className="flex-1 px-4 py-4 pb-20">
         {isLoading ? (

@@ -6,6 +6,7 @@ import { Footer } from "@/components/Footer";
 import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
+import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -120,6 +121,9 @@ const Index = () => {
           Use streaks to identify consistency — always compare with sportsbook lines before betting.
         </p>
       </header>
+
+      {/* Early Access Banner */}
+      <EarlyAccessBanner />
 
       {/* Data Freshness Indicator */}
       <div className="px-4 pt-3">
