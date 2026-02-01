@@ -19,10 +19,10 @@ import { useToast } from "@/hooks/use-toast";
 import type { User } from "@supabase/supabase-js";
 
 const categories = [
-  { value: "bug", label: "Bug" },
-  { value: "feature_request", label: "Feature Request" },
-  { value: "data_issue", label: "Data Issue" },
-  { value: "general", label: "General Feedback" },
+  { value: "Bug", label: "Bug" },
+  { value: "Feature Request", label: "Feature Request" },
+  { value: "Data Issue", label: "Data Issue" },
+  { value: "General", label: "General Feedback" },
 ];
 
 export default function FeedbackPage() {
