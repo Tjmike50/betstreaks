@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Bell, TrendingUp, TrendingDown, Star, CheckCheck, BellRing } from "lucide-react";
 import { useAlerts } from "@/hooks/useAlerts";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -55,9 +56,23 @@ const AlertsPage = () => {
   
   const [watchlistOnly, setWatchlistOnly] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
-  // Show loading skeleton while checking premium status
-  if (isPremiumLoading) {
+  // Check auth status
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsLoggedIn(!!session?.user);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setIsLoggedIn(!!session?.user);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Show loading skeleton while checking premium status or auth
+  if (isPremiumLoading || isLoggedIn === null) {
     return (
       <div className="min-h-screen bg-background flex flex-col pb-20">
         <header className="sticky top-0 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
@@ -81,7 +96,7 @@ const AlertsPage = () => {
 
   // Show premium lock screen for non-premium users
   if (!isPremium) {
-    return <PremiumLockedScreen />;
+    return <PremiumLockedScreen isLoggedIn={isLoggedIn} />;
   }
 
   // Mark alerts as seen when page opens

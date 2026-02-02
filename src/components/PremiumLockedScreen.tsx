@@ -6,16 +6,18 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 interface PremiumLockedScreenProps {
-  title?: string;
-  description?: string;
+  isLoggedIn: boolean;
   className?: string;
 }
 
 export function PremiumLockedScreen({
-  title = "Alerts are Premium",
-  description = "Unlock real-time streak alerts and \"new streak\" signals.",
+  isLoggedIn,
   className,
 }: PremiumLockedScreenProps) {
+  const title = isLoggedIn 
+    ? "Premium Alerts (Upgrade to unlock)" 
+    : "Premium Alerts (Log in to unlock)";
+  const description = "Unlock real-time streak alerts and \"new streak\" signals.";
   return (
     <div className={cn("min-h-screen bg-background flex flex-col items-center justify-center p-6", className)}>
       <div className="max-w-md w-full text-center space-y-6">
@@ -38,9 +40,15 @@ export function PremiumLockedScreen({
 
         {/* CTA Buttons */}
         <div className="flex flex-col gap-3">
-          <Button asChild size="lg" className="w-full">
-            <Link to="/premium">Upgrade to Premium</Link>
-          </Button>
+          {isLoggedIn ? (
+            <Button asChild size="lg" className="w-full">
+              <Link to="/premium">Upgrade to Premium</Link>
+            </Button>
+          ) : (
+            <Button asChild size="lg" className="w-full">
+              <Link to="/auth">Log in</Link>
+            </Button>
+          )}
           <Button asChild variant="ghost" size="sm">
             <Link to="/">Back to Home</Link>
           </Button>
