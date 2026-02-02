@@ -1,6 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { format } from "date-fns";
 
 export interface GameToday {
   id: string;
@@ -15,18 +14,34 @@ export interface GameToday {
   updated_at: string;
 }
 
+// Get local date in YYYY-MM-DD format
+function getLocalDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getOffsetDateString(date: Date, offsetDays: number): string {
+  const newDate = new Date(date);
+  newDate.setDate(date.getDate() + offsetDays);
+  return getLocalDateString(newDate);
+}
+
 export function useGamesToday() {
-  const queryClient = useQueryClient();
-  const today = format(new Date(), "yyyy-MM-dd");
+  const today = new Date();
+  const startDate = getOffsetDateString(today, -1); // yesterday
+  const endDate = getOffsetDateString(today, 1); // tomorrow
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["games-today", today],
+    queryKey: ["games-today", startDate, endDate],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("games_today")
         .select("*")
         .eq("sport", "NBA")
-        .eq("game_date", today)
+        .gte("game_date", startDate)
+        .lte("game_date", endDate)
         .order("game_time", { ascending: true, nullsFirst: false })
         .order("id", { ascending: true });
 

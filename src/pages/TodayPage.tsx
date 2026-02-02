@@ -56,7 +56,10 @@ export default function TodayPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-lg font-medium text-muted-foreground">
-              No NBA games today.
+              No NBA games found
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              (data updating)
             </p>
             <Button
               variant="outline"
