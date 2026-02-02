@@ -215,7 +215,7 @@ const AlertsPage = () => {
             <p className="text-muted-foreground">
               {watchlistOnly
                 ? "No alerts for your watchlist items"
-                : "No alerts yet — check back after games."}
+                : "No recent alerts"}
             </p>
           </div>
         ) : (
