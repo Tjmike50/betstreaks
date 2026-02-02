@@ -1,49 +1,78 @@
 
-# Fix: BLK/STL Stat Filter Not Working
+# Plan: Make Alerts Page Premium-Only
 
-## Problem Identified
+## Overview
+Transform the Alerts page into a premium-gated feature. Non-premium users (including logged-out users) will see a visually appealing lock screen with a preview of alerts and a call-to-action to upgrade. Premium users will have full access.
 
-After thorough investigation, I discovered that selecting BLK (or STL) from the Stat dropdown does NOT update the filter state. The dropdown shows "All" after selection, and no network request with `stat=eq.BLK` is made.
+## Current State
+- **AlertsPage**: Currently shows all alerts to everyone, with only "Push notifications" marked as premium
+- **usePremiumStatus hook**: Returns `isPremium: false` for all users (placeholder for future implementation)
+- **PremiumLockModal**: Exists for waitlist signup but doesn't fully gate the page
+- **FavoritesPage**: Shows a pattern for unauthenticated users (login prompt) but not full premium gating
 
-**Root Cause**: The FilterBar has a "click outside to close" handler. When you click on a dropdown option (rendered in a Radix UI Portal outside the drawer element), the click is detected as "outside" the drawer, triggering `onToggleExpanded()` which closes the drawer. This interrupts or races with the `onValueChange` callback.
+## Implementation Approach
 
-## Investigation Summary
+### 1. Create a PremiumLockedScreen Component
+A new reusable component for premium-locked pages that displays:
+- Lock icon with "Premium" badge
+- Title explaining the feature is premium
+- Value proposition text
+- Blurred/preview of sample alerts
+- "Upgrade to Premium" button (links to /premium page)
+- "Back to Home" link
+- Inline waitlist signup option
 
-- Database confirmed: 65 BLK streaks and 116 STL streaks exist
-- Network requests show NO `stat=eq.BLK` filter being applied  
-- After selecting BLK, the dropdown reverts to showing "All"
-- The drawer closes immediately when clicking dropdown options
+**File**: `src/components/PremiumLockedScreen.tsx`
 
-## Solution
+### 2. Update AlertsPage
+Modify the Alerts page to:
+- Import and use `usePremiumStatus` hook
+- Show loading skeleton while checking premium status
+- Render `PremiumLockedScreen` if user is not premium
+- Keep existing alerts functionality for premium users
 
-Modify the "click outside" detection in FilterBar to exclude clicks on Radix UI Portal elements (dropdown content). Radix UI renders Select content with `data-radix-popper-content-wrapper` attribute.
+**File**: `src/pages/AlertsPage.tsx`
 
-## Technical Changes
+### 3. Update usePremiumStatus Hook (Optional Enhancement)
+The hook is already set up as a placeholder. No changes needed now - when you implement Stripe subscriptions later, you'll update this hook to check actual premium status.
 
-### File: `src/components/FilterBar.tsx`
+## Technical Details
 
-Update the click outside handler to check if the click target is inside a Radix portal:
-
-```typescript
-const handleClickOutside = (event: MouseEvent) => {
-  const target = event.target as Node;
-  
-  // Check if click is inside the drawer
-  if (drawerRef.current?.contains(target)) {
-    return;
-  }
-  
-  // Check if click is inside a Radix portal (dropdowns, etc.)
-  const radixPortal = (target as Element).closest?.('[data-radix-popper-content-wrapper]');
-  if (radixPortal) {
-    return;
-  }
-  
-  onToggleExpanded();
-};
+### PremiumLockedScreen Component
+```text
++------------------------------------------+
+|               [Lock Icon]                 |
+|          "Alerts are Premium"             |
+|                                           |
+|   Unlock real-time streak alerts and      |
+|   "new streak" signals.                   |
+|                                           |
+|   [Upgrade to Premium Button]             |
+|   [Back to Home Link]                     |
+|                                           |
+|   ---- Preview ----                       |
+|   [Blurred sample alert cards]            |
+|   [Blurred sample alert cards]            |
+|   [Blurred sample alert cards]            |
++------------------------------------------+
 ```
 
-This change ensures that:
-1. Clicks inside the filter drawer don't close it (existing behavior)
-2. Clicks on dropdown options (in portals) don't close the drawer (NEW)
-3. Clicks truly outside (on the feed, etc.) still close the drawer (existing behavior)
+### AlertsPage Flow
+```text
+Loading? -> Show Skeleton
+Not Premium? -> Show PremiumLockedScreen
+Premium? -> Show Full Alerts List (existing code)
+```
+
+## Files to Create/Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/components/PremiumLockedScreen.tsx` | Create | New reusable component for premium-locked pages |
+| `src/pages/AlertsPage.tsx` | Modify | Add premium check and conditional rendering |
+
+## Notes
+- This follows the existing pattern of using `usePremiumStatus` which currently returns `isPremium: false`
+- When you later implement Stripe payments, updating the `usePremiumStatus` hook will automatically unlock the Alerts page for paying users
+- The preview section shows blurred placeholder cards to give users a taste of what they're missing
+- Uses existing UI components (Button, Card, Skeleton) to maintain consistency
