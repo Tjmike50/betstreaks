@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Lock, Zap, Eye, TrendingUp } from "lucide-react";
+import { Lock, Zap, Bell, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -9,9 +9,9 @@ interface PremiumLockedScreenProps {
 }
 
 const features = [
-  { icon: Zap, text: "PRA / PR / PA streak alerts" },
-  { icon: Eye, text: "Early streak detection" },
-  { icon: TrendingUp, text: "Signals before lines move" },
+  { icon: Zap, text: "Real-time streak alerts (PRA / PR / PA)" },
+  { icon: Bell, text: "New streak notifications" },
+  { icon: Users, text: "Combo streak tracking" },
 ];
 
 export function PremiumLockedScreen({
@@ -31,16 +31,9 @@ export function PremiumLockedScreen({
         {/* Title */}
         <h1 className="text-2xl font-bold">🔒 Premium Alerts</h1>
 
-        {/* Subtitle */}
-        <p className="text-muted-foreground">
-          Real-time streak alerts are a Premium feature.
-        </p>
-
         {/* Features List */}
         <div className="text-left space-y-3 bg-card border border-border rounded-lg p-4">
-          <p className="text-sm font-medium text-muted-foreground">
-            {isLoggedIn ? "Upgrade to unlock:" : "Log in and upgrade to unlock:"}
-          </p>
+          <p className="text-sm font-medium text-muted-foreground">Upgrade to unlock:</p>
           <ul className="space-y-3">
             {features.map((feature, index) => (
               <li key={index} className="flex items-center gap-3 text-sm">
@@ -50,6 +43,9 @@ export function PremiumLockedScreen({
             ))}
           </ul>
         </div>
+
+        {/* Cancel anytime */}
+        <p className="text-sm text-muted-foreground">Cancel anytime.</p>
 
         {/* CTA Buttons */}
         <div className="flex flex-col gap-3">
