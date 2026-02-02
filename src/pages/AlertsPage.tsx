@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { Bell, TrendingUp, TrendingDown, Star, CheckCheck, BellRing } from "lucide-react";
 import { useAlerts } from "@/hooks/useAlerts";
+import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Footer } from "@/components/Footer";
 import { PremiumBadge } from "@/components/PremiumBadge";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
+import { PremiumLockedScreen } from "@/components/PremiumLockedScreen";
 import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 import { cn } from "@/lib/utils";
 import { format, isToday, isYesterday, parseISO, formatDistanceToNow } from "date-fns";
@@ -40,9 +42,10 @@ function groupEventsByDay(events: StreakEvent[]): Record<DayGroup, StreakEvent[]
 
 const AlertsPage = () => {
   const navigate = useNavigate();
+  const { isPremium, isLoading: isPremiumLoading } = usePremiumStatus();
   const {
     events,
-    isLoading,
+    isLoading: isAlertsLoading,
     isInWatchlist,
     isNewAlert,
     newAlertCount,
@@ -52,6 +55,34 @@ const AlertsPage = () => {
   
   const [watchlistOnly, setWatchlistOnly] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+
+  // Show loading skeleton while checking premium status
+  if (isPremiumLoading) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col pb-20">
+        <header className="sticky top-0 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-5 w-5 rounded" />
+              <Skeleton className="h-6 w-20" />
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 px-4 py-4">
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <Skeleton key={i} className="h-20 w-full rounded-lg" />
+            ))}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Show premium lock screen for non-premium users
+  if (!isPremium) {
+    return <PremiumLockedScreen />;
+  }
 
   // Mark alerts as seen when page opens
   useEffect(() => {
@@ -157,7 +188,7 @@ const AlertsPage = () => {
 
       {/* Content */}
       <main className="flex-1 px-4 py-4">
-        {isLoading ? (
+        {isAlertsLoading ? (
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
               <Skeleton key={i} className="h-20 w-full rounded-lg" />
