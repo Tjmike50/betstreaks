@@ -1,78 +1,216 @@
 
-# Plan: Make Alerts Page Premium-Only
+# Plan: Stripe Subscriptions for BetStreaks Premium (Web)
 
 ## Overview
-Transform the Alerts page into a premium-gated feature. Non-premium users (including logged-out users) will see a visually appealing lock screen with a preview of alerts and a call-to-action to upgrade. Premium users will have full access.
+Implement Stripe-powered subscription billing for the web version of BetStreaks. When users purchase Premium via Stripe Checkout, their `user_flags.is_premium` flag is set to `true`. When canceled or expired, it reverts to `false`.
 
-## Current State
-- **AlertsPage**: Currently shows all alerts to everyone, with only "Push notifications" marked as premium
-- **usePremiumStatus hook**: Returns `isPremium: false` for all users (placeholder for future implementation)
-- **PremiumLockModal**: Exists for waitlist signup but doesn't fully gate the page
-- **FavoritesPage**: Shows a pattern for unauthenticated users (login prompt) but not full premium gating
+## Architecture
 
-## Implementation Approach
-
-### 1. Create a PremiumLockedScreen Component
-A new reusable component for premium-locked pages that displays:
-- Lock icon with "Premium" badge
-- Title explaining the feature is premium
-- Value proposition text
-- Blurred/preview of sample alerts
-- "Upgrade to Premium" button (links to /premium page)
-- "Back to Home" link
-- Inline waitlist signup option
-
-**File**: `src/components/PremiumLockedScreen.tsx`
-
-### 2. Update AlertsPage
-Modify the Alerts page to:
-- Import and use `usePremiumStatus` hook
-- Show loading skeleton while checking premium status
-- Render `PremiumLockedScreen` if user is not premium
-- Keep existing alerts functionality for premium users
-
-**File**: `src/pages/AlertsPage.tsx`
-
-### 3. Update usePremiumStatus Hook (Optional Enhancement)
-The hook is already set up as a placeholder. No changes needed now - when you implement Stripe subscriptions later, you'll update this hook to check actual premium status.
-
-## Technical Details
-
-### PremiumLockedScreen Component
 ```text
-+------------------------------------------+
-|               [Lock Icon]                 |
-|          "Alerts are Premium"             |
-|                                           |
-|   Unlock real-time streak alerts and      |
-|   "new streak" signals.                   |
-|                                           |
-|   [Upgrade to Premium Button]             |
-|   [Back to Home Link]                     |
-|                                           |
-|   ---- Preview ----                       |
-|   [Blurred sample alert cards]            |
-|   [Blurred sample alert cards]            |
-|   [Blurred sample alert cards]            |
-+------------------------------------------+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              USER FLOW                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  /premium page                                                               │
+│  ┌────────────────────────────────────────┐                                 │
+│  │  [Go Premium Monthly - $9.99/mo]       │──► create-checkout-session      │
+│  │  [Go Premium Yearly - $59.99/yr]       │    (Edge Function)              │
+│  │                                         │         │                       │
+│  │  Already Premium?                       │         ▼                       │
+│  │  [Manage Billing]                       │──► Stripe Checkout             │
+│  └────────────────────────────────────────┘         │                       │
+│                                                      ▼                       │
+│                                              Stripe Webhook                  │
+│                                              (stripe-webhook)                │
+│                                                      │                       │
+│                                                      ▼                       │
+│                                          ┌──────────────────────┐           │
+│                                          │  user_flags          │           │
+│                                          │  is_premium = true   │           │
+│                                          └──────────────────────┘           │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### AlertsPage Flow
+## Database Tables (Already Exist)
+
+The required tables are already in place:
+
+| Table | Purpose |
+|-------|---------|
+| `stripe_customers` | Maps `user_id` → `stripe_customer_id` |
+| `stripe_subscriptions` | Stores subscription details (status, price_id, period_end) |
+| `user_flags` | Contains `is_premium` boolean for premium access |
+
+**Note**: Existing RLS policies only allow SELECT for authenticated users. The edge functions will use the **service role key** to INSERT/UPDATE these tables.
+
+## Secrets Required
+
+Before implementation, two Stripe secrets must be added:
+
+| Secret | Purpose |
+|--------|---------|
+| `STRIPE_SECRET_KEY` | API key for Stripe operations (checkout, portal) |
+| `STRIPE_WEBHOOK_SECRET` | Signature verification for webhook events |
+
+## Edge Functions to Create
+
+### 1. `create-checkout-session`
+**Purpose**: Create a Stripe Checkout session for subscription purchase
+
+**Flow**:
+1. Verify user is authenticated via JWT
+2. Look up or create Stripe customer (stores mapping in `stripe_customers`)
+3. Create Checkout session with the selected price_id
+4. Return checkout URL
+
+**Inputs**: `{ priceId: string }`  
+**Outputs**: `{ url: string }`
+
+### 2. `create-portal-session`
+**Purpose**: Allow users to manage their subscription (cancel, update payment)
+
+**Flow**:
+1. Verify user is authenticated via JWT
+2. Look up Stripe customer ID from `stripe_customers`
+3. Create Customer Portal session
+4. Return portal URL
+
+**Outputs**: `{ url: string }`
+
+### 3. `stripe-webhook`
+**Purpose**: Handle Stripe webhook events (NO auth - uses signature verification)
+
+**Events Handled**:
+- `checkout.session.completed` → Link subscription to user
+- `customer.subscription.created` → Set `is_premium = true`
+- `customer.subscription.updated` → Check status, update premium flag
+- `customer.subscription.deleted` → Set `is_premium = false`
+- `invoice.payment_failed` → (Optional) Log for alerting
+
+**Premium Logic**:
 ```text
-Loading? -> Show Skeleton
-Not Premium? -> Show PremiumLockedScreen
-Premium? -> Show Full Alerts List (existing code)
+if status IN ('active', 'trialing') => is_premium = true
+else => is_premium = false
 ```
+
+## Frontend Changes
+
+### 1. Update `usePremiumStatus` Hook
+Query `user_flags` table for the current user's `is_premium` status:
+
+```typescript
+// Fetches is_premium from user_flags for authenticated users
+const { data } = await supabase
+  .from('user_flags')
+  .select('is_premium')
+  .eq('user_id', userId)
+  .single();
+```
+
+### 2. Redesign Premium Page (`/premium`)
+
+**For logged-out users**: Show login prompt  
+**For non-premium users**: Show subscription options  
+**For premium users**: Show status + Manage Billing button
+
+```text
+┌─────────────────────────────────────────┐
+│           BetStreaks Premium             │
+│                                          │
+│   [Feature list with checkmarks]         │
+│                                          │
+│   ┌──────────────────────────────────┐  │
+│   │  Monthly        │  Yearly        │  │
+│   │  $9.99/mo       │  $59.99/yr     │  │
+│   │  [Subscribe]    │  [Subscribe]   │  │
+│   │                 │  Save 50%      │  │
+│   └──────────────────────────────────┘  │
+│                                          │
+│   /premium?success=1 → Show confetti!   │
+└─────────────────────────────────────────┘
+
+For Premium Users:
+┌─────────────────────────────────────────┐
+│   ✓ You're a Premium member!            │
+│                                          │
+│   [Manage Billing]                       │
+└─────────────────────────────────────────┘
+```
+
+### 3. Handle Success Redirect
+When returning from Stripe Checkout with `?success=1`:
+- Show success toast/confetti
+- Refetch premium status
+- Display confirmation message
 
 ## Files to Create/Modify
 
 | File | Action | Description |
 |------|--------|-------------|
-| `src/components/PremiumLockedScreen.tsx` | Create | New reusable component for premium-locked pages |
-| `src/pages/AlertsPage.tsx` | Modify | Add premium check and conditional rendering |
+| `supabase/functions/create-checkout-session/index.ts` | Create | Checkout session creation |
+| `supabase/functions/create-portal-session/index.ts` | Create | Customer portal session |
+| `supabase/functions/stripe-webhook/index.ts` | Create | Webhook handler |
+| `supabase/config.toml` | Modify | Add function configs with `verify_jwt = false` |
+| `src/hooks/usePremiumStatus.ts` | Modify | Query `user_flags.is_premium` |
+| `src/pages/PremiumPage.tsx` | Modify | Subscription UI with checkout buttons |
 
-## Notes
-- This follows the existing pattern of using `usePremiumStatus` which currently returns `isPremium: false`
-- When you later implement Stripe payments, updating the `usePremiumStatus` hook will automatically unlock the Alerts page for paying users
-- The preview section shows blurred placeholder cards to give users a taste of what they're missing
-- Uses existing UI components (Button, Card, Skeleton) to maintain consistency
+## Stripe Price IDs
+
+You'll need to create products in Stripe Dashboard and provide the price IDs:
+- **Monthly**: `price_xxxxx` ($9.99/month)
+- **Yearly**: `price_yyyyy` ($59.99/year)
+
+These will be stored as constants in the frontend.
+
+## iOS Compatibility Note
+
+This implementation is web-only:
+- Edge functions are called from the web app only
+- No changes affect potential future iOS In-App Purchase flow
+- `user_flags.is_premium` can be set by either Stripe (web) or future IAP webhooks (iOS)
+
+## Implementation Order
+
+1. **Add Stripe secrets** (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET)
+2. **Create edge functions** (checkout, portal, webhook)
+3. **Update usePremiumStatus hook** to query database
+4. **Redesign Premium page** with subscription buttons
+5. **Test end-to-end** with Stripe test mode
+
+## Technical Details
+
+### Webhook Signature Verification
+```typescript
+import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno';
+
+const signature = req.headers.get('stripe-signature');
+const body = await req.text();
+const event = stripe.webhooks.constructEvent(
+  body, 
+  signature, 
+  Deno.env.get('STRIPE_WEBHOOK_SECRET')
+);
+```
+
+### Premium Flag Update Logic
+```typescript
+async function updatePremiumStatus(userId: string, isActive: boolean) {
+  await supabase
+    .from('user_flags')
+    .upsert({ 
+      user_id: userId, 
+      is_premium: isActive,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+}
+```
+
+### Checkout Session Metadata
+Store `user_id` in checkout session metadata to link subscription to user:
+```typescript
+const session = await stripe.checkout.sessions.create({
+  customer: stripeCustomerId,
+  metadata: { user_id: userId },
+  // ...
+});
+```
