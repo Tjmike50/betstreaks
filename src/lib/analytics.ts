@@ -30,13 +30,13 @@ export async function trackEvent(
     }
 
     // Insert event into analytics table
-    const { error } = await supabase
+    // Use type assertion since table was just created and types may not be synced
+    const { error } = await (supabase as ReturnType<typeof supabase.from>)
       .from("analytics_events")
       .insert({
         event_name: event,
         user_id: userId,
         metadata: options.metadata ?? null,
-        created_at: new Date().toISOString(),
       });
 
     if (error) {

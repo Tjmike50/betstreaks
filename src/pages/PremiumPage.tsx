@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { Badge } from "@/components/ui/badge";
 import { PREMIUM_FEATURES, PREMIUM_PRICING } from "@/lib/premiumFeatures";
+import { analytics } from "@/lib/analytics";
 
 const PRICE_IDS = {
   monthly: "price_1SyJVfF2kOU6awRkLbvUGeLl",
@@ -26,6 +27,11 @@ export default function PremiumPage() {
   const [isCheckoutLoading, setIsCheckoutLoading] = useState<"monthly" | "yearly" | null>(null);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
 
+  // Track page view
+  useEffect(() => {
+    analytics.viewPremiumPage();
+  }, []);
+
   // Check for success/canceled query params
   useEffect(() => {
     const success = searchParams.get("success");
@@ -36,6 +42,8 @@ export default function PremiumPage() {
         title: "Welcome to Premium! 🎉",
         description: "Your subscription is now active. Enjoy all premium features!",
       });
+      // Track checkout success
+      analytics.checkoutSuccess();
       // Refetch premium status after successful checkout
       refetch();
       // Clean up URL
@@ -46,6 +54,8 @@ export default function PremiumPage() {
         title: "Checkout canceled",
         description: "Your subscription was not completed.",
       });
+      // Track checkout cancel
+      analytics.checkoutCancel();
       // Clean up URL
       window.history.replaceState({}, "", "/premium");
     }
@@ -71,6 +81,13 @@ export default function PremiumPage() {
     if (!user) {
       navigate("/auth");
       return;
+    }
+
+    // Track click event
+    if (plan === "monthly") {
+      analytics.clickSubscribeMonthly();
+    } else {
+      analytics.clickSubscribeYearly();
     }
 
     setIsCheckoutLoading(plan);

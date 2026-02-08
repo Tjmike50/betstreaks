@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { analytics } from "@/lib/analytics";
 
 interface FavoritePlayer {
   id: string;
@@ -48,9 +49,11 @@ export function useFavorites() {
 
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["favorites"] });
       toast({ title: "Player added to favorites ⭐" });
+      // Track analytics
+      analytics.addFavorite(variables.playerId, variables.playerName);
     },
     onError: () => {
       toast({ title: "Failed to add favorite", variant: "destructive" });
