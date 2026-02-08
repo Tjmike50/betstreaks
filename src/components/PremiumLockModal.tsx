@@ -11,21 +11,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Crown, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { PREMIUM_FEATURES, PREMIUM_PRICING } from "@/lib/premiumFeatures";
 
 interface PremiumLockModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const PREMIUM_FEATURES = [
-  "Player combos (PTS+AST, PTS+REB, PRA, etc.)",
-  "Last 10 / 15 / 20 game splits",
-  "Real-time streak alerts",
-  "Best plays of the day (AI ranked)",
-  "Save favorite players",
-  "Double-Double & Triple-Double tracking",
-  "Historical matchup trends",
-];
 
 export function PremiumLockModal({ open, onOpenChange }: PremiumLockModalProps) {
   const navigate = useNavigate();
@@ -75,8 +66,8 @@ export function PremiumLockModal({ open, onOpenChange }: PremiumLockModalProps) 
 
         <div className="text-center py-2">
           <p className="text-sm text-muted-foreground">
-            Starting at <span className="font-semibold text-foreground">$10/month</span> or{" "}
-            <span className="font-semibold text-foreground">$60/year</span>
+            Starting at <span className="font-semibold text-foreground">{PREMIUM_PRICING.monthly.display}/{PREMIUM_PRICING.monthly.period}</span> or{" "}
+            <span className="font-semibold text-foreground">{PREMIUM_PRICING.yearly.display}/{PREMIUM_PRICING.yearly.period}</span>
           </p>
         </div>
 

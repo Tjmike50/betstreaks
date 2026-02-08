@@ -8,21 +8,12 @@ import { ArrowLeft, Crown, Check, Loader2, ExternalLink, Sparkles } from "lucide
 import { useToast } from "@/hooks/use-toast";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { Badge } from "@/components/ui/badge";
+import { PREMIUM_FEATURES, PREMIUM_PRICING } from "@/lib/premiumFeatures";
 
 const PRICE_IDS = {
   monthly: "price_1SyJVfF2kOU6awRkLbvUGeLl",
   yearly: "price_1SyJcpF2kOU6awRk2uaH9xum",
 };
-
-const FEATURES = [
-  "Player combos (PTS+AST, PTS+REB, PRA, etc.)",
-  "Last 10 / 15 / 20 game splits",
-  "Real-time streak alerts",
-  "Best plays of the day (AI ranked)",
-  "Save favorite players",
-  "Double-Double & Triple-Double tracking",
-  "Historical matchup trends",
-];
 
 export default function PremiumPage() {
   const navigate = useNavigate();
@@ -176,7 +167,7 @@ export default function PremiumPage() {
               </div>
 
               <div className="space-y-3">
-                {FEATURES.map((feature, index) => (
+                {PREMIUM_FEATURES.map((feature, index) => (
                   <div key={index} className="flex items-center gap-3">
                     <div className="flex-shrink-0 w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center">
                       <Check className="h-3 w-3 text-green-500" />
@@ -221,7 +212,7 @@ export default function PremiumPage() {
               </div>
 
               <div className="space-y-3">
-                {FEATURES.map((feature, index) => (
+                {PREMIUM_FEATURES.map((feature, index) => (
                   <div key={index} className="flex items-center gap-3">
                     <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
                       <Check className="h-3 w-3 text-primary" />
@@ -250,7 +241,7 @@ export default function PremiumPage() {
               </div>
 
               <div className="space-y-3">
-                {FEATURES.map((feature, index) => (
+                {PREMIUM_FEATURES.map((feature, index) => (
                   <div key={index} className="flex items-center gap-3">
                     <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
                       <Check className="h-3 w-3 text-primary" />
