@@ -8,3 +8,12 @@ verify_jwt = false
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+[functions.refresh-games-today]
+verify_jwt = false
+
+[functions.refresh-players-and-streaks]
+verify_jwt = false
+
+[functions.admin-trigger-refresh]
+verify_jwt = false

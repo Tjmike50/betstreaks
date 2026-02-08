@@ -434,18 +434,21 @@ export type Database = {
       user_flags: {
         Row: {
           created_at: string
+          is_admin: boolean
           is_premium: boolean
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          is_admin?: boolean
           is_premium?: boolean
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          is_admin?: boolean
           is_premium?: boolean
           updated_at?: string
           user_id?: string
@@ -493,7 +496,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_admin: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
