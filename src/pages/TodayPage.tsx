@@ -1,5 +1,6 @@
 import { RefreshCw, Calendar, AlertCircle } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
+import { useSearchParams } from "react-router-dom";
 import { useGamesToday } from "@/hooks/useGamesToday";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { GameCard } from "@/components/GameCard";
@@ -10,8 +11,12 @@ import { AdminRefreshButton } from "@/components/AdminRefreshButton";
 import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 
 export default function TodayPage() {
-  const { games, isLoading, isFetching, error, lastUpdated, refetch } = useGamesToday();
+  const { games, isLoading, isFetching, error, lastUpdated, refetch, debugInfo } = useGamesToday();
   const { formattedTime: refreshStatusTime, lastRun: refreshLastRun, season } = useRefreshStatus();
+  const [searchParams] = useSearchParams();
+
+  const isDebug = searchParams.get("debug") === "1";
+  const todayFormatted = format(new Date(), "EEEE, MMM d");
 
   const formattedLastUpdated = lastUpdated
     ? formatDistanceToNow(lastUpdated, { addSuffix: true })
@@ -50,6 +55,9 @@ export default function TodayPage() {
       <main className="px-4 py-4">
         {isLoading ? (
           <div className="space-y-3">
+            <p className="text-sm text-muted-foreground text-center py-2">
+              Loading today's games...
+            </p>
             {[...Array(5)].map((_, i) => (
               <Skeleton key={i} className="h-20 w-full rounded-lg" />
             ))}
@@ -77,17 +85,17 @@ export default function TodayPage() {
         ) : games.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium text-muted-foreground">
-              No games scheduled
+            <p className="text-lg font-medium">
+              No NBA games scheduled
             </p>
             <p className="text-sm text-muted-foreground mt-1">
-              {refreshLastRun 
-                ? `Last refresh: ${refreshStatusTime}`
-                : "Waiting for data refresh"
-              }
+              for {todayFormatted}
             </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              {season} Season
+            <p className="text-xs text-muted-foreground mt-3">
+              {refreshLastRun 
+                ? `Last updated: ${refreshStatusTime}`
+                : "Waiting for data refresh"
+              } • {season} Season
             </p>
             <div className="flex items-center gap-2 mt-4">
               <Button
@@ -101,22 +109,40 @@ export default function TodayPage() {
               </Button>
               <AdminRefreshButton />
             </div>
+            {isDebug && (
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg text-xs font-mono text-left w-full max-w-sm">
+                <p className="font-semibold mb-1">Debug Info</p>
+                <p>Records: {games.length} (raw: {debugInfo.rawCount})</p>
+                <p>Date range: {debugInfo.startDate} to {debugInfo.endDate}</p>
+                <p>Last updated: {lastUpdated?.toISOString() || "N/A"}</p>
+              </div>
+            )}
           </div>
         ) : (
-          <div className="divide-y divide-border rounded-lg overflow-hidden border border-border">
-            {games.map((game) => (
-              <GameCard
-                key={game.id}
-                id={game.id}
-                homeTeamAbbr={game.home_team_abbr}
-                awayTeamAbbr={game.away_team_abbr}
-                homeScore={game.home_score}
-                awayScore={game.away_score}
-                status={game.status}
-                gameTime={game.game_time}
-              />
-            ))}
-          </div>
+          <>
+            <div className="divide-y divide-border rounded-lg overflow-hidden border border-border">
+              {games.map((game) => (
+                <GameCard
+                  key={game.id}
+                  id={game.id}
+                  homeTeamAbbr={game.home_team_abbr}
+                  awayTeamAbbr={game.away_team_abbr}
+                  homeScore={game.home_score}
+                  awayScore={game.away_score}
+                  status={game.status}
+                  gameTime={game.game_time}
+                />
+              ))}
+            </div>
+            {isDebug && (
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg text-xs font-mono">
+                <p className="font-semibold mb-1">Debug Info</p>
+                <p>Records: {games.length} (raw: {debugInfo.rawCount})</p>
+                <p>Date range: {debugInfo.startDate} to {debugInfo.endDate}</p>
+                <p>Last updated: {lastUpdated?.toISOString() || "N/A"}</p>
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>
