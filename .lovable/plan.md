@@ -1,142 +1,138 @@
 
-# GitHub Actions Data Refresh Plan
+# Enhanced Data Refresh & Cleanup Plan
 
-## Overview
-Replace the unreliable cron-job.org + Edge Functions approach with a GitHub Actions workflow that runs your existing Python script on a schedule. This is the most stable path since:
-- You already have working Python code locally
-- GitHub Actions is free and has great logging
-- No need to fight IP blocking or Deno/TypeScript rewrites
+This plan covers all four requested changes with the full-season data window you asked for.
 
 ---
 
-## Files to Create
+## Summary of Changes
 
-### 1. Python Refresh Script
-**File**: `scripts/refresh.py`
-
-This script will:
-- Use `nba_api` to fetch player game logs and today's scoreboard
-- Connect to Supabase using the Python client
-- Upsert data into:
-  - `games_today` (schedule + live scores)
-  - `player_recent_games` (player stats per game)
-  - `streaks` (calculated streaks)
-  - `streak_events` (started/extended/broken events)
-  - `refresh_status` (timestamp tracking)
-
-### 2. Requirements File
-**File**: `requirements.txt`
-
-```
-nba_api>=1.4.1
-supabase>=2.0.0
-python-dotenv>=1.0.0
-```
-
-### 3. GitHub Actions Workflow
-**File**: `.github/workflows/refresh.yml`
-
-```yaml
-name: Refresh NBA Data
-
-on:
-  schedule:
-    - cron: "0 */3 * * *"   # Every 3 hours (UTC)
-  workflow_dispatch: {}      # Manual trigger button
-
-jobs:
-  refresh:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - run: pip install -r requirements.txt
-      - name: Run refresh
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/refresh.py
-```
+| Task | Description | Impact |
+|------|-------------|--------|
+| Fetch full season data | Use season start date instead of days_back | Streaks show complete season history |
+| Add thresholds | REB 15/18/20, PTS 45/50 | Catch elite performances |
+| Add team streaks | ML wins, PTS over/under | Teams tab populated |
+| Clean up Edge Functions | Remove 2 obsolete functions | Cleaner codebase |
 
 ---
 
-## Database Target Tables
+## 1. Fetch Data for the Entire Season
 
-| Table | Primary Key | What It Stores |
-|-------|-------------|----------------|
-| `games_today` | `id` (game_id) | Today's NBA schedule + scores |
-| `player_recent_games` | `(player_id, game_id)` | Individual player stats per game |
-| `streaks` | `id` (uuid) | Active streaks (player + stat + threshold) |
-| `streak_events` | `id` (uuid) | History of streak changes |
-| `refresh_status` | `id` (1=players, 2=games) | Last refresh timestamps |
+Instead of using `days_back=45` (or even 120 days), the script will calculate the **season start date** dynamically:
 
----
+- **2024-25 NBA Season** started **October 22, 2024**
+- Script will fetch all games from season start through today
+- This ensures all player/team history is captured for accurate streak detection
 
-## Python Script Logic
-
-```text
-1. Fetch today's scoreboard from nba_api
-   └── Upsert into games_today
-
-2. Fetch league game log (last 30 days)
-   └── Upsert into player_recent_games
-
-3. For each player:
-   For each stat (PTS, REB, AST, 3PM, BLK, STL):
-     For each threshold:
-       └── Count consecutive hits from most recent game
-       └── Calculate season_wins, last5, last10, etc.
-       └── If streak >= 3, add to streaks list
-
-4. Compare old streaks vs new streaks
-   └── Detect started/extended/broken events
-   └── Insert into streak_events
-
-5. Upsert streaks table
-
-6. Update refresh_status timestamps
-```
+The updated logic:
+- If current month is October or later: season started Oct 22 of current year
+- If current month is before October: season started Oct 22 of previous year
+- Fetch all game logs from that date forward (no arbitrary day limit)
 
 ---
 
-## Setup Steps (For You)
+## 2. Add Higher Thresholds for Elite Performers
 
-### Step 1: Add GitHub Secrets
-Go to your repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+**Current Thresholds**:
+- PTS: 10, 15, 20, 25, 30, 35, 40
+- REB: 5, 8, 10, 12, 15
 
-Add these two secrets:
-- `SUPABASE_URL` = `https://enhksxikgvvdohseivpx.supabase.co`
-- `SUPABASE_SERVICE_ROLE_KEY` = (get from Supabase Dashboard → Settings → API)
-
-### Step 2: Merge the Code
-After I create the files, push to main branch.
-
-### Step 3: Test Manually
-Go to **Actions** tab → **Refresh NBA Data** → **Run workflow** → Check logs.
-
-### Step 4: Verify Data
-Check the `player_recent_games` and `streaks` tables in Supabase to confirm Scottie Barnes shows up.
+**New Thresholds**:
+- PTS: Add **45, 50** (for superstar games like Luka, Giannis)
+- REB: Add **18, 20** (for elite rebounders like Gobert, Wembanyama)
 
 ---
 
-## What Happens to Edge Functions?
+## 3. Add Team Streak Support
 
-Keep them as-is for now. They're harmless and you might want them later for real-time score updates during games. The Python script handles the heavy lifting (player stats + streaks), while edge functions can optionally handle live game score polling if you ever want that.
+The Teams tab will now display fresh streaks for:
+
+| Stat | Description | Thresholds |
+|------|-------------|------------|
+| ML | Moneyline (consecutive wins) | Win detection only |
+| PTS | Team Points Over | 100, 105, 110, 115, 120, 125, 130 |
+| PTS_U | Team Points Under | 100, 105, 110, 115, 120, 125 |
+
+Implementation:
+- Add `TeamGameLogs` from nba_api
+- Create `fetch_team_game_logs()` function
+- Create `calculate_team_streaks()` function
+- Store with `entity_type="team"` and `player_id=0`
 
 ---
 
-## Timeline
+## 4. Clean Up Obsolete Edge Functions
 
-| Step | Effort |
+**Functions to Delete**:
+- `supabase/functions/refresh-games-today/` - Now handled by Python script
+- `supabase/functions/refresh-players-and-streaks/` - Now handled by Python script
+
+**Config Cleanup**:
+- Remove entries from `supabase/config.toml`
+
+**Functions to Keep**:
+- `admin-trigger-refresh/` - Manual admin trigger
+- `create-checkout-session/` - Stripe payments
+- `create-portal-session/` - Stripe portal
+- `stripe-webhook/` - Stripe webhooks
+- `healthcheck/` - Health monitoring
+
+---
+
+## Technical Details
+
+### File Changes
+
+| File | Action |
 |------|--------|
-| Create Python script | 5 min |
-| Create requirements.txt | 1 min |
-| Create GitHub workflow | 1 min |
-| You add secrets in GitHub | 2 min |
-| Test run | 2 min |
+| `scripts/refresh.py` | Major update: full season fetch, new thresholds, team streaks |
+| `supabase/functions/refresh-games-today/` | DELETE entire directory |
+| `supabase/functions/refresh-players-and-streaks/` | DELETE entire directory |
+| `supabase/config.toml` | Remove 2 function entries |
 
-**Total: ~10 minutes to working automated refreshes**
+### Updated refresh.py Logic
+
+**Season Date Calculation**:
+```python
+def get_season_start_date():
+    """Get the start date of the current NBA season."""
+    now = datetime.now()
+    if now.month >= 10:
+        # Season started this year (Oct 22)
+        return datetime(now.year, 10, 22)
+    else:
+        # Season started last year (Oct 22)
+        return datetime(now.year - 1, 10, 22)
+```
+
+**Updated Thresholds**:
+```python
+STAT_THRESHOLDS = {
+    "PTS": [10, 15, 20, 25, 30, 35, 40, 45, 50],
+    "REB": [5, 8, 10, 12, 15, 18, 20],
+    "AST": [3, 5, 8, 10, 12],
+    "3PM": [1, 2, 3, 4, 5, 6],
+    "BLK": [1, 2, 3, 4, 5],
+    "STL": [1, 2, 3, 4],
+}
+
+TEAM_STAT_THRESHOLDS = {
+    "ML": [1],
+    "PTS": [100, 105, 110, 115, 120, 125, 130],
+    "PTS_U": [100, 105, 110, 115, 120, 125],
+}
+```
+
+### New Team Functions
+
+1. **`fetch_team_game_logs()`**: Fetches team game data for the full season
+2. **`calculate_team_streaks()`**: Calculates ML/PTS/PTS_U streaks
+3. **`detect_streak_events()`**: Updated to handle both player and team entity types
+
+### Expected Results After Implementation
+
+- Player streaks: Now showing 10+ game runs (full season data)
+- REB 15+, 18+, 20+ streaks visible for elite rebounders
+- PTS 45+, 50+ streaks visible for superstar scorers
+- Teams tab: Populated with ML wins, PTS over/under streaks
+- Cleaner codebase: 2 fewer Edge Functions to maintain
