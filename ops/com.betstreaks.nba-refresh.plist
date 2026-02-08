@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 
+    BetStreaks NBA Data Refresh - macOS LaunchAgent
+    
+    Runs twice daily:
+    - 9:05 AM Eastern (14:05 UTC during EST, 13:05 UTC during EDT)
+    - 3:05 AM Eastern (08:05 UTC during EST, 07:05 UTC during EDT)
+    
+    Installation:
+    1. Copy to ~/Library/LaunchAgents/com.betstreaks.nba-refresh.plist
+    2. Edit USER_HOME placeholder below
+    3. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.betstreaks.nba-refresh.plist
+    -->
+    
+    <key>Label</key>
+    <string>com.betstreaks.nba-refresh</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>USER_HOME/Projects/betstreaks/scripts/run_refresh.sh</string>
+    </array>
+    
+    <!-- Run at 9:05 AM and 3:05 AM local time -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>9</integer>
+            <key>Minute</key>
+            <integer>5</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>3</integer>
+            <key>Minute</key>
+            <integer>5</integer>
+        </dict>
+    </array>
+    
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>USER_HOME/Projects/betstreaks</string>
+    
+    <!-- Environment variables (PATH for git, python, etc.) -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>HOME</key>
+        <string>USER_HOME</string>
+    </dict>
+    
+    <!-- Logging - launchd's own log capture -->
+    <key>StandardOutPath</key>
+    <string>USER_HOME/Projects/betstreaks/logs/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>USER_HOME/Projects/betstreaks/logs/launchd-stderr.log</string>
+    
+    <!-- Run immediately if a scheduled time was missed (e.g., machine was asleep) -->
+    <key>StartInterval</key>
+    <false/>
+    
+    <!-- Keep alive settings - do NOT restart on failure (we want exit codes preserved) -->
+    <key>KeepAlive</key>
+    <false/>
+    
+    <!-- Allow job to run even when on battery -->
+    <key>LowPriorityIO</key>
+    <true/>
+    
+    <!-- Nice value - run with lower priority -->
+    <key>Nice</key>
+    <integer>10</integer>
+    
+    <!-- Timeout - kill if running longer than 30 minutes -->
+    <key>TimeOut</key>
+    <integer>1800</integer>
+    
+    <!-- Run at load for testing (remove after confirming it works) -->
+    <!-- <key>RunAtLoad</key><true/> -->
+</dict>
+</plist>
