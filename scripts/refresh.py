@@ -6,9 +6,11 @@ Fetches player stats, team stats, and game data from nba_api and upserts to Supa
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import time
+from urllib.error import URLError
+from http.client import HTTPException
 
 from nba_api.stats.endpoints import (
     ScoreboardV2,
@@ -45,6 +47,11 @@ TEAM_STAT_THRESHOLDS = {
 }
 
 MIN_STREAK_LENGTH = 3
+
+# Retry and validation constants
+MAX_RETRIES = 3
+BASE_TIMEOUT = 60
+ALLOWED_EVENT_TYPES = {"extended", "broke"}
 
 
 def get_season_start_date() -> datetime:
@@ -122,7 +129,7 @@ def fetch_todays_games() -> list[dict]:
 
 
 def fetch_player_game_logs() -> list[dict]:
-    """Fetch player game logs for the entire season."""
+    """Fetch player game logs for the entire season with retry logic."""
     season_start = get_season_start_date()
     season = get_season_string()
     now = datetime.now()
@@ -132,48 +139,69 @@ def fetch_player_game_logs() -> list[dict]:
     
     print(f"Fetching player game logs for {season} season ({date_from} to {date_to})...")
     
-    try:
-        # Add delay to avoid rate limiting
-        time.sleep(1)
-        
-        logs = PlayerGameLogs(
-            season_nullable=season,
-            date_from_nullable=date_from,
-            date_to_nullable=date_to,
-        )
-        df = logs.get_data_frames()[0]
-        
-        games = []
-        for _, row in df.iterrows():
-            game_date = datetime.strptime(row["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d")
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Exponential backoff: 4s, 8s, 14s
+            wait_time = 2 ** (attempt + 1) + (attempt * 2)
+            print(f"  Attempt {attempt + 1}/{MAX_RETRIES} (waiting {wait_time}s)...")
+            time.sleep(wait_time)
             
-            games.append({
-                "player_id": int(row["PLAYER_ID"]),
-                "player_name": row["PLAYER_NAME"],
-                "team_abbr": row["TEAM_ABBREVIATION"],
-                "game_id": str(row["GAME_ID"]),
-                "game_date": game_date,
-                "matchup": row.get("MATCHUP"),
-                "wl": row.get("WL"),
-                "pts": int(row["PTS"]) if row.get("PTS") is not None else None,
-                "reb": int(row["REB"]) if row.get("REB") is not None else None,
-                "ast": int(row["AST"]) if row.get("AST") is not None else None,
-                "fg3m": int(row["FG3M"]) if row.get("FG3M") is not None else None,
-                "blk": int(row["BLK"]) if row.get("BLK") is not None else None,
-                "stl": int(row["STL"]) if row.get("STL") is not None else None,
-                "sport": "NBA",
-            })
-        
-        print(f"Found {len(games)} player game records")
-        return games
+            logs = PlayerGameLogs(
+                season_nullable=season,
+                date_from_nullable=date_from,
+                date_to_nullable=date_to,
+                timeout=BASE_TIMEOUT,
+            )
+            df = logs.get_data_frames()[0]
+            
+            if df.empty:
+                raise ValueError("PlayerGameLogs returned empty dataframe")
+            
+            # Verify expected columns exist
+            required_cols = ["PLAYER_ID", "PLAYER_NAME", "GAME_DATE", "GAME_ID"]
+            missing = [c for c in required_cols if c not in df.columns]
+            if missing:
+                raise ValueError(f"Missing expected columns: {missing}")
+            
+            games = []
+            for _, row in df.iterrows():
+                game_date = datetime.strptime(row["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d")
+                
+                games.append({
+                    "player_id": int(row["PLAYER_ID"]),
+                    "player_name": row["PLAYER_NAME"],
+                    "team_abbr": row["TEAM_ABBREVIATION"],
+                    "game_id": str(row["GAME_ID"]),
+                    "game_date": game_date,
+                    "matchup": row.get("MATCHUP"),
+                    "wl": row.get("WL"),
+                    "pts": int(row["PTS"]) if row.get("PTS") is not None else None,
+                    "reb": int(row["REB"]) if row.get("REB") is not None else None,
+                    "ast": int(row["AST"]) if row.get("AST") is not None else None,
+                    "fg3m": int(row["FG3M"]) if row.get("FG3M") is not None else None,
+                    "blk": int(row["BLK"]) if row.get("BLK") is not None else None,
+                    "stl": int(row["STL"]) if row.get("STL") is not None else None,
+                    "sport": "NBA",
+                })
+            
+            print(f"  Found {len(games)} player game records")
+            return games  # Success!
+            
+        except (URLError, HTTPException, TimeoutError, ValueError) as e:
+            last_error = e
+            print(f"  Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+        except Exception as e:
+            # Catch unexpected errors but still retry
+            last_error = e
+            print(f"  Attempt {attempt + 1} failed (unexpected): {type(e).__name__}: {e}")
     
-    except Exception as e:
-        print(f"Error fetching player logs: {e}")
-        return []
+    # All retries exhausted
+    raise RuntimeError(f"Failed to fetch player logs after {MAX_RETRIES} attempts: {last_error}")
 
 
 def fetch_team_game_logs() -> list[dict]:
-    """Fetch team game logs for the entire season."""
+    """Fetch team game logs for the entire season with retry logic."""
     season_start = get_season_start_date()
     season = get_season_string()
     now = datetime.now()
@@ -183,38 +211,59 @@ def fetch_team_game_logs() -> list[dict]:
     
     print(f"Fetching team game logs for {season} season ({date_from} to {date_to})...")
     
-    try:
-        # Add delay to avoid rate limiting
-        time.sleep(1)
-        
-        logs = TeamGameLogs(
-            season_nullable=season,
-            date_from_nullable=date_from,
-            date_to_nullable=date_to,
-        )
-        df = logs.get_data_frames()[0]
-        
-        games = []
-        for _, row in df.iterrows():
-            game_date = datetime.strptime(row["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d")
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Exponential backoff: 4s, 8s, 14s
+            wait_time = 2 ** (attempt + 1) + (attempt * 2)
+            print(f"  Attempt {attempt + 1}/{MAX_RETRIES} (waiting {wait_time}s)...")
+            time.sleep(wait_time)
             
-            games.append({
-                "team_id": int(row["TEAM_ID"]),
-                "team_abbr": row["TEAM_ABBREVIATION"],
-                "game_id": str(row["GAME_ID"]),
-                "game_date": game_date,
-                "matchup": row.get("MATCHUP"),
-                "wl": row.get("WL"),
-                "pts": int(row["PTS"]) if row.get("PTS") is not None else None,
-                "sport": "NBA",
-            })
-        
-        print(f"Found {len(games)} team game records")
-        return games
+            logs = TeamGameLogs(
+                season_nullable=season,
+                date_from_nullable=date_from,
+                date_to_nullable=date_to,
+                timeout=BASE_TIMEOUT,
+            )
+            df = logs.get_data_frames()[0]
+            
+            if df.empty:
+                raise ValueError("TeamGameLogs returned empty dataframe")
+            
+            # Verify expected columns exist
+            required_cols = ["TEAM_ID", "TEAM_ABBREVIATION", "GAME_DATE", "GAME_ID"]
+            missing = [c for c in required_cols if c not in df.columns]
+            if missing:
+                raise ValueError(f"Missing expected columns: {missing}")
+            
+            games = []
+            for _, row in df.iterrows():
+                game_date = datetime.strptime(row["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d")
+                
+                games.append({
+                    "team_id": int(row["TEAM_ID"]),
+                    "team_abbr": row["TEAM_ABBREVIATION"],
+                    "game_id": str(row["GAME_ID"]),
+                    "game_date": game_date,
+                    "matchup": row.get("MATCHUP"),
+                    "wl": row.get("WL"),
+                    "pts": int(row["PTS"]) if row.get("PTS") is not None else None,
+                    "sport": "NBA",
+                })
+            
+            print(f"  Found {len(games)} team game records")
+            return games  # Success!
+            
+        except (URLError, HTTPException, TimeoutError, ValueError) as e:
+            last_error = e
+            print(f"  Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+        except Exception as e:
+            # Catch unexpected errors but still retry
+            last_error = e
+            print(f"  Attempt {attempt + 1} failed (unexpected): {type(e).__name__}: {e}")
     
-    except Exception as e:
-        print(f"Error fetching team logs: {e}")
-        return []
+    # All retries exhausted
+    raise RuntimeError(f"Failed to fetch team logs after {MAX_RETRIES} attempts: {last_error}")
 
 
 def calculate_streaks(player_games: list[dict]) -> list[dict]:
@@ -561,14 +610,14 @@ def detect_streak_events(
         old_s = old_streaks.get(key)
         
         if old_s is None:
-            # New streak started
+            # New streak started - maps to "extended" per DB constraint
             events.append({
                 "player_id": new_s["player_id"],
                 "player_name": new_s["player_name"],
                 "team_abbr": new_s["team_abbr"],
                 "stat": new_s["stat"],
                 "threshold": new_s["threshold"],
-                "event_type": "started",
+                "event_type": "extended",  # New streak (maps to "extended" per DB constraint)
                 "prev_streak_len": 0,
                 "new_streak_len": new_s["streak_len"],
                 "last_game": new_s["last_game"],
@@ -600,7 +649,7 @@ def detect_streak_events(
                 "team_abbr": old_s["team_abbr"],
                 "stat": old_s["stat"],
                 "threshold": old_s["threshold"],
-                "event_type": "broken",
+                "event_type": "broke",  # Streak ended - maps to "broke" per DB constraint
                 "prev_streak_len": old_s["streak_len"],
                 "new_streak_len": 0,
                 "last_game": old_s["last_game"],
@@ -612,6 +661,72 @@ def detect_streak_events(
     return events
 
 
+def insert_streak_events(supabase: Client, events: list[dict]) -> None:
+    """Insert streak events with validation and chunked batches. Fails run if any chunk fails."""
+    if not events:
+        print("No streak events to insert")
+        return
+    
+    # Pre-validate event types
+    valid_events = []
+    invalid_events = []
+    for event in events:
+        event_type = event.get("event_type")
+        if event_type in ALLOWED_EVENT_TYPES:
+            event["created_at"] = datetime.now(timezone.utc).isoformat()
+            valid_events.append(event)
+        else:
+            invalid_events.append(event)
+            print(f"  WARNING: Invalid event_type '{event_type}' for {event.get('player_name')} - skipping")
+    
+    if invalid_events:
+        print(f"  Filtered out {len(invalid_events)} events with invalid event_type")
+    
+    if not valid_events:
+        print("No valid events to insert after filtering")
+        return
+    
+    # Insert in chunks - fail the run if any chunk fails
+    chunk_size = 200
+    inserted = 0
+    for i in range(0, len(valid_events), chunk_size):
+        chunk = valid_events[i:i + chunk_size]
+        chunk_num = i // chunk_size + 1
+        total_chunks = (len(valid_events) + chunk_size - 1) // chunk_size
+        
+        try:
+            supabase.table("streak_events").insert(chunk).execute()
+            inserted += len(chunk)
+            print(f"  Inserted chunk {chunk_num}/{total_chunks} ({len(chunk)} events)")
+        except Exception as e:
+            print(f"  ERROR inserting chunk {chunk_num}/{total_chunks}: {e}")
+            print(f"  First event in failed chunk: {chunk[0]}")
+            raise RuntimeError(f"Failed to insert streak events chunk {chunk_num}: {e}")
+    
+    print(f"Successfully inserted {inserted} streak events")
+
+
+def validate_data_freshness(games: list[dict], entity_type: str) -> bool:
+    """Check if fetched data includes recent games. Returns True if fresh, False if stale."""
+    if not games:
+        return False
+    
+    # Find the most recent game date
+    max_date = max(g["game_date"] for g in games)
+    max_date_dt = datetime.strptime(max_date, "%Y-%m-%d")
+    
+    # Data should be from within last 2 days (accounting for off-days)
+    today = datetime.now()
+    days_old = (today - max_date_dt).days
+    
+    if days_old > 2:
+        print(f"  WARNING: {entity_type} data is {days_old} days old (max date: {max_date})")
+        return False
+    
+    print(f"  Data freshness OK: most recent {entity_type} game is {max_date}")
+    return True
+
+
 def upsert_data(supabase: Client, table: str, data: list[dict], conflict_cols: Optional[list[str]] = None):
     """Upsert data to a Supabase table."""
     if not data:
@@ -620,8 +735,8 @@ def upsert_data(supabase: Client, table: str, data: list[dict], conflict_cols: O
     
     print(f"Upserting {len(data)} records to {table}...")
     
-    # Add updated_at timestamp
-    now = datetime.now().isoformat()
+    # Add updated_at timestamp (UTC)
+    now = datetime.now(timezone.utc).isoformat()
     for record in data:
         record["updated_at"] = now
     
@@ -643,7 +758,7 @@ def update_refresh_status(supabase: Client, refresh_id: int):
     supabase.table("refresh_status").upsert({
         "id": refresh_id,
         "sport": "NBA",
-        "last_run": datetime.now().isoformat(),
+        "last_run": datetime.now(timezone.utc).isoformat(),
     }, on_conflict="id").execute()
     print(f"Updated refresh_status id={refresh_id}")
 
@@ -665,17 +780,38 @@ def main():
     
     print()
     
-    # 2. Fetch player game logs
+    # 2. Fetch player game logs (will raise on failure after retries)
     player_games = fetch_player_game_logs()
-    if player_games:
-        upsert_data(supabase, "player_recent_games", player_games, ["player_id", "game_id"])
+    
+    # Fail-fast: empty results = hard fail
+    if len(player_games) == 0:
+        print("ERROR: Player game fetch returned 0 records - aborting to prevent data loss")
+        sys.exit(1)
+    
+    # Warning for suspiciously low counts
+    if len(player_games) < 100:
+        print(f"WARNING: Only {len(player_games)} player games - unusually low")
+    
+    # Freshness check (warning only, doesn't abort)
+    validate_data_freshness(player_games, "player")
+    
+    upsert_data(supabase, "player_recent_games", player_games, ["player_id", "game_id"])
     
     print()
     
-    # 3. Fetch team game logs
+    # 3. Fetch team game logs (will raise on failure after retries)
     team_games = fetch_team_game_logs()
-    if team_games:
-        upsert_data(supabase, "team_recent_games", team_games, ["team_id", "game_id"])
+    
+    if len(team_games) == 0:
+        print("ERROR: Team game fetch returned 0 records - aborting to prevent data loss")
+        sys.exit(1)
+    
+    if len(team_games) < 30:
+        print(f"WARNING: Only {len(team_games)} team games - unusually low")
+    
+    validate_data_freshness(team_games, "team")
+    
+    upsert_data(supabase, "team_recent_games", team_games, ["team_id", "game_id"])
     
     print()
     
@@ -690,20 +826,17 @@ def main():
     
     # 7. Detect streak events
     events = detect_streak_events(supabase, all_streaks)
-    if events:
-        # Insert events (don't upsert, we want history)
-        for event in events:
-            event["created_at"] = datetime.now().isoformat()
-        supabase.table("streak_events").insert(events).execute()
-        print(f"Inserted {len(events)} streak events")
     
-    # 8. Replace streaks table (delete old, insert new)
+    # 8. Insert events using validated chunked insert (will raise on failure)
+    insert_streak_events(supabase, events)
+    
+    # 9. Replace streaks table (delete old, insert new)
     print("Replacing streaks table...")
     supabase.table("streaks").delete().eq("sport", "NBA").execute()
     if all_streaks:
         upsert_data(supabase, "streaks", all_streaks)
     
-    # 9. Update refresh status
+    # 10. Update refresh status
     update_refresh_status(supabase, 1)  # id=1 for players/streaks
     
     end_time = datetime.now()
