@@ -4,11 +4,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Flame, TrendingUp, Calendar, Star, Lock, Info } from "lucide-react";
+import { Flame, TrendingUp, Calendar, Star, Lock, Share2 } from "lucide-react";
 import type { Streak } from "@/types/streak";
 import { getStatFriendlyLabel, isComboStat } from "@/lib/comboStats";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
+import { useToast } from "@/hooks/use-toast";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
 
 interface StreakCardProps {
@@ -20,6 +21,7 @@ interface StreakCardProps {
 
 export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = true }: StreakCardProps) {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const { isPremium } = usePremiumStatus();
   const { isStale } = useRefreshStatus();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
@@ -33,40 +35,6 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
   const twoDaysAgo = new Date();
   twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
   const isRecentGame = lastGameDate >= twoDaysAgo;
-
-  const handleClick = () => {
-    // If locked combo, show premium modal instead of navigating
-    if (isLocked) {
-      setShowPremiumModal(true);
-      return;
-    }
-    
-    const params = new URLSearchParams({
-      sport: streak.sport,
-      entity_type: streak.entity_type,
-      stat: streak.stat,
-      threshold: streak.threshold.toString(),
-    });
-    if (streak.player_id) params.set("player_id", streak.player_id.toString());
-    if (streak.team_abbr) params.set("team_abbr", streak.team_abbr);
-    navigate(`/streak?${params.toString()}`);
-  };
-
-  const handleStarClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    
-    // If locked combo, show premium modal instead of starring
-    if (isLocked) {
-      setShowPremiumModal(true);
-      return;
-    }
-    
-    onToggleStar?.(streak);
-  };
-
-  const formatDate = (dateStr: string) => {
-    return dateStr;
-  };
 
   // Get display name: for teams, prefer team_abbr
   const displayName = isTeam
@@ -107,6 +75,87 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
     return `${statLabel} ${streak.threshold}+`;
   };
 
+  const handleClick = () => {
+    // If locked combo, show premium modal instead of navigating
+    if (isLocked) {
+      setShowPremiumModal(true);
+      return;
+    }
+    
+    const params = new URLSearchParams({
+      sport: streak.sport,
+      entity_type: streak.entity_type,
+      stat: streak.stat,
+      threshold: streak.threshold.toString(),
+    });
+    if (streak.player_id) params.set("player_id", streak.player_id.toString());
+    if (streak.team_abbr) params.set("team_abbr", streak.team_abbr);
+    navigate(`/streak?${params.toString()}`);
+  };
+
+  const handleStarClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // If locked combo, show premium modal instead of starring
+    if (isLocked) {
+      setShowPremiumModal(true);
+      return;
+    }
+    
+    onToggleStar?.(streak);
+  };
+
+  const copyToClipboard = (url: string) => {
+    navigator.clipboard.writeText(url).then(() => {
+      toast({
+        title: "Link copied!",
+        description: "Share this streak with your friends",
+      });
+    }).catch(() => {
+      toast({
+        variant: "destructive",
+        title: "Failed to copy",
+        description: "Please copy the URL manually",
+      });
+    });
+  };
+
+  const handleShare = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Build share URL
+    const params = new URLSearchParams({
+      sport: streak.sport,
+      entity_type: streak.entity_type,
+      stat: streak.stat,
+      threshold: streak.threshold.toString(),
+    });
+    if (streak.player_id) params.set("player_id", streak.player_id.toString());
+    if (streak.team_abbr) params.set("team_abbr", streak.team_abbr);
+    
+    const shareUrl = `${window.location.origin}/streak?${params.toString()}`;
+    const betLabel = getBetLabel();
+    const shareText = `🔥 ${displayName} has a ${streak.streak_len}-game streak on ${betLabel}! Check it out on BetStreaks:`;
+    
+    // Try native share first (mobile)
+    if (navigator.share) {
+      navigator.share({
+        title: `${displayName} Streak`,
+        text: shareText,
+        url: shareUrl,
+      }).catch(() => {
+        // User cancelled or error, fall back to clipboard
+        copyToClipboard(shareUrl);
+      });
+    } else {
+      copyToClipboard(shareUrl);
+    }
+  };
+
+  const formatDate = (dateStr: string) => {
+    return dateStr;
+  };
+
   // Render locked combo card
   if (isLocked) {
     return (
@@ -143,7 +192,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
             </div>
 
             {/* Combo Label */}
-            <div className="inline-flex items-center gap-2 bg-yellow-500/15 text-yellow-600 dark:text-yellow-500 px-3 py-1.5 rounded-lg">
+            <div className="inline-flex items-center gap-2 bg-accent text-accent-foreground px-3 py-1.5 rounded-lg">
               <Lock className="h-4 w-4" />
               <span className="font-semibold">{getBetLabel()}</span>
             </div>
@@ -170,7 +219,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
       className="bg-card border-border hover:border-primary/50 transition-all duration-200 cursor-pointer active:scale-[0.98]"
     >
       <CardContent className="p-4 space-y-3">
-        {/* Header: Name + Team Badge (only for players) + Best Bet Badge + Star */}
+        {/* Header: Name + Team Badge (only for players) + Best Bet Badge + Share + Star */}
         <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-lg font-bold text-foreground truncate flex-1">
             {displayName}
@@ -198,6 +247,16 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
               </TooltipContent>
             </Tooltip>
           )}
+          {/* Share button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={handleShare}
+            aria-label="Share streak"
+          >
+            <Share2 className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+          </Button>
           {showStarButton && (
             <Button
               variant="ghost"
