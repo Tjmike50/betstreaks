@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,11 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Star, Trash2, Cloud, LogIn, BellRing } from "lucide-react";
+import { Star, Trash2, Cloud, LogIn, BellRing, Loader2 } from "lucide-react";
 import { useWatchlist } from "@/hooks/useWatchlist";
+import { useAuth } from "@/contexts/AuthContext";
 import { PremiumBadge } from "@/components/PremiumBadge";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
 import type { Streak } from "@/types/streak";
+import { useState } from "react";
 
 interface WatchlistItem {
   id: string;
@@ -43,12 +44,12 @@ interface WatchlistData {
 export default function WatchlistPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [userId, setUserId] = useState<string | null>(null);
+  const { user, isAuthenticated, isLoading: isAuthLoading, email } = useAuth();
+  const userId = user?.id ?? null;
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   
   const { 
-    isAuthenticated, 
     isStarred, 
     toggleWatchlist, 
     offlineCount, 
@@ -56,18 +57,6 @@ export default function WatchlistPage() {
     offlineKeys,
     removeOfflineKey
   } = useWatchlist();
-
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setUserId(session?.user?.id ?? null);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUserId(session?.user?.id ?? null);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
 
   // Optimized: Fetch watchlist items and all NBA streaks in parallel, then match client-side
   const { data: watchlistData, isLoading, error } = useQuery({
@@ -219,6 +208,15 @@ export default function WatchlistPage() {
   const inactiveItems = currentData?.inactiveItems || [];
   const hasItems = activeItems.length > 0 || inactiveItems.length > 0;
 
+  // Show loading state while auth initializes
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center pb-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="px-4 py-4 border-b border-border">
@@ -230,6 +228,11 @@ export default function WatchlistPage() {
             <p className="text-sm text-muted-foreground mt-1">
               Your saved streaks
             </p>
+            {isAuthenticated && email && (
+              <p className="text-xs text-muted-foreground">
+                Logged in as {email}
+              </p>
+            )}
           </div>
           {isAuthenticated ? (
             <Badge variant="secondary" className="gap-1.5 py-1 px-2.5">

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { useEffect, useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface FavoritePlayer {
   id: string;
@@ -14,21 +14,8 @@ interface FavoritePlayer {
 export function useFavorites() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [userId, setUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUserId(user?.id ?? null);
-    };
-    getUser();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setUserId(session?.user?.id ?? null);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  const { user, isAuthenticated } = useAuth();
+  const userId = user?.id ?? null;
 
   const { data: favorites = [], isLoading } = useQuery({
     queryKey: ["favorites", userId],
@@ -108,6 +95,6 @@ export function useFavorites() {
     isLoading,
     isFavorite,
     toggleFavorite,
-    isAuthenticated: !!userId,
+    isAuthenticated,
   };
 }

@@ -3,10 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Flame, TrendingUp, Calendar, Star, Lock } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Flame, TrendingUp, Calendar, Star, Lock, Info } from "lucide-react";
 import type { Streak } from "@/types/streak";
 import { getStatFriendlyLabel, isComboStat } from "@/lib/comboStats";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
 
 interface StreakCardProps {
@@ -19,11 +21,18 @@ interface StreakCardProps {
 export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = true }: StreakCardProps) {
   const navigate = useNavigate();
   const { isPremium } = usePremiumStatus();
+  const { isStale } = useRefreshStatus();
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   
   const isTeam = streak.entity_type === "team";
   const isCombo = isComboStat(streak.stat);
   const isLocked = isCombo && !isPremium;
+  
+  // Check if last game was within 2 days
+  const lastGameDate = new Date(streak.last_game);
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+  const isRecentGame = lastGameDate >= twoDaysAgo;
 
   const handleClick = () => {
     // If locked combo, show premium modal instead of navigating
@@ -64,8 +73,15 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
     ? streak.team_abbr || streak.player_name
     : streak.player_name;
 
-  // Check if qualifies as "Best Bet" - don't show for locked combos
-  const isBestBet = !isLocked && streak.season_win_pct >= 55 && streak.streak_len >= 3;
+  // Check if qualifies as "Best Bet" - deterministic and defensible criteria
+  // Must have: streak >= 3, season >= 55% OR L10 >= 60%, and last game within 2 days
+  // Disable if data is stale (>3h old) to avoid misleading users
+  const l10Pct = streak.last10_hit_pct ?? (streak.last10_games > 0 ? (streak.last10_hits / streak.last10_games) * 100 : 0);
+  const meetsBestBetCriteria = !isLocked && 
+    streak.streak_len >= 3 && 
+    (streak.season_win_pct >= 55 || l10Pct >= 60) &&
+    isRecentGame;
+  const isBestBet = meetsBestBetCriteria && !isStale;
 
   // Get bet label: special formatting for teams, combos, and stats
   const getBetLabel = () => {
@@ -168,10 +184,19 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
             </Badge>
           )}
           {isBestBet && (
-            <Badge className="bg-streak-gold text-background shrink-0 text-xs gap-1">
-              <Star className="h-3 w-3 fill-current" />
-              Best Bet
-            </Badge>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge className="bg-streak-gold text-background shrink-0 text-xs gap-1 cursor-help">
+                  <Star className="h-3 w-3 fill-current" />
+                  Best Bet
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                <p className="text-xs">
+                  Streak ≥3, Season ≥55% or L10 ≥60%, last game within 2 days
+                </p>
+              </TooltipContent>
+            </Tooltip>
           )}
           {showStarButton && (
             <Button

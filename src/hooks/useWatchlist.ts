@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import type { Streak } from "@/types/streak";
 
 const STORAGE_KEY = "betstreaks_watchlist";
@@ -49,25 +50,11 @@ function saveOfflineWatchlist(keys: string[]): void {
 
 export function useWatchlist() {
   const queryClient = useQueryClient();
+  const { user, isAuthenticated } = useAuth();
+  const userId = user?.id ?? null;
   
   // Offline state (localStorage)
   const [offlineKeys, setOfflineKeys] = useState<string[]>(() => loadOfflineWatchlist());
-  
-  // Track auth state changes from Supabase
-  const [userId, setUserId] = useState<string | null>(null);
-
-  // Listen to Supabase auth changes
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setUserId(session?.user?.id ?? null);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUserId(session?.user?.id ?? null);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
 
   // Sync offlineKeys to localStorage
   useEffect(() => {
