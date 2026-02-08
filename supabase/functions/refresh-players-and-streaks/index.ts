@@ -8,7 +8,7 @@ const corsHeaders = {
 
 interface RefreshCounts {
   player_recent_games: number;
-  team_recent_games: number;
+  games_fetched: number;
   streaks: number;
   streak_events: number;
 }
@@ -72,6 +72,62 @@ interface StreakEvent {
   sport: string;
 }
 
+// NBA CDN types
+interface NBAPlayer {
+  personId: number;
+  name: string;
+  nameI: string;
+  firstName: string;
+  familyName: string;
+  jerseyNum: string;
+  position: string;
+  teamId: number;
+  teamTricode: string;
+  statistics: {
+    points: number;
+    reboundsTotal: number;
+    assists: number;
+    threePointersMade: number;
+    blocks: number;
+    steals: number;
+  };
+}
+
+interface NBABoxscoreTeam {
+  teamId: number;
+  teamTricode: string;
+  score: number;
+  players: NBAPlayer[];
+}
+
+interface NBABoxscoreGame {
+  gameId: string;
+  gameTimeUTC: string;
+  gameStatus: number;
+  homeTeam: NBABoxscoreTeam;
+  awayTeam: NBABoxscoreTeam;
+}
+
+interface NBABoxscoreResponse {
+  game: NBABoxscoreGame;
+}
+
+interface NBAScoreboardGame {
+  gameId: string;
+  gameStatus: number;
+  gameStatusText: string;
+  gameTimeUTC: string;
+  homeTeam: { teamTricode: string; score: number };
+  awayTeam: { teamTricode: string; score: number };
+}
+
+interface NBAScoreboardResponse {
+  scoreboard: {
+    gameDate: string;
+    games: NBAScoreboardGame[];
+  };
+}
+
 // Threshold ranges by stat type (matching src/types/streak.ts)
 const THRESHOLD_RANGES: Record<string, { min: number; max: number; step: number }> = {
   PTS: { min: 10, max: 40, step: 5 },
@@ -93,98 +149,90 @@ const STAT_KEYS: Record<string, keyof PlayerGameLog> = {
 
 const MIN_STREAK_LENGTH = 3;
 
-// NBA Stats API headers to avoid blocking
-const NBA_STATS_HEADERS = {
-  "Host": "stats.nba.com",
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Accept": "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Accept-Encoding": "gzip, deflate, br",
-  "x-nba-stats-origin": "stats",
-  "x-nba-stats-token": "true",
-  "Origin": "https://stats.nba.com",
-  "Referer": "https://stats.nba.com/",
-  "Connection": "keep-alive",
-  "Sec-Fetch-Dest": "empty",
-  "Sec-Fetch-Mode": "cors",
-  "Sec-Fetch-Site": "same-origin",
-};
-
-function getCurrentSeason(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  // NBA season starts in October, so Oct-Dec is current year, Jan-Jun is previous year
-  if (month >= 10) {
-    return `${year}-${(year + 1).toString().slice(-2)}`;
-  } else {
-    return `${year - 1}-${year.toString().slice(-2)}`;
-  }
-}
-
-async function fetchLeagueGameLog(): Promise<PlayerGameLog[]> {
-  const season = getCurrentSeason();
-  const url = new URL("https://stats.nba.com/stats/leaguegamelog");
-  url.searchParams.set("Counter", "0");
-  url.searchParams.set("DateFrom", "");
-  url.searchParams.set("DateTo", "");
-  url.searchParams.set("Direction", "DESC");
-  url.searchParams.set("ISTRound", "");
-  url.searchParams.set("LeagueID", "00");
-  url.searchParams.set("PlayerOrTeam", "P");
-  url.searchParams.set("Season", season);
-  url.searchParams.set("SeasonType", "Regular Season");
-  url.searchParams.set("Sorter", "DATE");
-
-  console.log(`Fetching league game log for season ${season}...`);
-  console.log(`URL: ${url.toString()}`);
-
-  const response = await fetch(url.toString(), {
-    headers: NBA_STATS_HEADERS,
+async function fetchTodaysGames(): Promise<NBAScoreboardGame[]> {
+  const url = "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json";
+  
+  console.log("Fetching today's games from NBA CDN...");
+  
+  const response = await fetch(url, {
+    headers: {
+      "Accept": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    },
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    console.error("NBA Stats API error response:", text.substring(0, 500));
-    throw new Error(`NBA Stats API error: ${response.status} ${response.statusText}`);
+    throw new Error(`NBA CDN scoreboard error: ${response.status}`);
   }
 
-  const data = await response.json();
+  const data: NBAScoreboardResponse = await response.json();
+  console.log(`Found ${data.scoreboard?.games?.length || 0} games for ${data.scoreboard?.gameDate}`);
   
-  // Parse the NBA API response format
-  const resultSet = data.resultSets?.[0];
-  if (!resultSet) {
-    throw new Error("No result set in NBA API response");
+  return data.scoreboard?.games || [];
+}
+
+async function fetchBoxscore(gameId: string): Promise<NBABoxscoreGame | null> {
+  const url = `https://cdn.nba.com/static/json/liveData/boxscore/boxscore_${gameId}.json`;
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+
+    if (!response.ok) {
+      console.log(`Boxscore not available for ${gameId}: ${response.status}`);
+      return null;
+    }
+
+    const data: NBABoxscoreResponse = await response.json();
+    return data.game;
+  } catch (error) {
+    console.error(`Error fetching boxscore for ${gameId}:`, error);
+    return null;
   }
+}
 
-  const headers: string[] = resultSet.headers;
-  const rows: unknown[][] = resultSet.rowSet;
-
-  // Map column indices
-  const colIndex: Record<string, number> = {};
-  headers.forEach((h: string, i: number) => {
-    colIndex[h] = i;
-  });
-
-  console.log(`Received ${rows.length} game log rows`);
-  console.log(`Headers: ${headers.join(", ")}`);
-
-  const gameLogs: PlayerGameLog[] = rows.map((row: unknown[]) => ({
-    player_id: row[colIndex["PLAYER_ID"]] as number,
-    player_name: row[colIndex["PLAYER_NAME"]] as string,
-    team_abbr: row[colIndex["TEAM_ABBREVIATION"]] as string,
-    game_id: row[colIndex["GAME_ID"]] as string,
-    game_date: row[colIndex["GAME_DATE"]] as string,
-    matchup: row[colIndex["MATCHUP"]] as string,
-    wl: row[colIndex["WL"]] as string | null,
-    pts: (row[colIndex["PTS"]] as number) || 0,
-    reb: (row[colIndex["REB"]] as number) || 0,
-    ast: (row[colIndex["AST"]] as number) || 0,
-    fg3m: (row[colIndex["FG3M"]] as number) || 0,
-    blk: (row[colIndex["BLK"]] as number) || 0,
-    stl: (row[colIndex["STL"]] as number) || 0,
-  }));
-
+function extractPlayerStats(boxscore: NBABoxscoreGame): PlayerGameLog[] {
+  const gameLogs: PlayerGameLog[] = [];
+  const gameDate = boxscore.gameTimeUTC.split("T")[0];
+  const homeTricode = boxscore.homeTeam.teamTricode;
+  const awayTricode = boxscore.awayTeam.teamTricode;
+  
+  // Determine win/loss
+  const homeWon = boxscore.homeTeam.score > boxscore.awayTeam.score;
+  
+  // Process both teams
+  for (const team of [boxscore.homeTeam, boxscore.awayTeam]) {
+    const isHome = team.teamId === boxscore.homeTeam.teamId;
+    const wl = isHome ? (homeWon ? "W" : "L") : (homeWon ? "L" : "W");
+    const matchup = isHome 
+      ? `${team.teamTricode} vs. ${awayTricode}`
+      : `${team.teamTricode} @ ${homeTricode}`;
+    
+    for (const player of team.players || []) {
+      if (!player.statistics) continue;
+      
+      gameLogs.push({
+        player_id: player.personId,
+        player_name: player.name || `${player.firstName} ${player.familyName}`,
+        team_abbr: team.teamTricode,
+        game_id: boxscore.gameId,
+        game_date: gameDate,
+        matchup,
+        wl,
+        pts: player.statistics.points || 0,
+        reb: player.statistics.reboundsTotal || 0,
+        ast: player.statistics.assists || 0,
+        fg3m: player.statistics.threePointersMade || 0,
+        blk: player.statistics.blocks || 0,
+        stl: player.statistics.steals || 0,
+      });
+    }
+  }
+  
   return gameLogs;
 }
 
@@ -399,51 +447,79 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log("Starting refresh_players_and_streaks with NBA Stats API...");
+    console.log("Starting refresh_players_and_streaks with NBA CDN boxscores...");
 
     const counts: RefreshCounts = {
       player_recent_games: 0,
-      team_recent_games: 0,
+      games_fetched: 0,
       streaks: 0,
       streak_events: 0,
     };
 
-    // Step 1: Fetch league game log
-    let gameLogs: PlayerGameLog[];
-    try {
-      gameLogs = await fetchLeagueGameLog();
-      console.log(`Fetched ${gameLogs.length} player game logs`);
-    } catch (apiError) {
-      console.error("NBA Stats API fetch failed:", apiError);
-      // Return partial failure - API might be blocking
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          error: `NBA Stats API error: ${apiError instanceof Error ? apiError.message : "Unknown error"}`,
-          duration_ms: Date.now() - startTime,
-          hint: "stats.nba.com may be blocking cloud server IPs. Consider using an alternative data source.",
-        }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // Step 1: Fetch today's games and recent completed games
+    const todaysGames = await fetchTodaysGames();
+    
+    // Filter to completed games (gameStatus === 3 means Final)
+    const completedGames = todaysGames.filter(g => g.gameStatus === 3);
+    console.log(`Found ${completedGames.length} completed games out of ${todaysGames.length} total`);
+
+    // Step 2: Fetch existing game logs from database to combine with new data
+    const { data: existingLogs } = await supabase
+      .from("player_recent_games")
+      .select("*")
+      .eq("sport", "NBA")
+      .order("game_date", { ascending: false });
+
+    const allGameLogs: PlayerGameLog[] = (existingLogs || []).map(log => ({
+      player_id: log.player_id,
+      player_name: log.player_name || "",
+      team_abbr: log.team_abbr || "",
+      game_id: log.game_id,
+      game_date: log.game_date,
+      matchup: log.matchup || "",
+      wl: log.wl,
+      pts: log.pts || 0,
+      reb: log.reb || 0,
+      ast: log.ast || 0,
+      fg3m: log.fg3m || 0,
+      blk: log.blk || 0,
+      stl: log.stl || 0,
+    }));
+
+    console.log(`Loaded ${allGameLogs.length} existing game logs from database`);
+
+    // Step 3: Fetch boxscores for completed games and add new stats
+    const newGameLogs: PlayerGameLog[] = [];
+    const existingGameIds = new Set(allGameLogs.map(g => g.game_id));
+
+    for (const game of completedGames) {
+      if (existingGameIds.has(game.gameId)) {
+        console.log(`Game ${game.gameId} already in database, skipping`);
+        continue;
+      }
+
+      const boxscore = await fetchBoxscore(game.gameId);
+      if (boxscore) {
+        const playerStats = extractPlayerStats(boxscore);
+        newGameLogs.push(...playerStats);
+        counts.games_fetched++;
+        console.log(`Extracted ${playerStats.length} player stats from game ${game.gameId}`);
+      }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Step 2: Upsert player recent games
-    if (gameLogs.length > 0) {
-      // Take only last 20 games per player for recent games table
-      const playerGameCounts = new Map<number, number>();
-      const recentGames = gameLogs.filter(log => {
-        const count = playerGameCounts.get(log.player_id) || 0;
-        if (count < 20) {
-          playerGameCounts.set(log.player_id, count + 1);
-          return true;
-        }
-        return false;
-      });
+    // Combine new and existing logs
+    const combinedLogs = [...newGameLogs, ...allGameLogs];
+    console.log(`Combined total: ${combinedLogs.length} game logs (${newGameLogs.length} new)`);
 
+    // Step 4: Upsert new player recent games
+    if (newGameLogs.length > 0) {
       const { error: gamesError } = await supabase
         .from("player_recent_games")
         .upsert(
-          recentGames.map(g => ({
+          newGameLogs.map(g => ({
             player_id: g.player_id,
             player_name: g.player_name,
             team_abbr: g.team_abbr,
@@ -465,14 +541,13 @@ Deno.serve(async (req) => {
 
       if (gamesError) {
         console.error("Error upserting player_recent_games:", gamesError);
-        // Non-fatal, continue
       } else {
-        counts.player_recent_games = recentGames.length;
-        console.log(`Upserted ${recentGames.length} player recent games`);
+        counts.player_recent_games = newGameLogs.length;
+        console.log(`Upserted ${newGameLogs.length} player recent games`);
       }
     }
 
-    // Step 3: Fetch existing streaks for event detection
+    // Step 5: Fetch existing streaks for event detection
     const { data: existingStreaksData } = await supabase
       .from("streaks")
       .select("player_id, stat, threshold, streak_len")
@@ -487,12 +562,12 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${existingStreaks.size} existing streaks`);
 
-    // Step 4: Calculate new streaks
-    const { streaks, events } = calculateStreaks(gameLogs, existingStreaks);
+    // Step 6: Calculate new streaks from combined logs
+    const { streaks, events } = calculateStreaks(combinedLogs, existingStreaks);
     
     console.log(`Calculated ${streaks.length} streaks and ${events.length} events`);
 
-    // Step 5: Delete old player streaks and insert new ones
+    // Step 7: Delete old player streaks and insert new ones
     if (streaks.length > 0) {
       // Delete existing player streaks
       const { error: deleteError } = await supabase
@@ -525,7 +600,7 @@ Deno.serve(async (req) => {
       console.log(`Inserted ${streaks.length} streaks`);
     }
 
-    // Step 6: Insert streak events
+    // Step 8: Insert streak events
     if (events.length > 0) {
       const { error: eventsError } = await supabase
         .from("streak_events")
@@ -549,7 +624,6 @@ Deno.serve(async (req) => {
 
     if (statusError) {
       console.error("Error updating refresh_status:", statusError);
-      // Non-fatal, continue
     }
 
     const duration = Date.now() - startTime;
