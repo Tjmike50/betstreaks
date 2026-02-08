@@ -46,7 +46,13 @@ export function useGamesToday() {
         .order("id", { ascending: true });
 
       if (error) throw error;
-      return data as GameToday[];
+      
+      // Filter out placeholder games with null team abbreviations (All-Star break, etc.)
+      const validGames = (data as GameToday[]).filter(
+        (game) => game.home_team_abbr && game.away_team_abbr
+      );
+      
+      return validGames;
     },
     staleTime: 1000 * 60 * 2, // 2 minutes
   });

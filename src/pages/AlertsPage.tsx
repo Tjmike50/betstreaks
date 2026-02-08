@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { Bell, TrendingUp, TrendingDown, Star, CheckCheck, BellRing } from "lucide-react";
+import { Bell, TrendingUp, TrendingDown, Star, CheckCheck, BellRing, Loader2 } from "lucide-react";
 import { useAlerts } from "@/hooks/useAlerts";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,7 @@ function groupEventsByDay(events: StreakEvent[]): Record<DayGroup, StreakEvent[]
 
 const AlertsPage = () => {
   const navigate = useNavigate();
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const { isPremium, isLoading: isPremiumLoading } = usePremiumStatus();
   const {
     events,
@@ -56,57 +57,31 @@ const AlertsPage = () => {
   
   const [watchlistOnly, setWatchlistOnly] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
-  // Check auth status
+  // Mark alerts as seen when page opens (must be before early returns)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsLoggedIn(!!session?.user);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setIsLoggedIn(!!session?.user);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+    if (!isPremium) return; // Don't run if not premium
+    
+    // Small delay to let user see the NEW badges briefly
+    const timer = setTimeout(() => {
+      markAsSeen();
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [markAsSeen, isPremium]);
 
   // Show loading skeleton while checking premium status or auth
-  if (isPremiumLoading || isLoggedIn === null) {
+  if (isPremiumLoading || isAuthLoading) {
     return (
-      <div className="min-h-screen bg-background flex flex-col pb-20">
-        <header className="sticky top-0 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
-          <div className="px-4 py-3">
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-5 w-5 rounded" />
-              <Skeleton className="h-6 w-20" />
-            </div>
-          </div>
-        </header>
-        <main className="flex-1 px-4 py-4">
-          <div className="space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <Skeleton key={i} className="h-20 w-full rounded-lg" />
-            ))}
-          </div>
-        </main>
+      <div className="min-h-screen bg-background flex items-center justify-center pb-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   // Show premium lock screen for non-premium users
   if (!isPremium) {
-    return <PremiumLockedScreen isLoggedIn={isLoggedIn} />;
+    return <PremiumLockedScreen isLoggedIn={isAuthenticated} />;
   }
-
-  // Mark alerts as seen when page opens
-  useEffect(() => {
-    // Small delay to let user see the NEW badges briefly
-    const timer = setTimeout(() => {
-      markAsSeen();
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [markAsSeen]);
 
   // Filter by watchlist if enabled
   const filteredEvents = watchlistOnly

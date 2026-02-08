@@ -1,4 +1,41 @@
-# Welcome to your Lovable project
+# BetStreaks
+
+NBA player prop streak tracker for sports bettors.
+
+## Paid MVP Launch Checklist
+
+### ✅ Core Fixes Completed
+- [x] **Centralized auth state** - AuthProvider ensures consistent user state across all pages
+- [x] **Today page reliability** - Filters out placeholder games, shows friendly empty states
+- [x] **Data freshness** - 3-hour stale threshold, warning banner disables Best Bet badges
+- [x] **Best Bet tooltip** - Shows exact criteria: "Streak ≥3, Season ≥55% or L10 ≥60%, last game within 2 days"
+- [x] **Season label** - Displays "2024–25" consistently across the app
+
+### ✅ Premium Conversion
+- [x] Premium status indicator on Account page (Premium Active / Free)
+- [x] Stripe checkout flow wired via edge functions
+- [x] Consistent upgrade CTAs across premium-gated features
+
+### ✅ Watchlist/Favorites UX
+- [x] Star toggle clearly shows Added/Remove state
+- [x] Supabase sync for logged-in users
+- [x] localStorage fallback for guests (max 5)
+- [x] "Logged in as {email}" displayed on gated pages
+- [x] Loading states during auth initialization
+
+### Known Limitations
+- **Alerts page**: Gated as "Coming Soon" for non-premium users
+- **Push notifications**: Not yet implemented (placeholder toggle)
+- **Pagination**: Large streak lists may lag on older devices (optimization pending)
+- **Combo stats**: Premium-only (PTS+AST, PTS+REB, etc.)
+
+### Pre-Launch Verification
+1. **Login persists across refresh** ✓
+2. **Favorites works while logged in** ✓
+3. **Today page always renders meaningful content** ✓
+4. **Premium status flips after Stripe checkout** (requires live Stripe test)
+
+---
 
 ## Project info
 

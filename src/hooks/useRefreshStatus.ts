@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { STALE_THRESHOLD_HOURS, CURRENT_SEASON, isDataStale, getHoursSinceUpdate } from "@/lib/dataFreshness";
 
 interface RefreshStatus {
   id: number;
@@ -15,6 +16,7 @@ interface RefreshStatusResult {
   isLoading: boolean;
   error: Error | null;
   refetch: () => void;
+  season: string;
 }
 
 function formatRelativeTime(date: Date): string {
@@ -65,16 +67,12 @@ export function useRefreshStatus(): RefreshStatusResult {
 
   const lastRun = data?.last_run ? new Date(data.last_run) : null;
   
-  let hoursSinceUpdate: number | null = null;
+  const hoursSinceUpdate = getHoursSinceUpdate(lastRun);
+  const isStale = isDataStale(lastRun, STALE_THRESHOLD_HOURS);
+  
   let formattedTime = "Update status unavailable";
-  let isStale = false;
 
   if (lastRun) {
-    const now = new Date();
-    const diffMs = now.getTime() - lastRun.getTime();
-    hoursSinceUpdate = diffMs / (1000 * 60 * 60);
-    isStale = hoursSinceUpdate > 24;
-    
     if (isStale) {
       formattedTime = `${formatDateTime(lastRun)} (${formatRelativeTime(lastRun)})`;
     } else {
@@ -98,5 +96,6 @@ export function useRefreshStatus(): RefreshStatusResult {
     isLoading,
     error: error as Error | null,
     refetch: handleRefetch,
+    season: CURRENT_SEASON,
   };
 }

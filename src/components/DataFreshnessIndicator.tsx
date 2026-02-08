@@ -5,10 +5,11 @@ import { cn } from "@/lib/utils";
 
 interface DataFreshnessIndicatorProps {
   className?: string;
+  showSeason?: boolean;
 }
 
-export function DataFreshnessIndicator({ className }: DataFreshnessIndicatorProps) {
-  const { isStale, formattedTime, isLoading, refetch, lastRun } = useRefreshStatus();
+export function DataFreshnessIndicator({ className, showSeason = true }: DataFreshnessIndicatorProps) {
+  const { isStale, formattedTime, isLoading, refetch, lastRun, season } = useRefreshStatus();
 
   if (isLoading) {
     return null; // Don't show loading state, just hide until ready
@@ -20,11 +21,12 @@ export function DataFreshnessIndicator({ className }: DataFreshnessIndicatorProp
       <div className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", className)}>
         <Clock className="h-3 w-3" />
         <span>Update status unavailable</span>
+        {showSeason && <span className="text-muted-foreground/60">• {season}</span>}
       </div>
     );
   }
 
-  // Data is stale (>24h old) - show warning banner
+  // Data is stale (>3h old) - show warning banner
   if (isStale) {
     return (
       <div className={cn(
@@ -38,6 +40,7 @@ export function DataFreshnessIndicator({ className }: DataFreshnessIndicatorProp
               <p className="text-sm font-medium text-yellow-500">Data may be delayed</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Last update: {formattedTime}
+                {showSeason && <span className="text-muted-foreground/60"> • {season}</span>}
               </p>
             </div>
           </div>
@@ -60,6 +63,7 @@ export function DataFreshnessIndicator({ className }: DataFreshnessIndicatorProp
     <div className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", className)}>
       <Clock className="h-3 w-3" />
       <span>{formattedTime}</span>
+      {showSeason && <span className="text-muted-foreground/60">• {season}</span>}
     </div>
   );
 }

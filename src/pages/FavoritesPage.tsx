@@ -1,15 +1,26 @@
 import { useNavigate } from "react-router-dom";
-import { Star, ChevronRight, Crown } from "lucide-react";
+import { Star, ChevronRight, Crown, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Footer } from "@/components/Footer";
 import { useFavorites } from "@/hooks/useFavorites";
+import { useAuth } from "@/contexts/AuthContext";
 import { PremiumBadge } from "@/components/PremiumBadge";
 
 const FavoritesPage = () => {
   const navigate = useNavigate();
-  const { favorites, isLoading, isAuthenticated } = useFavorites();
+  const { isAuthenticated, isLoading: isAuthLoading, email } = useAuth();
+  const { favorites, isLoading } = useFavorites();
+
+  // Show loading state while auth initializes
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center pb-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
@@ -23,6 +34,11 @@ const FavoritesPage = () => {
         <p className="text-sm text-muted-foreground mt-1">
           Your favorite players
         </p>
+        {isAuthenticated && email && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Logged in as {email}
+          </p>
+        )}
       </header>
 
       {/* Content */}

@@ -1,4 +1,4 @@
-import { RefreshCw, Calendar } from "lucide-react";
+import { RefreshCw, Calendar, AlertCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useGamesToday } from "@/hooks/useGamesToday";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
 import { AdminRefreshButton } from "@/components/AdminRefreshButton";
+import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 
 export default function TodayPage() {
-  const { games, isLoading, isFetching, lastUpdated, refetch } = useGamesToday();
-  const { formattedTime: refreshStatusTime, lastRun: refreshLastRun } = useRefreshStatus();
+  const { games, isLoading, isFetching, error, lastUpdated, refetch } = useGamesToday();
+  const { formattedTime: refreshStatusTime, lastRun: refreshLastRun, season } = useRefreshStatus();
 
   const formattedLastUpdated = lastUpdated
     ? formatDistanceToNow(lastUpdated, { addSuffix: true })
@@ -36,11 +37,9 @@ export default function TodayPage() {
               <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
             </Button>
           </div>
-          {formattedLastUpdated && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Updated {formattedLastUpdated}
-            </p>
-          )}
+          <div className="mt-2">
+            <DataFreshnessIndicator showSeason={true} />
+          </div>
         </div>
       </header>
 
@@ -55,21 +54,41 @@ export default function TodayPage() {
               <Skeleton key={i} className="h-20 w-full rounded-lg" />
             ))}
           </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <AlertCircle className="h-12 w-12 text-destructive mb-4" />
+            <p className="text-lg font-medium text-destructive">
+              Failed to load games
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Please try again later
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refetch}
+              disabled={isFetching}
+              className="mt-4"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
+              Retry
+            </Button>
+          </div>
         ) : games.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-lg font-medium text-muted-foreground">
-              No games found yet — updating...
+              No games scheduled
             </p>
-            {refreshLastRun ? (
-              <p className="text-sm text-muted-foreground mt-1">
-                Last refresh: {refreshStatusTime}
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground mt-1">
-                Waiting for first data refresh
-              </p>
-            )}
+            <p className="text-sm text-muted-foreground mt-1">
+              {refreshLastRun 
+                ? `Last refresh: ${refreshStatusTime}`
+                : "Waiting for data refresh"
+              }
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {season} Season
+            </p>
             <div className="flex items-center gap-2 mt-4">
               <Button
                 variant="outline"
