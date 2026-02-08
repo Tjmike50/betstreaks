@@ -1,179 +1,110 @@
 
-# Fix Today Page Reliability
 
-## Problem
-The Today page can show blank/empty blocks in certain conditions, which undermines user trust for a paid MVP.
+# Add Visible Tier Badge to Account Page
 
-## Current State Analysis
-After inspection, the page structure is mostly correct:
-- **Loading state**: Shows 5 skeleton cards (no text)
-- **Error state**: Shows "Failed to load games" with Retry button
-- **Empty state**: Shows "No games scheduled" with refresh info
-- **Success state**: Shows game cards with teams, scores, status
-
-However, improvements are needed to guarantee the page never looks "broken."
+## Overview
+Add a prominent "Free Plan" or "Premium" tier badge directly below the user's email address on the Account page, making subscription status immediately visible without scrolling.
 
 ---
 
-## Implementation Plan
+## Current State
 
-### 1. Enhance Loading State (TodayPage.tsx)
-Add descriptive text to skeletons so users know content is loading.
+The Account page shows:
+1. User avatar icon
+2. "Logged in" heading
+3. Email address
+4. Feature list
+5. Premium card (further down - easy to miss)
 
-```text
-Current:
-  <Skeleton /> x5 (no text)
-
-Improved:
-  <div>
-    <p>Loading today's games...</p>
-    <Skeleton /> x5
-  </div>
-```
-
-### 2. Improve Empty State with Date Context
-Show today's date so users understand what day the "no games" message refers to.
-
-```text
-Current:
-  "No games scheduled"
-  "Last refresh: 5m ago"
-
-Improved:
-  "No NBA games scheduled for Saturday, Feb 8"
-  "Last updated: 5m ago • 2025–26 Season"
-```
-
-### 3. Add Debug Indicator
-When `?debug=1` query param is present, show debugging info.
-
-| Field | Value |
-|-------|-------|
-| Records fetched | 10 |
-| Date range | 2026-02-07 to 2026-02-09 |
-| Last updated | 2026-02-08T09:00:06Z |
-
-### 4. Ensure GameCard Never Renders Empty
-The GameCard already handles null team abbreviations gracefully (shows "TBD"), but the hook filters these out. Add a safety check in the page to log if any slip through.
+Users must scroll to the premium card section to understand their tier status.
 
 ---
 
-## File Changes
+## Solution
 
-### `src/pages/TodayPage.tsx`
-| Change | Description |
-|--------|-------------|
-| Add loading text | Show "Loading today's games..." above skeletons |
-| Add today's date | Format and display current date in empty state |
-| Add debug panel | Show record count, date range, timestamps when `?debug=1` |
-| Import useSearchParams | Needed to read query params |
+Add a colored badge directly below the email that shows:
 
-### `src/hooks/useGamesToday.ts`
-| Change | Description |
-|--------|-------------|
-| Export debug info | Return `debugInfo` object with startDate, endDate, rawCount |
+| Status | Badge Display |
+|--------|---------------|
+| Loading | Gray spinner badge |
+| Free | "Free Plan" - neutral gray badge |
+| Premium | "Premium" - green badge with check icon |
 
 ---
 
-## Code Changes Detail
+## Visual Design
 
-### TodayPage.tsx Updates
-
-**Add imports:**
-```typescript
-import { useSearchParams } from "react-router-dom";
-import { format } from "date-fns";
+**Free Plan Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌──────────────┐           │
+│      │  Free Plan   │  ← Gray   │
+│      └──────────────┘           │
+└─────────────────────────────────┘
 ```
 
-**Add debug detection:**
-```typescript
-const [searchParams] = useSearchParams();
-const isDebug = searchParams.get("debug") === "1";
-const todayFormatted = format(new Date(), "EEEE, MMM d");
+**Premium Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌────────────────┐         │
+│      │ ✓ Premium      │ ← Green │
+│      └────────────────┘         │
+└─────────────────────────────────┘
 ```
 
-**Enhanced loading state:**
+---
+
+## Implementation
+
+### File: `src/pages/AccountPage.tsx`
+
+**Add tier badge component inline** (lines 207-214):
+
 ```tsx
-{isLoading ? (
-  <div className="space-y-3">
-    <p className="text-sm text-muted-foreground text-center py-2">
-      Loading today's games...
-    </p>
-    {[...Array(5)].map((_, i) => (
-      <Skeleton key={i} className="h-20 w-full rounded-lg" />
-    ))}
-  </div>
-)
+<div className="text-center space-y-2">
+  <h2 className="text-lg font-semibold text-foreground">
+    Logged in
+  </h2>
+  <p className="text-sm text-muted-foreground break-all">
+    {user.email}
+  </p>
+  
+  {/* NEW: Tier Badge */}
+  {isPremiumLoading ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Checking...
+    </span>
+  ) : isPremium ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
+      <Check className="h-3 w-3" />
+      Premium
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      Free Plan
+    </span>
+  )}
+</div>
 ```
-
-**Enhanced empty state:**
-```tsx
-: games.length === 0 ? (
-  <div className="flex flex-col items-center justify-center py-16 text-center">
-    <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
-    <p className="text-lg font-medium">
-      No NBA games scheduled
-    </p>
-    <p className="text-sm text-muted-foreground mt-1">
-      for {todayFormatted}
-    </p>
-    ...
-  </div>
-)
-```
-
-**Add debug panel (dev-only):**
-```tsx
-{isDebug && (
-  <div className="mt-4 p-3 bg-muted/50 rounded-lg text-xs font-mono">
-    <p className="font-semibold mb-1">Debug Info</p>
-    <p>Records: {games.length} (raw: {debugInfo.rawCount})</p>
-    <p>Date range: {debugInfo.startDate} to {debugInfo.endDate}</p>
-    <p>Last updated: {lastUpdated?.toISOString() || "N/A"}</p>
-  </div>
-)}
-```
-
-### useGamesToday.ts Updates
-
-**Add debug info to return:**
-```typescript
-const debugInfo = {
-  startDate,
-  endDate,
-  rawCount: data?.length ?? 0,
-};
-
-return {
-  games: data ?? [],
-  isLoading,
-  isFetching,
-  error,
-  lastUpdated: data?.length ? lastUpdated : null,
-  refetch: handleRefresh,
-  debugInfo, // NEW
-};
-```
-
----
-
-## Testing Acceptance Criteria
-
-| State | What User Sees |
-|-------|----------------|
-| **Loading** | "Loading today's games..." + skeleton cards |
-| **Success** | List of game cards with teams, scores, times |
-| **Empty** | "No NBA games scheduled for [today's date]" + refresh button |
-| **Error** | "Couldn't load today's games" + Retry button |
-| **Debug** | All above + debug panel with record counts and timestamps |
 
 ---
 
 ## Summary
 
-| File | Changes |
-|------|---------|
-| `src/pages/TodayPage.tsx` | Add loading text, date in empty state, debug panel |
-| `src/hooks/useGamesToday.ts` | Export debugInfo with date range and counts |
+| Change | Description |
+|--------|-------------|
+| Add tier badge | Colored pill badge showing "Free Plan" or "Premium" with icon |
+| Position | Directly below email address for immediate visibility |
+| States | Loading (spinner), Free (gray), Premium (green + check) |
 
-This ensures the Today page always displays meaningful content and never shows blank blocks.
+**Files Modified:** `src/pages/AccountPage.tsx`
+
+This makes subscription tier instantly visible at the top of the Account page, so users always know whether they're on Free or Premium without scrolling.
+
