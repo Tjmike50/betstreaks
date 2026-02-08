@@ -67,6 +67,12 @@ export function useGamesToday() {
     refetch();
   };
 
+  const debugInfo = {
+    startDate,
+    endDate,
+    rawCount: data?.length ?? 0,
+  };
+
   return {
     games: data ?? [],
     isLoading,
@@ -74,5 +80,6 @@ export function useGamesToday() {
     error,
     lastUpdated: data?.length ? lastUpdated : null,
     refetch: handleRefresh,
+    debugInfo,
   };
 }
