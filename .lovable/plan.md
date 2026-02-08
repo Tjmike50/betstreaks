@@ -1,95 +1,99 @@
 
+# Updated Plan: Free Scheduling Alternatives
 
-## Overview
+## Current Status ✅
+The core infrastructure is already implemented:
+- **Edge Functions**: `refresh-games-today`, `refresh-players-and-streaks`, and `admin-trigger-refresh` are deployed
+- **Admin Button**: Only visible to users with `is_admin=true` in `user_flags`
+- **Secret**: `REFRESH_SECRET` is configured
 
-This plan removes all Premium waitlist functionality and creates a cleaner Premium experience with direct Stripe checkout integration. The Premium page will be more prominently accessible and clearly communicate the value proposition with subscription options.
+## The Problem
+Supabase's `pg_cron` extension requires the **Pro plan** ($25/month). We need a free alternative for scheduled refresh.
 
----
+## Free Scheduling Options
 
-## Summary of Changes
+### Option A: External Free Cron Service (Recommended)
+Use a free service like **cron-job.org** or **EasyCron** to call your Edge Functions:
 
-### Files to Delete
-- `src/hooks/usePremiumWaitlist.ts` - No longer needed
+| Service | Free Tier | Interval |
+|---------|-----------|----------|
+| cron-job.org | Unlimited jobs | 1 min minimum |
+| EasyCron | 200 calls/month | 20 min minimum |
+| Cronitor | 5 monitors | 1 min minimum |
 
-### Files to Modify Significantly 
-1. **`src/components/PremiumLockModal.tsx`** - Convert from waitlist signup to direct Premium upgrade modal
-2. **`src/pages/AccountPage.tsx`** - Update Premium teaser card (remove "Coming Soon" and "Join waitlist")
-3. **`src/pages/PremiumPage.tsx`** - Update features list and pricing display ($10/mo to match spec)
-4. **`src/pages/PrivacyPage.tsx`** - Remove waitlist reference from privacy content
+**Setup Steps:**
+1. Create account on cron-job.org (free, no credit card)
+2. Create two cron jobs:
+   - **Games refresh** (every 10 min): `POST` to `https://[project-ref].supabase.co/functions/v1/refresh-games-today`
+   - **Players refresh** (every 3 hours): `POST` to `https://[project-ref].supabase.co/functions/v1/refresh-players-and-streaks`
+3. Add header: `x-refresh-secret: [your-secret-value]`
 
-### Files with No Changes Needed
-- `src/components/BottomNav.tsx` - Premium is already accessible via Account; no new tab needed per current design
-- `src/components/PremiumLockedScreen.tsx` - Already properly configured with features and pricing
-- `src/App.tsx` - Route `/premium` already exists
+### Option B: GitHub Actions (Free for Public Repos)
+Create a scheduled workflow that runs periodically:
 
----
+```yaml
+# .github/workflows/refresh-data.yml
+name: Refresh Data
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # Every 10 minutes (games)
+    - cron: '0 */3 * * *'   # Every 3 hours (players)
+  workflow_dispatch:  # Manual trigger
 
-## Detailed Changes
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh Games
+        run: |
+          curl -X POST https://[project].supabase.co/functions/v1/refresh-games-today \
+            -H "x-refresh-secret: ${{ secrets.REFRESH_SECRET }}"
+```
 
-### 1. Delete Waitlist Hook
-Remove `src/hooks/usePremiumWaitlist.ts` entirely - it's no longer used anywhere after this refactor.
+**Note**: GitHub Actions has a 5-minute minimum interval and may have delays during high load.
 
-### 2. Convert PremiumLockModal to Upgrade Modal
-**Current behavior:** Collects email for waitlist, inserts into `premium_waitlist` table
-**New behavior:** Shows Premium benefits with upgrade/login button that navigates to `/premium`
+### Option C: Manual-Only (Simplest)
+Keep only the admin button and run refreshes manually. This works if you:
+- Don't need real-time updates
+- Are comfortable triggering refreshes yourself
 
-The modal will:
-- Display the Premium feature list (matching the user's requirements)
-- Show pricing ($10/mo, $60/yr)
-- For logged-in users: Show "Upgrade to Premium" button linking to `/premium`
-- For logged-out users: Show "Log in to Upgrade" button linking to `/auth`
-- Remove all email input and waitlist submission logic
+## My Recommendation
 
-### 3. Update AccountPage Premium Teaser
-**Current state:** Shows "Go Premium" with "Coming Soon" and "Join waitlist" button
-**New state:** Shows "Go Premium" with pricing info and "Upgrade" or "Manage Subscription" button
+**Use Option A (cron-job.org)** because:
+- Completely free with no limits
+- More reliable than GitHub Actions for frequent schedules
+- Easy to set up in 5 minutes
+- Your Edge Functions are already secured with `x-refresh-secret`
 
-For logged-in users:
-- If Premium: Show "You are Premium" with checkmark and "Manage Subscription" button
-- If not Premium: Show "Go Premium" with pricing and "Upgrade" button
+## What's Already Done
+No code changes needed! Everything is implemented:
 
-For logged-out users:
-- Show "Go Premium" with "Log in to upgrade" messaging
+| Component | Status |
+|-----------|--------|
+| `refresh-games-today` Edge Function | ✅ Deployed |
+| `refresh-players-and-streaks` Edge Function | ✅ Deployed |
+| `admin-trigger-refresh` Edge Function | ✅ Deployed |
+| `AdminRefreshButton` component | ✅ Working |
+| `useAdmin` hook | ✅ Working |
+| `REFRESH_SECRET` environment variable | ✅ Configured |
+| Empty state with refresh info | ✅ Implemented |
 
-### 4. Update PremiumPage Features List
-Expand the features list to match the user's requirements:
-1. Player combos (PTS+AST, PTS+REB, PRA, etc.)
-2. Last 10 / 15 / 20 game splits
-3. Alerts tab (streak alerts)
-4. Best plays of the day (AI ranked)
-5. Save favorite players
-6. Double-Double & Triple-Double tracking
-7. Historical matchup trends
+## Next Step: Set Up cron-job.org
 
-Also update pricing display:
-- Monthly: $10/month (currently shows $9.99)
-- Yearly: $60/year (currently shows $59.99)
+1. Go to https://cron-job.org and create a free account
+2. Click "Create cronjob"
+3. Configure **Games Refresh**:
+   - Title: `BetStreaks - Refresh Games`
+   - URL: `https://[your-project-ref].supabase.co/functions/v1/refresh-games-today`
+   - Schedule: Every 10 minutes
+   - Request Method: POST
+   - Headers: Add `x-refresh-secret` with your secret value
+4. Configure **Players Refresh**:
+   - Title: `BetStreaks - Refresh Players`
+   - URL: `https://[your-project-ref].supabase.co/functions/v1/refresh-players-and-streaks`
+   - Schedule: Every 3 hours
+   - Request Method: POST
+   - Headers: Add `x-refresh-secret` with your secret value
 
-### 5. Update PrivacyPage
-Remove waitlist reference from the "Information We Collect" section:
-- Change: "Email address (account creation or premium waitlist)"
-- To: "Email address (account creation)"
-
----
-
-## Technical Notes
-
-### Database Consideration
-The `premium_waitlist` Supabase table will remain in the database but won't be used by the app. This is safe since:
-- No new entries will be written
-- Existing data is preserved for historical reference
-- The table can be dropped later via a migration if desired
-
-### localStorage Cleanup
-The `joined_waitlist` localStorage key will no longer be set or read. Existing values are harmless and will be ignored.
-
-### Components Using PremiumLockModal
-These components will continue to work with the updated modal:
-- `RecentGamesList.tsx`
-- `StreakCard.tsx`
-- `FilterBar.tsx`
-- `AlertsPage.tsx`
-- `StreakStats.tsx`
-- `WatchlistPage.tsx`
-- `PlayerPage.tsx`
-
+## Summary
+Your server-side refresh system is complete! The only manual step is setting up the free external cron service. No paid Supabase plan required.
