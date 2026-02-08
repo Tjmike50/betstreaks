@@ -428,7 +428,7 @@ def calculate_team_streaks(team_games: list[dict]) -> list[dict]:
             last20_hits = sum(1 for g in last20 if g.get("wl") == "W")
             
             streaks.append({
-                "player_id": 0,  # Not applicable for teams
+                "player_id": tid,  # Use team_id for unique identification
                 "player_name": data["team_name"],
                 "team_abbr": data["team_abbr"],
                 "stat": "ML",
@@ -486,7 +486,7 @@ def calculate_team_streaks(team_games: list[dict]) -> list[dict]:
             last20_hits = sum(1 for g in last20 if (g.get("pts") or 0) >= threshold)
             
             streaks.append({
-                "player_id": 0,
+                "player_id": tid,
                 "player_name": data["team_name"],
                 "team_abbr": data["team_abbr"],
                 "stat": "PTS",
@@ -544,7 +544,7 @@ def calculate_team_streaks(team_games: list[dict]) -> list[dict]:
             last20_hits = sum(1 for g in last20 if (g.get("pts") or 0) <= threshold)
             
             streaks.append({
-                "player_id": 0,
+                "player_id": tid,
                 "player_name": data["team_name"],
                 "team_abbr": data["team_abbr"],
                 "stat": "PTS_U",
