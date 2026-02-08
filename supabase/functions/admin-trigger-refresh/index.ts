@@ -27,7 +27,6 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const refreshSecret = Deno.env.get("REFRESH_SECRET")!;
 
     // Create client with user's token to verify auth
     const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
@@ -66,56 +65,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log("Admin verified, triggering refresh functions...");
-
-    // Parse request body for which functions to trigger
-    const body = await req.json().catch(() => ({}));
-    const triggerGames = body.games !== false;
-    const triggerPlayers = body.players !== false;
-
-    const results: Record<string, unknown> = {};
-
-    // Call refresh-games-today
-    if (triggerGames) {
-      try {
-        const gamesResponse = await fetch(`${supabaseUrl}/functions/v1/refresh-games-today`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-refresh-secret": refreshSecret,
-          },
-        });
-        results.games = await gamesResponse.json();
-      } catch (e) {
-        console.error("Error calling refresh-games-today:", e);
-        results.games = { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
-      }
-    }
-
-    // Call refresh-players-and-streaks
-    if (triggerPlayers) {
-      try {
-        const playersResponse = await fetch(`${supabaseUrl}/functions/v1/refresh-players-and-streaks`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-refresh-secret": refreshSecret,
-          },
-        });
-        results.players = await playersResponse.json();
-      } catch (e) {
-        console.error("Error calling refresh-players-and-streaks:", e);
-        results.players = { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
-      }
-    }
+    console.log("Admin verified. Note: Data refresh is now handled by GitHub Actions.");
+    console.log("To trigger a manual refresh, run the GitHub Actions workflow.");
 
     const duration = Date.now() - startTime;
 
+    // Return info about how to trigger refresh
     return new Response(
       JSON.stringify({
         ok: true,
+        message: "Data refresh is now handled by GitHub Actions. Please trigger the 'NBA Data Refresh' workflow manually from the GitHub Actions tab, or wait for the scheduled run.",
+        info: {
+          workflow: ".github/workflows/refresh.yml",
+          schedule: "Runs automatically on schedule",
+          manual_trigger: "Go to GitHub Actions → NBA Data Refresh → Run workflow",
+        },
         ran_at: new Date().toISOString(),
-        results,
         duration_ms: duration,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
