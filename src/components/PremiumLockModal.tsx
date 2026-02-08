@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Dialog,
   DialogContent,
@@ -8,8 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Crown, CheckCircle, Loader2 } from "lucide-react";
+import { Crown, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 interface PremiumLockModalProps {
@@ -17,138 +17,87 @@ interface PremiumLockModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+const PREMIUM_FEATURES = [
+  "Player combos (PTS+AST, PTS+REB, PRA, etc.)",
+  "Last 10 / 15 / 20 game splits",
+  "Real-time streak alerts",
+  "Best plays of the day (AI ranked)",
+  "Save favorite players",
+  "Double-Double & Triple-Double tracking",
+  "Historical matchup trends",
+];
+
 export function PremiumLockModal({ open, onOpenChange }: PremiumLockModalProps) {
-  const [email, setEmail] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setIsLoggedIn(!!user);
+    });
+  }, [open]);
 
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email.trim() || !emailRegex.test(email.trim())) {
-      setError("Please enter a valid email address");
-      return;
-    }
-
-    if (email.trim().length > 255) {
-      setError("Email must be less than 255 characters");
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      // Get current user if authenticated
-      const { data: { user } } = await supabase.auth.getUser();
-
-      const { error: insertError } = await supabase
-        .from("premium_waitlist")
-        .insert({
-          email: email.trim().toLowerCase(),
-          user_id: user?.id ?? null,
-          source: "app_modal",
-        });
-
-      if (insertError) {
-        // Check for duplicate email
-        if (insertError.code === "23505") {
-          setIsSuccess(true);
-          localStorage.setItem("joined_waitlist", "true");
-        } else {
-          throw insertError;
-        }
-      } else {
-        setIsSuccess(true);
-        localStorage.setItem("joined_waitlist", "true");
-      }
-    } catch (err) {
-      console.error("Waitlist signup error:", err);
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
+  const handleUpgrade = () => {
+    onOpenChange(false);
+    navigate("/premium");
   };
 
-  const handleClose = () => {
+  const handleLogin = () => {
     onOpenChange(false);
-    // Reset state after modal closes
-    setTimeout(() => {
-      setEmail("");
-      setIsSuccess(false);
-      setError(null);
-    }, 200);
+    navigate("/auth");
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-yellow-500/20">
-            {isSuccess ? (
-              <CheckCircle className="h-6 w-6 text-green-500" />
-            ) : (
-              <Crown className="h-6 w-6 text-yellow-500" />
-            )}
+            <Crown className="h-6 w-6 text-yellow-500" />
           </div>
           <DialogTitle className="text-center">
-            {isSuccess ? "You're on the list" : "Get Early Access"}
+            Upgrade to Premium
           </DialogTitle>
           <DialogDescription className="text-center">
-            {isSuccess
-              ? "Premium is launching soon."
-              : "Join the early access list to be notified when Premium launches and new features go live."}
+            Unlock all features and catch streaks early
           </DialogDescription>
         </DialogHeader>
 
-        {isSuccess ? (
-          <DialogFooter className="sm:justify-center pt-2">
-            <Button onClick={handleClose} className="w-full sm:w-auto">
-              Got it
-            </Button>
-          </DialogFooter>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Input
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={isSubmitting}
-                className="w-full"
-                autoComplete="email"
-              />
-              {error && (
-                <p className="text-sm text-destructive">{error}</p>
-              )}
+        <div className="space-y-2 py-2">
+          {PREMIUM_FEATURES.map((feature, index) => (
+            <div key={index} className="flex items-center gap-3">
+              <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
+                <Check className="h-3 w-3 text-primary" />
+              </div>
+              <span className="text-sm text-foreground">{feature}</span>
             </div>
-            <DialogFooter className="flex-col gap-2 sm:flex-col">
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Joining...
-                  </>
-                ) : (
-                  "Join Early Access"
-                )}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={handleClose}
-                className="w-full"
-                disabled={isSubmitting}
-              >
-                Not now
-              </Button>
-            </DialogFooter>
-          </form>
-        )}
+          ))}
+        </div>
+
+        <div className="text-center py-2">
+          <p className="text-sm text-muted-foreground">
+            Starting at <span className="font-semibold text-foreground">$10/month</span> or{" "}
+            <span className="font-semibold text-foreground">$60/year</span>
+          </p>
+        </div>
+
+        <DialogFooter className="flex-col gap-2 sm:flex-col">
+          {isLoggedIn ? (
+            <Button onClick={handleUpgrade} className="w-full">
+              Upgrade to Premium
+            </Button>
+          ) : (
+            <Button onClick={handleLogin} className="w-full">
+              Log in to Upgrade
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            className="w-full"
+          >
+            Not now
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

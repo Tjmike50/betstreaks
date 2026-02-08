@@ -7,7 +7,7 @@ import { ArrowLeft } from "lucide-react";
 const privacyContent = [
   {
     title: "Information We Collect",
-    content: "We may collect:\n• Email address (account creation or premium waitlist)\n• User authentication identifiers\n• App usage data (saved picks, feature usage)\n\nWe do NOT collect:\n• Payment information\n• Sportsbook credentials\n• Financial data"
+    content: "We may collect:\n• Email address (account creation)\n• User authentication identifiers\n• App usage data (saved picks, feature usage)\n\nWe do NOT collect:\n• Payment information\n• Sportsbook credentials\n• Financial data"
   },
   {
     title: "How We Use Information",
