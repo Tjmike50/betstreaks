@@ -18,6 +18,97 @@ interface GameData {
   sport: string;
 }
 
+// NBA CDN API response types
+interface NBAGame {
+  gameId: string;
+  gameCode: string;
+  gameStatus: number;
+  gameStatusText: string;
+  gameTimeUTC: string;
+  gameDateTimeUTC: string;
+  homeTeam: {
+    teamId: number;
+    teamName: string;
+    teamCity: string;
+    teamTricode: string;
+    score: number;
+  };
+  awayTeam: {
+    teamId: number;
+    teamName: string;
+    teamCity: string;
+    teamTricode: string;
+    score: number;
+  };
+}
+
+interface NBAScoreboardResponse {
+  scoreboard: {
+    gameDate: string;
+    games: NBAGame[];
+  };
+}
+
+function parseGameTime(gameTimeUTC: string): { gameDate: string; gameTime: string } {
+  try {
+    const date = new Date(gameTimeUTC);
+    // Format date as YYYY-MM-DD
+    const gameDate = date.toISOString().split("T")[0];
+    
+    // Format time in ET (Eastern Time)
+    const gameTime = date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/New_York",
+    }) + " ET";
+    
+    return { gameDate, gameTime };
+  } catch (error) {
+    console.error("Error parsing game time:", gameTimeUTC, error);
+    return { gameDate: new Date().toISOString().split("T")[0], gameTime: null as unknown as string };
+  }
+}
+
+function transformNBAGame(nbaGame: NBAGame): GameData {
+  const { gameDate, gameTime } = parseGameTime(nbaGame.gameTimeUTC || nbaGame.gameDateTimeUTC);
+  
+  return {
+    id: nbaGame.gameId,
+    home_team_abbr: nbaGame.homeTeam.teamTricode,
+    away_team_abbr: nbaGame.awayTeam.teamTricode,
+    home_score: nbaGame.homeTeam.score,
+    away_score: nbaGame.awayTeam.score,
+    status: nbaGame.gameStatusText,
+    game_date: gameDate,
+    game_time: gameTime,
+    sport: "NBA",
+  };
+}
+
+async function fetchNBAScoreboard(): Promise<NBAGame[]> {
+  const url = "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json";
+  
+  console.log("Fetching NBA scoreboard from CDN...");
+  
+  const response = await fetch(url, {
+    headers: {
+      "Accept": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`NBA CDN API error: ${response.status} ${response.statusText}`);
+  }
+
+  const data: NBAScoreboardResponse = await response.json();
+  
+  console.log(`Fetched ${data.scoreboard?.games?.length || 0} games for ${data.scoreboard?.gameDate}`);
+  
+  return data.scoreboard?.games || [];
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -45,27 +136,17 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log("Starting refresh_games_today...");
+    console.log("Starting refresh_games_today with NBA CDN API...");
 
-    // ========================================
-    // PLACEHOLDER: NBA API LOGIC GOES HERE
-    // ========================================
-    // This is where you'll add the NBA API calls to fetch today's games.
-    // The logic should:
-    // 1. Fetch today's NBA schedule from the NBA API
-    // 2. For each game, get scores and status
-    // 3. Transform the data into GameData format
-    // 4. Upsert into games_today table
-    //
-    // Example structure:
-    // const games: GameData[] = await fetchNBAGamesToday();
-    //
-    // For now, we'll just update the refresh_status to indicate the function ran.
-    // ========================================
-
-    const games: GameData[] = [];
+    // Fetch today's games from NBA CDN
+    const nbaGames = await fetchNBAScoreboard();
     
-    // Example: If you have games data, upsert them
+    // Transform to our format
+    const games: GameData[] = nbaGames.map(transformNBAGame);
+    
+    console.log(`Transformed ${games.length} games for upsert`);
+    
+    // Upsert games if we have any
     if (games.length > 0) {
       const { error: upsertError } = await supabase
         .from("games_today")
@@ -81,10 +162,13 @@ Deno.serve(async (req) => {
         console.error("Error upserting games:", upsertError);
         throw upsertError;
       }
+      
+      console.log(`Successfully upserted ${games.length} games`);
+    } else {
+      console.log("No games to upsert (likely no games today)");
     }
 
-    // Update refresh_status for games refresh
-    // Using id=2 for games_today refresh (id=1 is for player/streak data)
+    // Update refresh_status for games refresh (id=2)
     const { error: statusError } = await supabase
       .from("refresh_status")
       .upsert(
@@ -107,7 +191,11 @@ Deno.serve(async (req) => {
         ran_at: new Date().toISOString(),
         counts: { games: games.length },
         duration_ms: duration,
-        message: "Placeholder - add NBA API logic to fetch real game data",
+        sample: games.slice(0, 3).map(g => ({
+          id: g.id,
+          matchup: `${g.away_team_abbr} @ ${g.home_team_abbr}`,
+          status: g.status,
+        })),
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

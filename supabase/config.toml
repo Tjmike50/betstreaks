@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.admin-trigger-refresh]
 verify_jwt = false
+
+[functions.healthcheck]
+verify_jwt = false
