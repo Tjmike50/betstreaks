@@ -1,13 +1,16 @@
 import { RefreshCw, Calendar } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useGamesToday } from "@/hooks/useGamesToday";
+import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { GameCard } from "@/components/GameCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
+import { AdminRefreshButton } from "@/components/AdminRefreshButton";
 
 export default function TodayPage() {
   const { games, isLoading, isFetching, lastUpdated, refetch } = useGamesToday();
+  const { formattedTime: refreshStatusTime, lastRun: refreshLastRun } = useRefreshStatus();
 
   const formattedLastUpdated = lastUpdated
     ? formatDistanceToNow(lastUpdated, { addSuffix: true })
@@ -56,21 +59,29 @@ export default function TodayPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-lg font-medium text-muted-foreground">
-              No NBA games found
+              No games found yet — updating...
             </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              (data updating)
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={refetch}
-              className="mt-4"
-              disabled={isFetching}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
+            {refreshLastRun ? (
+              <p className="text-sm text-muted-foreground mt-1">
+                Last refresh: {refreshStatusTime}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground mt-1">
+                Waiting for first data refresh
+              </p>
+            )}
+            <div className="flex items-center gap-2 mt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refetch}
+                disabled={isFetching}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+              <AdminRefreshButton />
+            </div>
           </div>
         ) : (
           <div className="divide-y divide-border rounded-lg overflow-hidden border border-border">

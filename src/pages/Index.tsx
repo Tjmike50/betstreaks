@@ -7,6 +7,7 @@ import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
+import { AdminRefreshButton } from "@/components/AdminRefreshButton";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -111,15 +112,21 @@ const Index = () => {
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="px-4 py-4 border-b border-border">
-        <h1 className="text-2xl font-bold text-foreground">
-          🔥 BetStreaks
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Active NBA player prop streaks
-        </p>
-        <p className="text-xs text-muted-foreground mt-2">
-          Use streaks to identify consistency — always compare with sportsbook lines before betting.
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">
+              🔥 BetStreaks
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Active NBA player prop streaks
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Use streaks to identify consistency — always compare with sportsbook lines before betting.
+            </p>
+          </div>
+          {/* Admin-only refresh button */}
+          <AdminRefreshButton />
+        </div>
       </header>
 
       {/* Early Access Banner */}
