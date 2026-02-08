@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Footer } from "@/components/Footer";
-import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield, AlertTriangle, MessageSquare } from "lucide-react";
+import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield, AlertTriangle, MessageSquare, Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function AccountPage() {
@@ -14,6 +15,8 @@ export default function AccountPage() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isPortalLoading, setIsPortalLoading] = useState(false);
+  const { isPremium, isLoading: isPremiumLoading } = usePremiumStatus();
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -53,6 +56,31 @@ export default function AccountPage() {
     });
   };
 
+  const handleManageBilling = async () => {
+    setIsPortalLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("create-portal-session");
+
+      if (error) throw error;
+
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error("No portal URL returned");
+      }
+    } catch (error) {
+      console.error("Portal error:", error);
+      toast({
+        variant: "destructive",
+        title: "Could not open billing portal",
+        description: error instanceof Error ? error.message : "Please try again later.",
+      });
+    } finally {
+      setIsPortalLoading(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -60,6 +88,101 @@ export default function AccountPage() {
       </div>
     );
   }
+
+  const renderPremiumCard = () => {
+    if (!user) {
+      // Logged out - show upgrade teaser
+      return (
+        <Card 
+          className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
+          onClick={() => navigate("/premium")}
+        >
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
+                <Crown className="h-5 w-5 text-yellow-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Go Premium</h3>
+                <p className="text-xs text-muted-foreground">$10/mo or $60/yr</p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
+              Learn more
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (isPremiumLoading) {
+      return (
+        <Card className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20">
+          <CardContent className="p-4 flex items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (isPremium) {
+      // Premium user - show status and manage button
+      return (
+        <Card className="bg-gradient-to-r from-green-500/10 to-green-500/5 border-green-500/20">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-500/20">
+                <Check className="h-5 w-5 text-green-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">You are Premium</h3>
+                <p className="text-xs text-muted-foreground">All features unlocked</p>
+              </div>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="border-green-500/30 text-green-500 hover:bg-green-500/10"
+              onClick={handleManageBilling}
+              disabled={isPortalLoading}
+            >
+              {isPortalLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  Manage
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    // Logged in but not premium - show upgrade CTA
+    return (
+      <Card 
+        className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
+        onClick={() => navigate("/premium")}
+      >
+        <CardContent className="p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
+              <Crown className="h-5 w-5 text-yellow-500" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground">Go Premium</h3>
+              <p className="text-xs text-muted-foreground">$10/mo or $60/yr</p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
+            Upgrade
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  };
 
   // Logged in state
   if (user) {
@@ -105,26 +228,8 @@ export default function AccountPage() {
                 </div>
               </div>
 
-              {/* Premium Teaser Card */}
-              <Card 
-                className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
-                onClick={() => navigate("/premium")}
-              >
-                <CardContent className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
-                      <Crown className="h-5 w-5 text-yellow-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-foreground">Go Premium</h3>
-                      <p className="text-xs text-muted-foreground">Coming Soon</p>
-                    </div>
-                  </div>
-                  <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
-                    Join waitlist
-                  </Button>
-                </CardContent>
-              </Card>
+              {/* Premium Card */}
+              {renderPremiumCard()}
 
               {/* Feedback Link */}
               <div 
@@ -235,26 +340,8 @@ export default function AccountPage() {
               </div>
             </div>
 
-            {/* Premium Teaser Card */}
-            <Card 
-              className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
-              onClick={() => navigate("/premium")}
-            >
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
-                    <Crown className="h-5 w-5 text-yellow-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-foreground">Go Premium</h3>
-                    <p className="text-xs text-muted-foreground">Coming Soon</p>
-                  </div>
-                </div>
-                <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
-                  Join waitlist
-                </Button>
-              </CardContent>
-            </Card>
+            {/* Premium Card */}
+            {renderPremiumCard()}
 
             {/* Feedback Link */}
             <div 

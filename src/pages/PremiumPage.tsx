@@ -15,12 +15,13 @@ const PRICE_IDS = {
 };
 
 const FEATURES = [
-  "Real-time streak alerts (PRA, PR, PA)",
+  "Player combos (PTS+AST, PTS+REB, PRA, etc.)",
   "Last 10 / 15 / 20 game splits",
+  "Real-time streak alerts",
   "Best plays of the day (AI ranked)",
   "Save favorite players",
+  "Double-Double & Triple-Double tracking",
   "Historical matchup trends",
-  "Player combo streaks",
 ];
 
 export default function PremiumPage() {
@@ -265,7 +266,7 @@ export default function PremiumPage() {
                 <div className="border border-border rounded-lg p-4 space-y-3">
                   <div className="text-center">
                     <p className="text-sm font-medium text-muted-foreground">Monthly</p>
-                    <p className="text-2xl font-bold text-foreground">$9.99</p>
+                    <p className="text-2xl font-bold text-foreground">$10</p>
                     <p className="text-xs text-muted-foreground">per month</p>
                   </div>
                   <Button
@@ -285,11 +286,11 @@ export default function PremiumPage() {
                 {/* Yearly */}
                 <div className="border-2 border-primary rounded-lg p-4 space-y-3 relative">
                   <Badge className="absolute -top-2 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs">
-                    Save 50%
+                    Best Value
                   </Badge>
                   <div className="text-center">
                     <p className="text-sm font-medium text-muted-foreground">Yearly</p>
-                    <p className="text-2xl font-bold text-foreground">$59.99</p>
+                    <p className="text-2xl font-bold text-foreground">$60</p>
                     <p className="text-xs text-muted-foreground">per year</p>
                   </div>
                   <Button
