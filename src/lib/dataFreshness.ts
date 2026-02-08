@@ -3,7 +3,7 @@
 export const STALE_THRESHOLD_HOURS = 3;
 
 // Season label
-export const CURRENT_SEASON = "2024–25";
+export const CURRENT_SEASON = "2025–26";
 
 // Check if a date is stale (older than threshold)
 export function isDataStale(lastUpdate: Date | null, thresholdHours = STALE_THRESHOLD_HOURS): boolean {
