@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """
 NBA Data Refresh Script for GitHub Actions
-Fetches player stats and game data from nba_api and upserts to Supabase.
+Fetches player stats, team stats, and game data from nba_api and upserts to Supabase.
 """
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 import time
 
 from nba_api.stats.endpoints import (
     ScoreboardV2,
     PlayerGameLogs,
+    TeamGameLogs,
 )
 from nba_api.stats.static import teams
 from supabase import create_client, Client
 
-# Configuration
+# Configuration - Player stat thresholds
 STAT_COLUMNS = {
     "PTS": "pts",
     "REB": "reb",
@@ -27,17 +28,43 @@ STAT_COLUMNS = {
     "STL": "stl",
 }
 
-# Thresholds to check for each stat
 STAT_THRESHOLDS = {
-    "PTS": [10, 15, 20, 25, 30, 35, 40],
-    "REB": [5, 8, 10, 12, 15],
+    "PTS": [10, 15, 20, 25, 30, 35, 40, 45, 50],
+    "REB": [5, 8, 10, 12, 15, 18, 20],
     "AST": [3, 5, 8, 10, 12],
     "3PM": [1, 2, 3, 4, 5, 6],
     "BLK": [1, 2, 3, 4, 5],
     "STL": [1, 2, 3, 4],
 }
 
+# Configuration - Team stat thresholds
+TEAM_STAT_THRESHOLDS = {
+    "ML": [1],  # Moneyline (win detection)
+    "PTS": [100, 105, 110, 115, 120, 125, 130],  # Team points over
+    "PTS_U": [100, 105, 110, 115, 120, 125],  # Team points under
+}
+
 MIN_STREAK_LENGTH = 3
+
+
+def get_season_start_date() -> datetime:
+    """Get the start date of the current NBA season (Oct 22)."""
+    now = datetime.now()
+    if now.month >= 10:
+        # Season started this year (Oct 22)
+        return datetime(now.year, 10, 22)
+    else:
+        # Season started last year (Oct 22)
+        return datetime(now.year - 1, 10, 22)
+
+
+def get_season_string() -> str:
+    """Get the current season string (e.g., '2024-25')."""
+    now = datetime.now()
+    if now.month >= 10:
+        return f"{now.year}-{str(now.year + 1)[2:]}"
+    else:
+        return f"{now.year - 1}-{str(now.year)[2:]}"
 
 
 def get_supabase_client() -> Client:
@@ -94,19 +121,16 @@ def fetch_todays_games() -> list[dict]:
         return []
 
 
-def fetch_player_game_logs(days_back: int = 30) -> list[dict]:
-    """Fetch player game logs for the last N days."""
-    print(f"Fetching player game logs (last {days_back} days)...")
-    
-    # Get current season
+def fetch_player_game_logs() -> list[dict]:
+    """Fetch player game logs for the entire season."""
+    season_start = get_season_start_date()
+    season = get_season_string()
     now = datetime.now()
-    if now.month >= 10:
-        season = f"{now.year}-{str(now.year + 1)[2:]}"
-    else:
-        season = f"{now.year - 1}-{str(now.year)[2:]}"
     
-    date_from = (now - timedelta(days=days_back)).strftime("%m/%d/%Y")
+    date_from = season_start.strftime("%m/%d/%Y")
     date_to = now.strftime("%m/%d/%Y")
+    
+    print(f"Fetching player game logs for {season} season ({date_from} to {date_to})...")
     
     try:
         # Add delay to avoid rate limiting
@@ -148,9 +172,54 @@ def fetch_player_game_logs(days_back: int = 30) -> list[dict]:
         return []
 
 
+def fetch_team_game_logs() -> list[dict]:
+    """Fetch team game logs for the entire season."""
+    season_start = get_season_start_date()
+    season = get_season_string()
+    now = datetime.now()
+    
+    date_from = season_start.strftime("%m/%d/%Y")
+    date_to = now.strftime("%m/%d/%Y")
+    
+    print(f"Fetching team game logs for {season} season ({date_from} to {date_to})...")
+    
+    try:
+        # Add delay to avoid rate limiting
+        time.sleep(1)
+        
+        logs = TeamGameLogs(
+            season_nullable=season,
+            date_from_nullable=date_from,
+            date_to_nullable=date_to,
+        )
+        df = logs.get_data_frames()[0]
+        
+        games = []
+        for _, row in df.iterrows():
+            game_date = datetime.strptime(row["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d")
+            
+            games.append({
+                "team_id": int(row["TEAM_ID"]),
+                "team_abbr": row["TEAM_ABBREVIATION"],
+                "game_id": str(row["GAME_ID"]),
+                "game_date": game_date,
+                "matchup": row.get("MATCHUP"),
+                "wl": row.get("WL"),
+                "pts": int(row["PTS"]) if row.get("PTS") is not None else None,
+                "sport": "NBA",
+            })
+        
+        print(f"Found {len(games)} team game records")
+        return games
+    
+    except Exception as e:
+        print(f"Error fetching team logs: {e}")
+        return []
+
+
 def calculate_streaks(player_games: list[dict]) -> list[dict]:
-    """Calculate streaks for each player/stat/threshold combination."""
-    print("Calculating streaks...")
+    """Calculate player streaks for each player/stat/threshold combination."""
+    print("Calculating player streaks...")
     
     # Group games by player
     player_data = {}
@@ -199,7 +268,7 @@ def calculate_streaks(player_games: list[dict]) -> list[dict]:
                 season_games = len(games)
                 season_win_pct = round((season_wins / season_games * 100), 1) if season_games > 0 else 0
                 
-                # Calculate L5, L10 stats
+                # Calculate L5, L10, L15, L20 stats
                 last5 = games[:5]
                 last5_hits = sum(1 for g in last5 if (g.get(col_name) or 0) >= threshold)
                 last5_games = len(last5)
@@ -209,6 +278,16 @@ def calculate_streaks(player_games: list[dict]) -> list[dict]:
                 last10_hits = sum(1 for g in last10 if (g.get(col_name) or 0) >= threshold)
                 last10_games = len(last10)
                 last10_hit_pct = round((last10_hits / last10_games * 100), 1) if last10_games > 0 else None
+                
+                last15 = games[:15]
+                last15_hits = sum(1 for g in last15 if (g.get(col_name) or 0) >= threshold)
+                last15_games = len(last15)
+                last15_hit_pct = round((last15_hits / last15_games * 100), 1) if last15_games > 0 else None
+                
+                last20 = games[:20]
+                last20_hits = sum(1 for g in last20 if (g.get(col_name) or 0) >= threshold)
+                last20_games = len(last20)
+                last20_hit_pct = round((last20_hits / last20_games * 100), 1) if last20_games > 0 else None
                 
                 streaks.append({
                     "player_id": pid,
@@ -229,11 +308,222 @@ def calculate_streaks(player_games: list[dict]) -> list[dict]:
                     "last10_hits": last10_hits,
                     "last10_games": last10_games,
                     "last10_hit_pct": last10_hit_pct,
+                    "last15_hits": last15_hits,
+                    "last15_games": last15_games,
+                    "last15_hit_pct": last15_hit_pct,
+                    "last20_hits": last20_hits,
+                    "last20_games": last20_games,
+                    "last20_hit_pct": last20_hit_pct,
                     "sport": "NBA",
                     "entity_type": "player",
                 })
     
-    print(f"Found {len(streaks)} active streaks")
+    print(f"Found {len(streaks)} active player streaks")
+    return streaks
+
+
+def calculate_team_streaks(team_games: list[dict]) -> list[dict]:
+    """Calculate team streaks for each team/stat/threshold combination."""
+    print("Calculating team streaks...")
+    
+    # Get team name mapping
+    nba_teams = {t["abbreviation"]: t["full_name"] for t in teams.get_teams()}
+    
+    # Group games by team
+    team_data = {}
+    for game in team_games:
+        tid = game["team_id"]
+        if tid not in team_data:
+            team_abbr = game["team_abbr"]
+            team_data[tid] = {
+                "team_name": nba_teams.get(team_abbr, team_abbr),
+                "team_abbr": team_abbr,
+                "games": [],
+            }
+        team_data[tid]["games"].append(game)
+    
+    # Sort each team's games by date (most recent first)
+    for tid in team_data:
+        team_data[tid]["games"].sort(key=lambda g: g["game_date"], reverse=True)
+    
+    streaks = []
+    
+    for tid, data in team_data.items():
+        games = data["games"]
+        if not games:
+            continue
+        
+        # Process ML (Moneyline - consecutive wins)
+        ml_streak_len = 0
+        ml_streak_start = None
+        for game in games:
+            if game.get("wl") == "W":
+                ml_streak_len += 1
+                ml_streak_start = game["game_date"]
+            else:
+                break
+        
+        if ml_streak_len >= MIN_STREAK_LENGTH:
+            season_wins = sum(1 for g in games if g.get("wl") == "W")
+            season_games = len(games)
+            season_win_pct = round((season_wins / season_games * 100), 1) if season_games > 0 else 0
+            
+            # L5, L10, L15, L20 for ML
+            last5 = games[:5]
+            last5_hits = sum(1 for g in last5 if g.get("wl") == "W")
+            last10 = games[:10]
+            last10_hits = sum(1 for g in last10 if g.get("wl") == "W")
+            last15 = games[:15]
+            last15_hits = sum(1 for g in last15 if g.get("wl") == "W")
+            last20 = games[:20]
+            last20_hits = sum(1 for g in last20 if g.get("wl") == "W")
+            
+            streaks.append({
+                "player_id": 0,  # Not applicable for teams
+                "player_name": data["team_name"],
+                "team_abbr": data["team_abbr"],
+                "stat": "ML",
+                "threshold": 1,
+                "streak_len": ml_streak_len,
+                "streak_start": ml_streak_start,
+                "streak_win_pct": 100.0,
+                "season_wins": season_wins,
+                "season_games": season_games,
+                "season_win_pct": season_win_pct,
+                "last_game": games[0]["game_date"],
+                "last5_hits": last5_hits,
+                "last5_games": len(last5),
+                "last5_hit_pct": round((last5_hits / len(last5) * 100), 1) if last5 else None,
+                "last10_hits": last10_hits,
+                "last10_games": len(last10),
+                "last10_hit_pct": round((last10_hits / len(last10) * 100), 1) if last10 else None,
+                "last15_hits": last15_hits,
+                "last15_games": len(last15),
+                "last15_hit_pct": round((last15_hits / len(last15) * 100), 1) if last15 else None,
+                "last20_hits": last20_hits,
+                "last20_games": len(last20),
+                "last20_hit_pct": round((last20_hits / len(last20) * 100), 1) if last20 else None,
+                "sport": "NBA",
+                "entity_type": "team",
+            })
+        
+        # Process PTS (Team Points Over)
+        for threshold in TEAM_STAT_THRESHOLDS["PTS"]:
+            streak_len = 0
+            streak_start = None
+            
+            for game in games:
+                pts = game.get("pts")
+                if pts is not None and pts >= threshold:
+                    streak_len += 1
+                    streak_start = game["game_date"]
+                else:
+                    break
+            
+            if streak_len < MIN_STREAK_LENGTH:
+                continue
+            
+            season_wins = sum(1 for g in games if (g.get("pts") or 0) >= threshold)
+            season_games = len(games)
+            season_win_pct = round((season_wins / season_games * 100), 1) if season_games > 0 else 0
+            
+            last5 = games[:5]
+            last5_hits = sum(1 for g in last5 if (g.get("pts") or 0) >= threshold)
+            last10 = games[:10]
+            last10_hits = sum(1 for g in last10 if (g.get("pts") or 0) >= threshold)
+            last15 = games[:15]
+            last15_hits = sum(1 for g in last15 if (g.get("pts") or 0) >= threshold)
+            last20 = games[:20]
+            last20_hits = sum(1 for g in last20 if (g.get("pts") or 0) >= threshold)
+            
+            streaks.append({
+                "player_id": 0,
+                "player_name": data["team_name"],
+                "team_abbr": data["team_abbr"],
+                "stat": "PTS",
+                "threshold": threshold,
+                "streak_len": streak_len,
+                "streak_start": streak_start,
+                "streak_win_pct": 100.0,
+                "season_wins": season_wins,
+                "season_games": season_games,
+                "season_win_pct": season_win_pct,
+                "last_game": games[0]["game_date"],
+                "last5_hits": last5_hits,
+                "last5_games": len(last5),
+                "last5_hit_pct": round((last5_hits / len(last5) * 100), 1) if last5 else None,
+                "last10_hits": last10_hits,
+                "last10_games": len(last10),
+                "last10_hit_pct": round((last10_hits / len(last10) * 100), 1) if last10 else None,
+                "last15_hits": last15_hits,
+                "last15_games": len(last15),
+                "last15_hit_pct": round((last15_hits / len(last15) * 100), 1) if last15 else None,
+                "last20_hits": last20_hits,
+                "last20_games": len(last20),
+                "last20_hit_pct": round((last20_hits / len(last20) * 100), 1) if last20 else None,
+                "sport": "NBA",
+                "entity_type": "team",
+            })
+        
+        # Process PTS_U (Team Points Under)
+        for threshold in TEAM_STAT_THRESHOLDS["PTS_U"]:
+            streak_len = 0
+            streak_start = None
+            
+            for game in games:
+                pts = game.get("pts")
+                if pts is not None and pts <= threshold:
+                    streak_len += 1
+                    streak_start = game["game_date"]
+                else:
+                    break
+            
+            if streak_len < MIN_STREAK_LENGTH:
+                continue
+            
+            season_wins = sum(1 for g in games if (g.get("pts") or 0) <= threshold)
+            season_games = len(games)
+            season_win_pct = round((season_wins / season_games * 100), 1) if season_games > 0 else 0
+            
+            last5 = games[:5]
+            last5_hits = sum(1 for g in last5 if (g.get("pts") or 0) <= threshold)
+            last10 = games[:10]
+            last10_hits = sum(1 for g in last10 if (g.get("pts") or 0) <= threshold)
+            last15 = games[:15]
+            last15_hits = sum(1 for g in last15 if (g.get("pts") or 0) <= threshold)
+            last20 = games[:20]
+            last20_hits = sum(1 for g in last20 if (g.get("pts") or 0) <= threshold)
+            
+            streaks.append({
+                "player_id": 0,
+                "player_name": data["team_name"],
+                "team_abbr": data["team_abbr"],
+                "stat": "PTS_U",
+                "threshold": threshold,
+                "streak_len": streak_len,
+                "streak_start": streak_start,
+                "streak_win_pct": 100.0,
+                "season_wins": season_wins,
+                "season_games": season_games,
+                "season_win_pct": season_win_pct,
+                "last_game": games[0]["game_date"],
+                "last5_hits": last5_hits,
+                "last5_games": len(last5),
+                "last5_hit_pct": round((last5_hits / len(last5) * 100), 1) if last5 else None,
+                "last10_hits": last10_hits,
+                "last10_games": len(last10),
+                "last10_hit_pct": round((last10_hits / len(last10) * 100), 1) if last10 else None,
+                "last15_hits": last15_hits,
+                "last15_games": len(last15),
+                "last15_hit_pct": round((last15_hits / len(last15) * 100), 1) if last15 else None,
+                "last20_hits": last20_hits,
+                "last20_games": len(last20),
+                "last20_hit_pct": round((last20_hits / len(last20) * 100), 1) if last20 else None,
+                "sport": "NBA",
+                "entity_type": "team",
+            })
+    
+    print(f"Found {len(streaks)} active team streaks")
     return streaks
 
 
@@ -246,18 +536,25 @@ def detect_streak_events(
     
     # Fetch existing streaks
     result = supabase.table("streaks").select("*").eq("sport", "NBA").execute()
-    old_streaks = {
-        (s["player_id"], s["stat"], s["threshold"]): s
-        for s in result.data
-    }
     
-    new_streaks_map = {
-        (s["player_id"], s["stat"], s["threshold"]): s
-        for s in new_streaks
-    }
+    # Create keys based on entity type
+    old_streaks = {}
+    for s in result.data:
+        if s["entity_type"] == "team":
+            key = (s["team_abbr"], s["stat"], s["threshold"], "team")
+        else:
+            key = (s["player_id"], s["stat"], s["threshold"], "player")
+        old_streaks[key] = s
+    
+    new_streaks_map = {}
+    for s in new_streaks:
+        if s["entity_type"] == "team":
+            key = (s["team_abbr"], s["stat"], s["threshold"], "team")
+        else:
+            key = (s["player_id"], s["stat"], s["threshold"], "player")
+        new_streaks_map[key] = s
     
     events = []
-    now = datetime.now().isoformat()
     
     # Check for new/extended streaks
     for key, new_s in new_streaks_map.items():
@@ -275,7 +572,7 @@ def detect_streak_events(
                 "prev_streak_len": 0,
                 "new_streak_len": new_s["streak_len"],
                 "last_game": new_s["last_game"],
-                "entity_type": "player",
+                "entity_type": new_s["entity_type"],
                 "sport": "NBA",
             })
         elif new_s["streak_len"] > old_s["streak_len"]:
@@ -290,7 +587,7 @@ def detect_streak_events(
                 "prev_streak_len": old_s["streak_len"],
                 "new_streak_len": new_s["streak_len"],
                 "last_game": new_s["last_game"],
-                "entity_type": "player",
+                "entity_type": new_s["entity_type"],
                 "sport": "NBA",
             })
     
@@ -307,7 +604,7 @@ def detect_streak_events(
                 "prev_streak_len": old_s["streak_len"],
                 "new_streak_len": 0,
                 "last_game": old_s["last_game"],
-                "entity_type": "player",
+                "entity_type": old_s["entity_type"],
                 "sport": "NBA",
             })
     
@@ -355,6 +652,8 @@ def main():
     """Main entry point."""
     start_time = datetime.now()
     print(f"=== NBA Data Refresh Started at {start_time.isoformat()} ===\n")
+    print(f"Season: {get_season_string()}")
+    print(f"Season start: {get_season_start_date().strftime('%Y-%m-%d')}\n")
     
     supabase = get_supabase_client()
     
@@ -367,17 +666,30 @@ def main():
     print()
     
     # 2. Fetch player game logs
-    player_games = fetch_player_game_logs(days_back=45)
+    player_games = fetch_player_game_logs()
     if player_games:
         upsert_data(supabase, "player_recent_games", player_games, ["player_id", "game_id"])
     
     print()
     
-    # 3. Calculate streaks
-    streaks = calculate_streaks(player_games)
+    # 3. Fetch team game logs
+    team_games = fetch_team_game_logs()
+    if team_games:
+        upsert_data(supabase, "team_recent_games", team_games, ["team_id", "game_id"])
     
-    # 4. Detect streak events
-    events = detect_streak_events(supabase, streaks)
+    print()
+    
+    # 4. Calculate player streaks
+    player_streaks = calculate_streaks(player_games)
+    
+    # 5. Calculate team streaks
+    team_streaks = calculate_team_streaks(team_games)
+    
+    # 6. Combine all streaks
+    all_streaks = player_streaks + team_streaks
+    
+    # 7. Detect streak events
+    events = detect_streak_events(supabase, all_streaks)
     if events:
         # Insert events (don't upsert, we want history)
         for event in events:
@@ -385,22 +697,24 @@ def main():
         supabase.table("streak_events").insert(events).execute()
         print(f"Inserted {len(events)} streak events")
     
-    # 5. Replace streaks table (delete old, insert new)
+    # 8. Replace streaks table (delete old, insert new)
     print("Replacing streaks table...")
     supabase.table("streaks").delete().eq("sport", "NBA").execute()
-    if streaks:
-        upsert_data(supabase, "streaks", streaks)
+    if all_streaks:
+        upsert_data(supabase, "streaks", all_streaks)
     
-    # 6. Update refresh status
-    update_refresh_status(supabase, 1)  # id=1 for players
+    # 9. Update refresh status
+    update_refresh_status(supabase, 1)  # id=1 for players/streaks
     
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     
     print(f"\n=== Refresh Complete in {duration:.1f}s ===")
-    print(f"Games: {len(games)}")
-    print(f"Player records: {len(player_games)}")
-    print(f"Active streaks: {len(streaks)}")
+    print(f"Games today: {len(games)}")
+    print(f"Player game records: {len(player_games)}")
+    print(f"Team game records: {len(team_games)}")
+    print(f"Player streaks: {len(player_streaks)}")
+    print(f"Team streaks: {len(team_streaks)}")
     print(f"Streak events: {len(events)}")
 
 
