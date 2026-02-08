@@ -1,23 +1,14 @@
 import { Link } from "react-router-dom";
-import { Lock, Zap, BarChart3, Trophy, Heart, TrendingUp, Users, Target } from "lucide-react";
+import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { PREMIUM_FEATURES_WITH_ICONS, PREMIUM_PRICING } from "@/lib/premiumFeatures";
 
 interface PremiumLockedScreenProps {
   isLoggedIn: boolean;
   className?: string;
 }
-
-const premiumFeatures = [
-  { icon: Users, text: "Player combos (PTS+AST, PTS+REB, PRA, etc.)" },
-  { icon: BarChart3, text: "Last 10 / 15 / 20 game splits" },
-  { icon: Zap, text: "Real-time streak alerts" },
-  { icon: Trophy, text: "Best plays of the day (AI ranked)" },
-  { icon: Heart, text: "Save favorite players" },
-  { icon: Target, text: "Double-Double & Triple-Double tracking" },
-  { icon: TrendingUp, text: "Historical matchup trends" },
-];
 
 export function PremiumLockedScreen({
   isLoggedIn,
@@ -56,7 +47,7 @@ export function PremiumLockedScreen({
         <div className="text-left space-y-3">
           <p className="text-sm font-semibold text-muted-foreground">What Premium unlocks:</p>
           <ul className="space-y-2">
-            {premiumFeatures.map((feature, index) => (
+            {PREMIUM_FEATURES_WITH_ICONS.map((feature, index) => (
               <li key={index} className="flex items-center gap-3 text-sm">
                 <feature.icon className="h-4 w-4 text-yellow-500 shrink-0" />
                 <span>{feature.text}</span>
@@ -67,10 +58,10 @@ export function PremiumLockedScreen({
 
         {/* Pricing */}
         <div className="bg-card border border-border rounded-lg p-4 space-y-2">
-          <p className="text-2xl font-bold">$10 <span className="text-base font-normal text-muted-foreground">/ month</span></p>
+          <p className="text-2xl font-bold">{PREMIUM_PRICING.monthly.display} <span className="text-base font-normal text-muted-foreground">/ {PREMIUM_PRICING.monthly.period}</span></p>
           <p className="text-sm text-muted-foreground">or</p>
           <p className="text-lg font-semibold">
-            $60 <span className="text-sm font-normal text-muted-foreground">/ year</span>
+            {PREMIUM_PRICING.yearly.display} <span className="text-sm font-normal text-muted-foreground">/ {PREMIUM_PRICING.yearly.period}</span>
             <Badge variant="secondary" className="ml-2 bg-green-500/20 text-green-400 border-green-500/30">
               save 50%
             </Badge>
