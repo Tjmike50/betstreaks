@@ -211,6 +211,23 @@ export default function AccountPage() {
                 <p className="text-sm text-muted-foreground break-all">
                   {user.email}
                 </p>
+                
+                {/* Tier Badge */}
+                {isPremiumLoading ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Checking...
+                  </span>
+                ) : isPremium ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
+                    <Check className="h-3 w-3" />
+                    Premium
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+                    Free Plan
+                  </span>
+                )}
               </div>
 
               <div className="space-y-3 pt-2">
