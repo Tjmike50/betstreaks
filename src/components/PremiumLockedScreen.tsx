@@ -10,13 +10,13 @@ interface PremiumLockedScreenProps {
 }
 
 const premiumFeatures = [
-  { icon: Zap, text: "Real-time streak alerts (PRA, PR, PA)" },
+  { icon: Users, text: "Player combos (PTS+AST, PTS+REB, PRA, etc.)" },
   { icon: BarChart3, text: "Last 10 / 15 / 20 game splits" },
+  { icon: Zap, text: "Real-time streak alerts" },
   { icon: Trophy, text: "Best plays of the day (AI ranked)" },
   { icon: Heart, text: "Save favorite players" },
-  { icon: TrendingUp, text: "Historical matchup trends" },
-  { icon: Users, text: "Player combo streaks" },
   { icon: Target, text: "Double-Double & Triple-Double tracking" },
+  { icon: TrendingUp, text: "Historical matchup trends" },
 ];
 
 export function PremiumLockedScreen({
