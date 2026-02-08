@@ -6,22 +6,36 @@ NBA player prop streak tracker for sports bettors.
 
 ### ✅ Core Fixes Completed
 - [x] **Centralized auth state** - AuthProvider ensures consistent user state across all pages
-- [x] **Today page reliability** - Filters out placeholder games, shows friendly empty states
+- [x] **Today page reliability** - Filters out placeholder games, shows friendly empty states with date
 - [x] **Data freshness** - 3-hour stale threshold, warning banner disables Best Bet badges
 - [x] **Best Bet tooltip** - Shows exact criteria: "Streak ≥3, Season ≥55% or L10 ≥60%, last game within 2 days"
-- [x] **Season label** - Displays "2024–25" consistently across the app
+- [x] **Season label** - Displays "2025–26" consistently across the app
+- [x] **Debug mode** - Add `?debug=1` to any page URL to see data diagnostics
 
 ### ✅ Premium Conversion
 - [x] Premium status indicator on Account page (Premium Active / Free)
 - [x] Stripe checkout flow wired via edge functions
+- [x] Webhook handles subscription.created/updated/deleted events
+- [x] Premium status auto-refreshes after successful checkout (`?success=1`)
 - [x] Consistent upgrade CTAs across premium-gated features
 
 ### ✅ Watchlist/Favorites UX
 - [x] Star toggle clearly shows Added/Remove state
-- [x] Supabase sync for logged-in users
+- [x] Supabase sync for logged-in users (`favorite_players` table)
 - [x] localStorage fallback for guests (max 5)
 - [x] "Logged in as {email}" displayed on gated pages
 - [x] Loading states during auth initialization
+
+### ✅ Share Functionality (Viral Loop)
+- [x] Share button on every streak card
+- [x] Native share on mobile, clipboard fallback on desktop
+- [x] Deep links to streak detail view
+- [x] "Link copied!" toast feedback
+
+### ✅ Analytics (Conversion Tracking)
+- [x] `analytics_events` table in Supabase
+- [x] Events tracked: view_premium_page, click_subscribe, checkout_success/cancel, add_favorite, share_streak
+- [x] Privacy-friendly (no PII logged)
 
 ### Known Limitations
 - **Alerts page**: Gated as "Coming Soon" for non-premium users
@@ -33,7 +47,9 @@ NBA player prop streak tracker for sports bettors.
 1. **Login persists across refresh** ✓
 2. **Favorites works while logged in** ✓
 3. **Today page always renders meaningful content** ✓
-4. **Premium status flips after Stripe checkout** (requires live Stripe test)
+4. **Premium status flips after Stripe checkout** ✓ (test with Stripe test mode)
+5. **Share button copies link to clipboard** ✓
+6. **Stale data banner appears when data >3h old** ✓
 
 ---
 
