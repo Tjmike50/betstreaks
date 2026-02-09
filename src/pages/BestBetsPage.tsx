@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronUp, Trophy } from "lucide-react";
 import type { Streak } from "@/types/streak";
 import { calculateBestBetsScore } from "@/types/streak";
+import { isNbaTeam } from "@/lib/nbaTeams";
 
 const STORAGE_KEY = "betstreaks-bestbets-filters";
 
@@ -89,6 +90,9 @@ export default function BestBetsPage() {
       if (error) throw error;
 
       let results = data as Streak[];
+
+      // Filter to NBA teams only (exclude G League)
+      results = results.filter((s) => isNbaTeam(s.team_abbr));
 
       // Filter by L10 hit %
       results = results.filter((s) => (s.last10_hit_pct ?? 0) >= filters.minL10Pct);

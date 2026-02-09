@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Streak, StreakFilters } from "@/types/streak";
 import { calculateBestBetsScore } from "@/types/streak";
+import { isNbaTeam } from "@/lib/nbaTeams";
 
 // Minimum thresholds to hide spam (when advanced mode is OFF)
 const MIN_THRESHOLDS: Record<string, number> = {
@@ -80,6 +81,9 @@ export function useStreaks(filters: StreakFilters) {
       if (error) throw error;
 
       let streaks = data as Streak[];
+
+      // Filter to NBA teams only (exclude G League)
+      streaks = streaks.filter((s) => isNbaTeam(s.team_abbr));
 
       // Apply threshold minimums unless advanced mode is on
       if (!filters.advanced) {
