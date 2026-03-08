@@ -209,10 +209,13 @@ CRITICAL RULES:
 - For "balanced" slips: mix high-confidence and moderate-value candidates
 - For "aggressive" slips: pick higher-value candidates even with more volatility
 - Provide reasoning that references the actual data (hit rates, averages, trends, matchup data)
-- Include the data context for each leg (hit rates, sample sizes, etc.)
+- Include rich data_context for each leg with hit rates, sample sizes, rest notes, and defensive context
 - Generate realistic estimated combined American odds
 - Always note sample size when citing matchup-specific data
 - Do NOT over-weight tiny sample sizes (< 3 games)
+- Reference rest/fatigue when it's meaningful (back-to-back, 3+ days rest)
+- Reference opponent defensive context when sample size >= 5 games
+- Use line-specific hit rates (not just averages) in reasoning
 
 SCORED CANDIDATES (ranked by confidence):
 ${JSON.stringify(candidateSummary, null, 1)}
