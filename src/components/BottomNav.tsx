@@ -6,8 +6,8 @@ import { useAlerts } from "@/hooks/useAlerts";
 const navItems = [
   { path: "/", label: "Streaks", icon: Flame },
   { path: "/today", label: "Today", icon: Calendar },
+  { path: "/ai-builder", label: "AI", icon: Brain },
   { path: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
-  { path: "/favorites", label: "Favorites", icon: Heart },
   { path: "/account", label: "Account", icon: User },
 ];
 
