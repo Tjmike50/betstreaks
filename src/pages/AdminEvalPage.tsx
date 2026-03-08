@@ -447,6 +447,42 @@ export default function AdminEvalPage() {
           </Card>
         )}
 
+        {/* Line Snapshot Status */}
+        {!snapLoading && snapStatus && (
+          <Card>
+            <CardContent className="pt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  Line Snapshots
+                </h3>
+                <Button size="sm" variant="ghost" onClick={handleRefreshSnap} disabled={refreshingSnap} className="h-7 text-xs">
+                  {refreshingSnap ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  Collect
+                </Button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-lg font-bold text-primary">{snapStatus.totalToday}</div>
+                  <div className="text-[10px] text-muted-foreground">Snapshots</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-primary">{snapStatus.uniqueProps}</div>
+                  <div className="text-[10px] text-muted-foreground">Props Tracked</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted-foreground mt-1">
+                    {snapStatus.lastRefresh
+                      ? `${snapStatus.hoursSince!.toFixed(1)}h ago`
+                      : "Never"}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">Last Run</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {isLoading ? (
           <div className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
         ) : (
