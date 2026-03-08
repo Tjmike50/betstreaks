@@ -71,6 +71,13 @@ interface MarketMovement {
   movement_note: string | null;
 }
 
+interface FactorAudit {
+  factor: string;
+  raw_value: number;
+  weight: number;
+  weighted_contribution: number;
+}
+
 interface ScoredProp {
   player_id: number;
   player_name: string;
@@ -127,6 +134,8 @@ interface ScoredProp {
   lineup_confidence: string | null;
   // Market movement
   market_movement: MarketMovement | null;
+  // Scoring audit
+  scoring_audit: FactorAudit[] | null;
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
