@@ -22,6 +22,7 @@ import FeedbackPage from "./pages/FeedbackPage";
 import AIBetBuilderPage from "./pages/AIBetBuilderPage";
 import BetAnalyzerPage from "./pages/BetAnalyzerPage";
 import SavedSlipsPage from "./pages/SavedSlipsPage";
+import AdminEvalPage from "./pages/AdminEvalPage";
 import NotFound from "./pages/NotFound";
 import { BottomNav } from "./components/BottomNav";
 
