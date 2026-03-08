@@ -1142,7 +1142,7 @@ serve(async (req) => {
         }).filter(id => id > 0);
 
         const availCtx = computeAvailabilityContext(
-          playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || []
+          playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || [], availabilityIsFresh
         );
 
         for (const threshold of thresholds) {
