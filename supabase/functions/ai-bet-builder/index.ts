@@ -63,8 +63,37 @@ serve(async (req) => {
       }
     }
 
-    // ===== PHASE 1: Call Prop Scoring Engine =====
-    console.log("Calling prop scoring engine...");
+    // ===== PHASE 1: Fetch live odds first (need matchups for scoring) =====
+    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
+    const featuredRes = await fetch(featuredUrl);
+    let gamesData: any[] = [];
+    if (featuredRes.ok) {
+      gamesData = await featuredRes.json();
+    } else {
+      console.error("Odds API error:", featuredRes.status);
+    }
+
+    // Extract matchups for scoring engine (map full names to abbreviations)
+    const NBA_TEAM_ABBRS: Record<string, string> = {
+      "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
+      "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
+      "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
+      "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
+      "Los Angeles Clippers": "LAC", "Los Angeles Lakers": "LAL", "Memphis Grizzlies": "MEM",
+      "Miami Heat": "MIA", "Milwaukee Bucks": "MIL", "Minnesota Timberwolves": "MIN",
+      "New Orleans Pelicans": "NOP", "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC",
+      "Orlando Magic": "ORL", "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX",
+      "Portland Trail Blazers": "POR", "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS",
+      "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
+    };
+
+    const matchups = gamesData.map((g: any) => ({
+      home_team: NBA_TEAM_ABBRS[g.home_team] || g.home_team,
+      away_team: NBA_TEAM_ABBRS[g.away_team] || g.away_team,
+    }));
+
+    // ===== PHASE 2: Call Prop Scoring Engine with matchup context =====
+    console.log(`Calling prop scoring engine with ${matchups.length} matchups...`);
     let scoredProps: any[] = [];
     try {
       const scoringRes = await fetch(`${SUPABASE_URL}/functions/v1/prop-scoring-engine`, {
@@ -73,7 +102,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
         },
-        body: JSON.stringify({ top_n: 50 }),
+        body: JSON.stringify({ top_n: 50, matchups }),
       });
 
       if (scoringRes.ok) {
@@ -85,16 +114,6 @@ serve(async (req) => {
       }
     } catch (e) {
       console.error("Scoring engine call failed:", e);
-    }
-
-    // ===== PHASE 2: Fetch live odds for market context =====
-    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
-    const featuredRes = await fetch(featuredUrl);
-    let gamesData: any[] = [];
-    if (featuredRes.ok) {
-      gamesData = await featuredRes.json();
-    } else {
-      console.error("Odds API error:", featuredRes.status);
     }
 
     // Fetch player props from odds API for market lines
