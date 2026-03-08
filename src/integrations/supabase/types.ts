@@ -309,6 +309,117 @@ export type Database = {
         }
         Relationships: []
       }
+      player_prop_scores: {
+        Row: {
+          away_avg: number | null
+          away_games: number | null
+          away_hit_rate: number | null
+          confidence_score: number | null
+          consistency_score: number | null
+          game_date: string
+          home_avg: number | null
+          home_away: string | null
+          home_games: number | null
+          home_hit_rate: number | null
+          id: string
+          last10_avg: number | null
+          last10_hit_rate: number | null
+          last15_avg: number | null
+          last15_hit_rate: number | null
+          last3_avg: number | null
+          last5_avg: number | null
+          last5_hit_rate: number | null
+          opponent_abbr: string | null
+          player_id: number
+          player_name: string
+          reason_tags: Json | null
+          scored_at: string
+          season_avg: number | null
+          season_hit_rate: number | null
+          stat_type: string
+          team_abbr: string | null
+          threshold: number
+          total_games: number | null
+          value_score: number | null
+          volatility_score: number | null
+          vs_opponent_avg: number | null
+          vs_opponent_games: number | null
+          vs_opponent_hit_rate: number | null
+        }
+        Insert: {
+          away_avg?: number | null
+          away_games?: number | null
+          away_hit_rate?: number | null
+          confidence_score?: number | null
+          consistency_score?: number | null
+          game_date?: string
+          home_avg?: number | null
+          home_away?: string | null
+          home_games?: number | null
+          home_hit_rate?: number | null
+          id?: string
+          last10_avg?: number | null
+          last10_hit_rate?: number | null
+          last15_avg?: number | null
+          last15_hit_rate?: number | null
+          last3_avg?: number | null
+          last5_avg?: number | null
+          last5_hit_rate?: number | null
+          opponent_abbr?: string | null
+          player_id: number
+          player_name: string
+          reason_tags?: Json | null
+          scored_at?: string
+          season_avg?: number | null
+          season_hit_rate?: number | null
+          stat_type: string
+          team_abbr?: string | null
+          threshold: number
+          total_games?: number | null
+          value_score?: number | null
+          volatility_score?: number | null
+          vs_opponent_avg?: number | null
+          vs_opponent_games?: number | null
+          vs_opponent_hit_rate?: number | null
+        }
+        Update: {
+          away_avg?: number | null
+          away_games?: number | null
+          away_hit_rate?: number | null
+          confidence_score?: number | null
+          consistency_score?: number | null
+          game_date?: string
+          home_avg?: number | null
+          home_away?: string | null
+          home_games?: number | null
+          home_hit_rate?: number | null
+          id?: string
+          last10_avg?: number | null
+          last10_hit_rate?: number | null
+          last15_avg?: number | null
+          last15_hit_rate?: number | null
+          last3_avg?: number | null
+          last5_avg?: number | null
+          last5_hit_rate?: number | null
+          opponent_abbr?: string | null
+          player_id?: number
+          player_name?: string
+          reason_tags?: Json | null
+          scored_at?: string
+          season_avg?: number | null
+          season_hit_rate?: number | null
+          stat_type?: string
+          team_abbr?: string | null
+          threshold?: number
+          total_games?: number | null
+          value_score?: number | null
+          volatility_score?: number | null
+          vs_opponent_avg?: number | null
+          vs_opponent_games?: number | null
+          vs_opponent_hit_rate?: number | null
+        }
+        Relationships: []
+      }
       player_recent_games: {
         Row: {
           ast: number | null
