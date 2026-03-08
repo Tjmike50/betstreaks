@@ -353,9 +353,11 @@ serve(async (req) => {
     for (const [pidStr, logs] of Object.entries(playerLogs)) {
       const pid = Number(pidStr);
       const team = logs[0]?.team_abbr;
-      if (!team || !teamMatchups[team]) continue;
+      if (!team) continue;
 
-      const { opponent, homeAway } = teamMatchups[team];
+      const matchup = teamMatchups[team];
+      const opponent = matchup?.opponent || null;
+      const homeAway = matchup?.homeAway || "unknown";
 
       // Sort by game_date desc (should already be, but ensure)
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
