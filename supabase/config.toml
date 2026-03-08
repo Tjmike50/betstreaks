@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.collect-line-snapshots]
 verify_jwt = false
+
+[functions.scoring-analysis]
+verify_jwt = false

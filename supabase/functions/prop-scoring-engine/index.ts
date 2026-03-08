@@ -919,6 +919,7 @@ function scoreProp(
     availability_notes: availCtx.availability_notes,
     lineup_confidence: availCtx.lineup_confidence,
     market_movement: marketMovement,
+    scoring_audit: scoringAudit,
   };
 }
 
