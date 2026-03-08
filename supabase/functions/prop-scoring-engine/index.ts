@@ -425,8 +425,9 @@ serve(async (req) => {
       JSON.stringify({
         scored_props: topProps,
         total_candidates: allScored.length,
-        games_today: games.length,
+        teams_matched: teamsPlaying.length,
         players_analyzed: Object.keys(playerLogs).length,
+        scoring_all_players: scoringAllPlayers,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
