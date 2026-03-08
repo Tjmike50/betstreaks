@@ -248,6 +248,56 @@ export default function AdminEvalPage() {
     enabled: isAdmin,
   });
 
+  // Line snapshot status query
+  const { data: snapStatus, isLoading: snapLoading, refetch: refetchSnap } = useQuery({
+    queryKey: ["snap-status", todayStr],
+    queryFn: async () => {
+      const { count: totalToday } = await supabase
+        .from("line_snapshots")
+        .select("id", { count: "exact", head: true })
+        .eq("game_date", todayStr);
+
+      const { data: uniqueProps } = await supabase
+        .from("line_snapshots")
+        .select("player_name, stat_type")
+        .eq("game_date", todayStr);
+
+      const uniqueKeys = new Set((uniqueProps || []).map(p => `${p.player_name}|${p.stat_type}`));
+
+      const { data: refreshRow } = await supabase
+        .from("refresh_status")
+        .select("last_run")
+        .eq("id", 3)
+        .maybeSingle();
+
+      const lastRefresh = refreshRow?.last_run ? new Date(refreshRow.last_run) : null;
+      const hoursSince = lastRefresh ? (Date.now() - lastRefresh.getTime()) / (1000 * 60 * 60) : null;
+
+      return {
+        totalToday: totalToday || 0,
+        uniqueProps: uniqueKeys.size,
+        lastRefresh,
+        hoursSince,
+      };
+    },
+    enabled: isAdmin,
+  });
+
+  const [refreshingSnap, setRefreshingSnap] = useState(false);
+  const handleRefreshSnap = async () => {
+    setRefreshingSnap(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("collect-line-snapshots", { body: {} });
+      if (error) throw error;
+      toast({ title: "Snapshots collected", description: `${data.new_snapshots} new, ${data.skipped_dupes} dupes skipped` });
+      refetchSnap();
+    } catch (e) {
+      toast({ title: "Snapshot collection failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRefreshingSnap(false);
+    }
+  };
+
   const handleRefreshAvail = async () => {
     setRefreshingAvail(true);
     try {
@@ -393,6 +443,42 @@ export default function AdminEvalPage() {
                   Missing: {availStatus.teamsMissing.join(", ")}
                 </p>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Line Snapshot Status */}
+        {!snapLoading && snapStatus && (
+          <Card>
+            <CardContent className="pt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  Line Snapshots
+                </h3>
+                <Button size="sm" variant="ghost" onClick={handleRefreshSnap} disabled={refreshingSnap} className="h-7 text-xs">
+                  {refreshingSnap ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  Collect
+                </Button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-lg font-bold text-primary">{snapStatus.totalToday}</div>
+                  <div className="text-[10px] text-muted-foreground">Snapshots</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-primary">{snapStatus.uniqueProps}</div>
+                  <div className="text-[10px] text-muted-foreground">Props Tracked</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted-foreground mt-1">
+                    {snapStatus.lastRefresh
+                      ? `${snapStatus.hoursSince!.toFixed(1)}h ago`
+                      : "Never"}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">Last Run</div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}

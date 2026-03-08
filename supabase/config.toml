@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.refresh-availability]
 verify_jwt = false
+
+[functions.collect-line-snapshots]
+verify_jwt = false
