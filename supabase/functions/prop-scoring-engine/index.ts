@@ -61,6 +61,16 @@ interface AvailabilityContext {
   key_teammate_statuses: { name: string; status: string }[];
 }
 
+interface MarketMovement {
+  opening_line: number | null;
+  current_line: number | null;
+  line_moved: "up" | "down" | "unchanged" | null;
+  opening_odds: string | null;
+  current_odds: string | null;
+  odds_improved: boolean | null;
+  movement_note: string | null;
+}
+
 interface ScoredProp {
   player_id: number;
   player_name: string;
@@ -115,6 +125,8 @@ interface ScoredProp {
   player_status: string | null;
   availability_notes: string[];
   lineup_confidence: string | null;
+  // Market movement
+  market_movement: MarketMovement | null;
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
