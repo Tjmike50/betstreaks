@@ -94,6 +94,10 @@ interface ScoredProp {
   role_label: string | null;
   key_teammates_out: string[];
   teammate_notes: string[];
+  // Availability context
+  player_status: string | null;
+  availability_notes: string[];
+  lineup_confidence: string | null;
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
