@@ -17,6 +17,8 @@ export interface LegDataContext {
   teammate_note?: string | null;
   minutes_trend?: "up" | "down" | "stable" | null;
   role_label?: "starter" | "bench" | null;
+  availability_note?: string | null;
+  lineup_confidence?: "high" | "medium" | "low" | null;
 }
 
 export interface AISlipLeg {
