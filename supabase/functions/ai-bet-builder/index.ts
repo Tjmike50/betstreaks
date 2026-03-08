@@ -200,6 +200,10 @@ serve(async (req) => {
       role_label: p.role_label,
       key_teammates_out: p.key_teammates_out || [],
       teammate_notes: p.teammate_notes || [],
+      // Availability context
+      player_status: p.player_status,
+      availability_notes: p.availability_notes || [],
+      lineup_confidence: p.lineup_confidence,
       tags: p.reason_tags,
       total_games: p.total_games,
     }));
