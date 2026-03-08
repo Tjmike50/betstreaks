@@ -248,6 +248,20 @@ export default function AdminEvalPage() {
     enabled: isAdmin,
   });
 
+  const handleRefreshAvail = async () => {
+    setRefreshingAvail(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("refresh-availability", { body: {} });
+      if (error) throw error;
+      toast({ title: "Availability refreshed", description: `${data.records} records for ${data.teams_covered}/${data.teams_playing} teams` });
+      refetchAvail();
+    } catch (e) {
+      toast({ title: "Availability refresh failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRefreshingAvail(false);
+    }
+  };
+
   const handleGrade = async () => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
