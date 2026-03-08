@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff } from "lucide-react";
+import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff, TrendingUp, BarChart3, Activity, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAIBetBuilder } from "@/hooks/useAIBetBuilder";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { useAuth } from "@/contexts/AuthContext";
-import type { AISlip } from "@/types/aiSlip";
+import type { AISlip, LegDataContext } from "@/types/aiSlip";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -44,6 +44,86 @@ function getRiskIcon(risk: string) {
     case "aggressive": return Zap;
     default: return Target;
   }
+}
+
+function getVolatilityColor(label: string | null | undefined) {
+  switch (label) {
+    case "low": return "text-green-400";
+    case "medium": return "text-yellow-400";
+    case "high": return "text-red-400";
+    default: return "text-muted-foreground";
+  }
+}
+
+function getConfidenceColor(score: number | null | undefined) {
+  if (score == null) return "text-muted-foreground";
+  if (score >= 70) return "text-green-400";
+  if (score >= 45) return "text-yellow-400";
+  return "text-red-400";
+}
+
+function DataContextChips({ ctx }: { ctx: LegDataContext }) {
+  const chips: { label: string; color: string }[] = [];
+
+  if (ctx.last10_hit_rate) chips.push({ label: `L10: ${ctx.last10_hit_rate}`, color: "bg-primary/10 text-primary" });
+  if (ctx.vs_opponent) chips.push({ label: `vs OPP: ${ctx.vs_opponent}`, color: "bg-blue-500/10 text-blue-400" });
+  if (ctx.home_away_split) chips.push({ label: ctx.home_away_split, color: "bg-purple-500/10 text-purple-400" });
+
+  if (ctx.tags?.length) {
+    for (const tag of ctx.tags.slice(0, 2)) {
+      const label = tag.replace(/_/g, " ");
+      const color = tag.includes("hot") || tag.includes("consistent") || tag.includes("strong")
+        ? "bg-green-500/10 text-green-400"
+        : tag.includes("cold") || tag.includes("volatile") || tag.includes("weak")
+        ? "bg-red-500/10 text-red-400"
+        : "bg-muted text-muted-foreground";
+      chips.push({ label, color });
+    }
+  }
+
+  if (chips.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1 mt-1.5">
+      {chips.map((c, i) => (
+        <span key={i} className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${c.color}`}>
+          {c.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function LegDataBar({ ctx }: { ctx: LegDataContext }) {
+  return (
+    <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-border/20">
+      <div className="text-center">
+        <div className={`text-xs font-bold ${getConfidenceColor(ctx.confidence_score)}`}>
+          {ctx.confidence_score != null ? ctx.confidence_score : "—"}
+        </div>
+        <div className="text-[9px] text-muted-foreground">Confidence</div>
+      </div>
+      <div className="text-center">
+        <div className="text-xs font-bold text-foreground">
+          {ctx.season_avg != null ? ctx.season_avg : "—"}
+        </div>
+        <div className="text-[9px] text-muted-foreground">Szn Avg</div>
+      </div>
+      <div className="text-center">
+        <div className={`text-xs font-bold ${getVolatilityColor(ctx.volatility_label)}`}>
+          {ctx.volatility_label || "—"}
+        </div>
+        <div className="text-[9px] text-muted-foreground">Volatility</div>
+      </div>
+      {ctx.sample_size != null && (
+        <div className="col-span-3 text-center">
+          <span className="text-[9px] text-muted-foreground">
+            {ctx.sample_size} game sample
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
@@ -84,7 +164,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
 
   return (
     <Card className={`overflow-hidden transition-all ${getRiskColor(slip.risk_label)}`}>
-      {/* Header bar */}
+      {/* Header */}
       <div className="px-4 pt-4 pb-3 space-y-2">
         <div className="flex items-start justify-between gap-2">
           <div className="space-y-1.5 flex-1 min-w-0">
@@ -109,7 +189,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
       {/* Legs */}
       <CardContent className="px-4 pb-4 pt-0 space-y-2">
         {slip.legs.map((leg, i) => (
-          <div key={i} className="bg-card/80 border border-border/30 rounded-lg p-3 space-y-1.5">
+          <div key={i} className="bg-card/80 border border-border/30 rounded-lg p-3 space-y-1">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 {leg.team_abbr && (
@@ -129,6 +209,12 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
             {leg.reasoning && (
               <p className="text-[11px] text-muted-foreground leading-relaxed">{leg.reasoning}</p>
             )}
+
+            {/* Data context chips */}
+            {leg.data_context && <DataContextChips ctx={leg.data_context} />}
+
+            {/* Data context bar */}
+            {leg.data_context && <LegDataBar ctx={leg.data_context} />}
           </div>
         ))}
 
@@ -163,18 +249,21 @@ function BuilderLoadingState() {
           <div className="absolute inset-0 rounded-full border-2 border-primary border-t-transparent animate-spin" />
           <Brain className="absolute inset-0 m-auto h-6 w-6 text-primary" />
         </div>
-        <p className="text-sm font-medium">Building your slips...</p>
-        <p className="text-xs text-muted-foreground">Analyzing live odds & player data</p>
+        <p className="text-sm font-medium">Scoring candidates & building slips...</p>
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Analyzing player game logs & matchup data</p>
+          <p className="text-xs text-muted-foreground">Computing hit rates, trends & confidence scores</p>
+          <p className="text-xs text-muted-foreground">Assembling data-driven slips with live odds</p>
+        </div>
       </div>
-      {/* Skeleton cards */}
       {[1, 2].map((i) => (
         <Card key={i} className="border-border/30 animate-pulse">
           <CardContent className="pt-4 space-y-3">
             <div className="h-5 bg-muted rounded w-2/3" />
             <div className="h-3 bg-muted rounded w-1/3" />
             <div className="space-y-2">
-              <div className="h-16 bg-muted/50 rounded-lg" />
-              <div className="h-16 bg-muted/50 rounded-lg" />
+              <div className="h-20 bg-muted/50 rounded-lg" />
+              <div className="h-20 bg-muted/50 rounded-lg" />
             </div>
           </CardContent>
         </Card>
@@ -209,8 +298,15 @@ export default function AIBetBuilderPage() {
           </div>
           <h1 className="text-2xl font-bold">Build Your Slip</h1>
           <p className="text-sm text-muted-foreground">
-            Tell us what you want and AI builds it using live odds
+            Data-driven picks powered by historical scoring analysis
           </p>
+        </div>
+
+        {/* Data engine badge */}
+        <div className="flex items-center justify-center gap-4 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1"><BarChart3 className="h-3 w-3" /> Hit Rate Engine</span>
+          <span className="flex items-center gap-1"><TrendingUp className="h-3 w-3" /> Trend Analysis</span>
+          <span className="flex items-center gap-1"><Users className="h-3 w-3" /> Matchup Data</span>
         </div>
 
         {/* Quick Prompts */}
@@ -244,7 +340,7 @@ export default function AIBetBuilderPage() {
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Building slips...
+                Scoring & building...
               </>
             ) : (
               <>
@@ -312,7 +408,7 @@ export default function AIBetBuilderPage() {
           </div>
         )}
 
-        {/* Empty state after generation with no results */}
+        {/* Empty state */}
         {!isLoading && !error && slips.length === 0 && prompt && (
           <div className="text-center py-8 text-muted-foreground">
             <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -322,7 +418,7 @@ export default function AIBetBuilderPage() {
 
         {/* Disclaimer */}
         <p className="text-[10px] text-muted-foreground text-center px-4">
-          AI-generated picks are data-driven suggestions, not guarantees. Always gamble responsibly.
+          AI picks are data-driven suggestions based on historical scoring analysis, not guarantees. Always gamble responsibly.
         </p>
       </div>
     </div>
