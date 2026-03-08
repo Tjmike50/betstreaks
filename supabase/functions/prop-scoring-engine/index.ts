@@ -512,6 +512,12 @@ function computeAvailabilityContext(
     }
   }
 
+  // If availability data is stale/missing, reduce lineup confidence and add note
+  if (!availabilityIsFresh && result.lineup_confidence === "high") {
+    result.lineup_confidence = "medium";
+    result.availability_notes.push("Availability data may be stale");
+  }
+
   // Check key teammate availability
   for (const tmId of keyTeammateIds) {
     const tmExplicit = availabilityMap.get(tmId);
