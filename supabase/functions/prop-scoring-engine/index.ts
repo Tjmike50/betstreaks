@@ -794,6 +794,14 @@ function scoreProp(
   if (allValues.length >= 15) reasonTags.push("large_sample");
   if (allValues.length < 8) reasonTags.push("small_sample");
 
+  // Availability reason tags
+  for (const note of availCtx.availability_notes) {
+    reasonTags.push(note);
+  }
+  if (availCtx.lineup_confidence === "low") {
+    reasonTags.push("uncertain_lineup");
+  }
+
   return {
     player_id: games[0].player_id,
     player_name: games[0].player_name || "",
@@ -843,6 +851,9 @@ function scoreProp(
     role_label: teammateCtx.role_label,
     key_teammates_out: teammateCtx.key_teammates_out,
     teammate_notes: teammateCtx.teammate_notes,
+    player_status: availCtx.player_status,
+    availability_notes: availCtx.availability_notes,
+    lineup_confidence: availCtx.lineup_confidence,
   };
 }
 
