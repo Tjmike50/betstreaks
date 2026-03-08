@@ -498,6 +498,78 @@ export type Database = {
         }
         Relationships: []
       }
+      prop_outcomes: {
+        Row: {
+          actual_value: number | null
+          confidence_score: number | null
+          consistency_score: number | null
+          created_at: string
+          game_date: string
+          graded_at: string | null
+          hit: boolean | null
+          home_away: string | null
+          id: string
+          line_hit_rate_l10: number | null
+          line_hit_rate_season: number | null
+          opponent_abbr: string | null
+          player_id: number
+          player_name: string
+          reason_tags: Json | null
+          source: string | null
+          stat_type: string
+          team_abbr: string | null
+          threshold: number
+          value_score: number | null
+          volatility_score: number | null
+        }
+        Insert: {
+          actual_value?: number | null
+          confidence_score?: number | null
+          consistency_score?: number | null
+          created_at?: string
+          game_date: string
+          graded_at?: string | null
+          hit?: boolean | null
+          home_away?: string | null
+          id?: string
+          line_hit_rate_l10?: number | null
+          line_hit_rate_season?: number | null
+          opponent_abbr?: string | null
+          player_id: number
+          player_name: string
+          reason_tags?: Json | null
+          source?: string | null
+          stat_type: string
+          team_abbr?: string | null
+          threshold: number
+          value_score?: number | null
+          volatility_score?: number | null
+        }
+        Update: {
+          actual_value?: number | null
+          confidence_score?: number | null
+          consistency_score?: number | null
+          created_at?: string
+          game_date?: string
+          graded_at?: string | null
+          hit?: boolean | null
+          home_away?: string | null
+          id?: string
+          line_hit_rate_l10?: number | null
+          line_hit_rate_season?: number | null
+          opponent_abbr?: string | null
+          player_id?: number
+          player_name?: string
+          reason_tags?: Json | null
+          source?: string | null
+          stat_type?: string
+          team_abbr?: string | null
+          threshold?: number
+          value_score?: number | null
+          volatility_score?: number | null
+        }
+        Relationships: []
+      }
       refresh_status: {
         Row: {
           id: number
@@ -538,6 +610,115 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "saved_slips_slip_id_fkey"
+            columns: ["slip_id"]
+            isOneToOne: false
+            referencedRelation: "ai_slips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      slip_leg_outcomes: {
+        Row: {
+          actual_value: number | null
+          confidence_score: number | null
+          created_at: string
+          hit: boolean | null
+          id: string
+          leg_order: number
+          pick: string
+          player_name: string
+          slip_outcome_id: string
+          stat_type: string
+          team_abbr: string | null
+          threshold: number
+        }
+        Insert: {
+          actual_value?: number | null
+          confidence_score?: number | null
+          created_at?: string
+          hit?: boolean | null
+          id?: string
+          leg_order?: number
+          pick: string
+          player_name: string
+          slip_outcome_id: string
+          stat_type: string
+          team_abbr?: string | null
+          threshold: number
+        }
+        Update: {
+          actual_value?: number | null
+          confidence_score?: number | null
+          created_at?: string
+          hit?: boolean | null
+          id?: string
+          leg_order?: number
+          pick?: string
+          player_name?: string
+          slip_outcome_id?: string
+          stat_type?: string
+          team_abbr?: string | null
+          threshold?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "slip_leg_outcomes_slip_outcome_id_fkey"
+            columns: ["slip_outcome_id"]
+            isOneToOne: false
+            referencedRelation: "slip_outcomes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      slip_outcomes: {
+        Row: {
+          created_at: string
+          estimated_odds: string | null
+          first_failed_leg: number | null
+          game_date: string
+          graded_at: string | null
+          id: string
+          leg_count: number
+          legs_hit: number | null
+          prompt: string | null
+          risk_label: string
+          slip_hit: boolean | null
+          slip_id: string | null
+          slip_name: string
+        }
+        Insert: {
+          created_at?: string
+          estimated_odds?: string | null
+          first_failed_leg?: number | null
+          game_date?: string
+          graded_at?: string | null
+          id?: string
+          leg_count?: number
+          legs_hit?: number | null
+          prompt?: string | null
+          risk_label: string
+          slip_hit?: boolean | null
+          slip_id?: string | null
+          slip_name: string
+        }
+        Update: {
+          created_at?: string
+          estimated_odds?: string | null
+          first_failed_leg?: number | null
+          game_date?: string
+          graded_at?: string | null
+          id?: string
+          leg_count?: number
+          legs_hit?: number | null
+          prompt?: string | null
+          risk_label?: string
+          slip_hit?: boolean | null
+          slip_id?: string | null
+          slip_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "slip_outcomes_slip_id_fkey"
             columns: ["slip_id"]
             isOneToOne: false
             referencedRelation: "ai_slips"
