@@ -54,6 +54,7 @@ const App = () => (
             <Route path="/analyzer" element={<BetAnalyzerPage />} />
             <Route path="/saved-slips" element={<SavedSlipsPage />} />
             <Route path="/player/:playerId" element={<PlayerPage />} />
+            <Route path="/admin/eval" element={<AdminEvalPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
