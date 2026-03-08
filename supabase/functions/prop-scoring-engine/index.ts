@@ -1050,19 +1050,29 @@ serve(async (req) => {
       teamRosters[team] = buildTeamGameRosters(playerLogs, team);
     }
 
-    // 4b. Fetch player availability data
+    // 4b. Fetch player availability data + freshness check
     const availabilityMap = new Map<number, PlayerAvailability>();
+    let availabilityIsFresh = false;
     {
       const { data: avail } = await supabase
         .from("player_availability")
-        .select("player_id, player_name, team_abbr, status, reason, source, confidence")
+        .select("player_id, player_name, team_abbr, status, reason, source, confidence, updated_at")
         .eq("game_date", today);
-      if (avail) {
+      if (avail && avail.length > 0) {
         for (const a of avail) {
           availabilityMap.set(a.player_id, a as PlayerAvailability);
         }
+        // Check freshness: if most recent update is within 6 hours, consider fresh
+        const mostRecent = avail.reduce((latest, a) => {
+          const t = new Date(a.updated_at).getTime();
+          return t > latest ? t : latest;
+        }, 0);
+        const hoursSinceUpdate = (Date.now() - mostRecent) / (1000 * 60 * 60);
+        availabilityIsFresh = hoursSinceUpdate <= 6;
+        console.log(`Availability: ${avail.length} records, ${hoursSinceUpdate.toFixed(1)}h old, fresh=${availabilityIsFresh}`);
+      } else {
+        console.log(`No availability data for ${today} — will derive from logs with reduced confidence`);
       }
-      console.log(`Loaded ${availabilityMap.size} explicit availability records for ${today}`);
     }
 
     // 4c. Build team game date sets for availability derivation
