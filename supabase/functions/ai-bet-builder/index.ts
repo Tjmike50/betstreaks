@@ -254,6 +254,8 @@ serve(async (req) => {
       player_status: p.player_status,
       availability_notes: p.availability_notes || [],
       lineup_confidence: p.lineup_confidence,
+      // Market movement context
+      market_movement: p.market_movement || null,
       tags: p.reason_tags,
       total_games: p.total_games,
     }));
