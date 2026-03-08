@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Plus, Trash2, Loader2, ShieldCheck, AlertTriangle, TrendingUp, TrendingDown, ArrowRight } from "lucide-react";
+import { Search, Plus, Trash2, Loader2, ShieldCheck, AlertTriangle, TrendingUp, TrendingDown, Brain, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,29 +12,55 @@ import type { AnalyzerLegInput, BetAnalysis } from "@/types/aiSlip";
 
 const STAT_TYPES = ["Points", "Rebounds", "Assists", "3-Pointers", "Spread", "Total", "Moneyline"];
 
-function getGradeColor(grade: string) {
+function getGradeStyle(grade: string) {
   switch (grade) {
-    case "A": return "bg-green-500/20 text-green-400";
-    case "B": return "bg-blue-500/20 text-blue-400";
-    case "C": return "bg-yellow-500/20 text-yellow-400";
-    case "D": return "bg-orange-500/20 text-orange-400";
-    case "F": return "bg-red-500/20 text-red-400";
-    default: return "bg-muted text-muted-foreground";
+    case "A": return { bg: "bg-green-500/20 border-green-500/40", text: "text-green-400" };
+    case "B": return { bg: "bg-blue-500/20 border-blue-500/40", text: "text-blue-400" };
+    case "C": return { bg: "bg-yellow-500/20 border-yellow-500/40", text: "text-yellow-400" };
+    case "D": return { bg: "bg-orange-500/20 border-orange-500/40", text: "text-orange-400" };
+    case "F": return { bg: "bg-red-500/20 border-red-500/40", text: "text-red-400" };
+    default: return { bg: "bg-muted", text: "text-muted-foreground" };
   }
 }
 
-function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: AnalyzerLegInput[] }) {
+function AnalyzerLoadingState() {
   return (
     <div className="space-y-4">
-      {/* Grade */}
-      <Card>
+      <div className="text-center py-8 space-y-3">
+        <div className="relative mx-auto w-16 h-16">
+          <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
+          <div className="absolute inset-0 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <BarChart3 className="absolute inset-0 m-auto h-6 w-6 text-primary" />
+        </div>
+        <p className="text-sm font-medium">Analyzing your slip...</p>
+        <p className="text-xs text-muted-foreground">Grading legs, checking correlations</p>
+      </div>
+      <div className="space-y-3 animate-pulse">
+        <div className="h-24 bg-muted/50 rounded-lg" />
+        <div className="grid grid-cols-2 gap-3">
+          <div className="h-20 bg-muted/50 rounded-lg" />
+          <div className="h-20 bg-muted/50 rounded-lg" />
+        </div>
+        <div className="h-32 bg-muted/50 rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
+function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: AnalyzerLegInput[] }) {
+  const gradeStyle = getGradeStyle(analysis.overall_grade);
+
+  return (
+    <div className="space-y-3">
+      {/* Grade Card */}
+      <Card className={`border ${gradeStyle.bg}`}>
         <CardContent className="pt-4">
           <div className="flex items-center gap-4">
-            <div className={`text-4xl font-black w-16 h-16 rounded-xl flex items-center justify-center ${getGradeColor(analysis.overall_grade)}`}>
+            <div className={`text-4xl font-black w-16 h-16 rounded-xl flex items-center justify-center border ${gradeStyle.bg} ${gradeStyle.text}`}>
               {analysis.overall_grade}
             </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
+            <div className="flex-1 space-y-1.5">
+              <div className="flex items-center gap-2">
                 <Badge variant="outline" className={
                   analysis.risk_label === "safe" ? "bg-green-500/20 text-green-400 border-green-500/30" :
                   analysis.risk_label === "balanced" ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
@@ -42,8 +68,9 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
                 }>
                   {analysis.risk_label}
                 </Badge>
+                <span className="text-xs text-muted-foreground font-mono">{legs.length} legs</span>
               </div>
-              <p className="text-sm text-muted-foreground">{analysis.overall_reasoning}</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{analysis.overall_reasoning}</p>
             </div>
           </div>
         </CardContent>
@@ -52,27 +79,27 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
       {/* Strongest & Weakest */}
       <div className="grid grid-cols-2 gap-3">
         <Card className="border-green-500/20">
-          <CardContent className="pt-4 space-y-1">
-            <div className="flex items-center gap-1.5 text-green-400 text-xs font-semibold">
+          <CardContent className="pt-3 pb-3 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-green-400 text-[11px] font-bold uppercase tracking-wide">
               <TrendingUp className="h-3.5 w-3.5" />
-              Strongest Leg
+              Strongest
             </div>
-            <p className="text-sm font-medium">
+            <p className="text-sm font-semibold leading-tight">
               {legs[analysis.strongest_leg?.leg_index]?.player_name || "—"}
             </p>
-            <p className="text-xs text-muted-foreground">{analysis.strongest_leg?.reasoning}</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">{analysis.strongest_leg?.reasoning}</p>
           </CardContent>
         </Card>
         <Card className="border-red-500/20">
-          <CardContent className="pt-4 space-y-1">
-            <div className="flex items-center gap-1.5 text-red-400 text-xs font-semibold">
+          <CardContent className="pt-3 pb-3 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-red-400 text-[11px] font-bold uppercase tracking-wide">
               <TrendingDown className="h-3.5 w-3.5" />
-              Weakest Leg
+              Weakest
             </div>
-            <p className="text-sm font-medium">
+            <p className="text-sm font-semibold leading-tight">
               {legs[analysis.weakest_leg?.leg_index]?.player_name || "—"}
             </p>
-            <p className="text-xs text-muted-foreground">{analysis.weakest_leg?.reasoning}</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">{analysis.weakest_leg?.reasoning}</p>
           </CardContent>
         </Card>
       </div>
@@ -80,13 +107,13 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
       {/* Correlation Warnings */}
       {analysis.correlation_warnings && analysis.correlation_warnings.length > 0 && (
         <Card className="border-yellow-500/20 bg-yellow-500/5">
-          <CardContent className="pt-4 space-y-2">
-            <div className="flex items-center gap-1.5 text-yellow-400 text-xs font-semibold">
+          <CardContent className="pt-3 pb-3 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-yellow-400 text-[11px] font-bold uppercase tracking-wide">
               <AlertTriangle className="h-3.5 w-3.5" />
               Correlation Warnings
             </div>
             {analysis.correlation_warnings.map((w, i) => (
-              <p key={i} className="text-xs text-muted-foreground">• {w}</p>
+              <p key={i} className="text-[11px] text-muted-foreground leading-relaxed">• {w}</p>
             ))}
           </CardContent>
         </Card>
@@ -94,19 +121,20 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
 
       {/* Rebuilds */}
       {analysis.safer_rebuild && (
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="border-green-500/20">
+          <CardHeader className="pb-1.5 pt-3 px-4">
             <CardTitle className="text-sm flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-green-400" />
-              Safer Rebuild
-              <span className="font-mono text-primary">{analysis.safer_rebuild.estimated_odds}</span>
+              <span>Safer Rebuild</span>
+              <span className="font-mono text-primary text-xs">{analysis.safer_rebuild.estimated_odds}</span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-xs text-muted-foreground">{analysis.safer_rebuild.reasoning}</p>
+          <CardContent className="px-4 pb-3 space-y-2">
+            <p className="text-[11px] text-muted-foreground">{analysis.safer_rebuild.reasoning}</p>
             {analysis.safer_rebuild.legs?.map((leg, i) => (
-              <div key={i} className="text-xs bg-secondary/50 rounded px-2 py-1.5">
-                <span className="font-medium">{leg.player_name}</span> — {leg.line} {leg.stat_type}
+              <div key={i} className="text-xs bg-secondary/50 rounded-lg px-3 py-2 flex items-center justify-between">
+                <span><span className="font-semibold">{leg.player_name}</span> — {leg.line} {leg.stat_type}</span>
+                {leg.odds && <span className="font-mono text-muted-foreground text-[10px]">{leg.odds}</span>}
               </div>
             ))}
           </CardContent>
@@ -114,19 +142,20 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
       )}
 
       {analysis.aggressive_rebuild && (
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="border-red-500/20">
+          <CardHeader className="pb-1.5 pt-3 px-4">
             <CardTitle className="text-sm flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-red-400" />
-              Higher Payout Version
-              <span className="font-mono text-primary">{analysis.aggressive_rebuild.estimated_odds}</span>
+              <span>Higher Payout Version</span>
+              <span className="font-mono text-primary text-xs">{analysis.aggressive_rebuild.estimated_odds}</span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-xs text-muted-foreground">{analysis.aggressive_rebuild.reasoning}</p>
+          <CardContent className="px-4 pb-3 space-y-2">
+            <p className="text-[11px] text-muted-foreground">{analysis.aggressive_rebuild.reasoning}</p>
             {analysis.aggressive_rebuild.legs?.map((leg, i) => (
-              <div key={i} className="text-xs bg-secondary/50 rounded px-2 py-1.5">
-                <span className="font-medium">{leg.player_name}</span> — {leg.line} {leg.stat_type}
+              <div key={i} className="text-xs bg-secondary/50 rounded-lg px-3 py-2 flex items-center justify-between">
+                <span><span className="font-semibold">{leg.player_name}</span> — {leg.line} {leg.stat_type}</span>
+                {leg.odds && <span className="font-mono text-muted-foreground text-[10px]">{leg.odds}</span>}
               </div>
             ))}
           </CardContent>
@@ -168,7 +197,7 @@ export default function BetAnalyzerPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      <div className="max-w-lg mx-auto px-4 pt-6 space-y-6">
+      <div className="max-w-lg mx-auto px-4 pt-6 space-y-5">
         {/* Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 bg-primary/10 rounded-full px-4 py-1.5">
@@ -185,11 +214,11 @@ export default function BetAnalyzerPage() {
         <div className="space-y-3">
           {legs.map((leg, idx) => (
             <Card key={idx} className="border-border/50">
-              <CardContent className="pt-4 space-y-3">
+              <CardContent className="pt-3 pb-3 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-muted-foreground">Leg {idx + 1}</span>
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">Leg {idx + 1}</span>
                   {legs.length > 1 && (
-                    <button onClick={() => removeLeg(idx)} className="text-muted-foreground hover:text-destructive transition-colors">
+                    <button onClick={() => removeLeg(idx)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -201,7 +230,7 @@ export default function BetAnalyzerPage() {
                 />
                 <div className="grid grid-cols-3 gap-2">
                   <Select value={leg.stat_type} onValueChange={(v) => updateLeg(idx, "stat_type", v)}>
-                    <SelectTrigger className="text-xs">
+                    <SelectTrigger className="text-xs h-9">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -214,10 +243,10 @@ export default function BetAnalyzerPage() {
                     placeholder="Line (24.5)"
                     value={leg.line}
                     onChange={(e) => updateLeg(idx, "line", e.target.value)}
-                    className="text-xs"
+                    className="text-xs h-9"
                   />
                   <Select value={leg.pick} onValueChange={(v) => updateLeg(idx, "pick", v)}>
-                    <SelectTrigger className="text-xs">
+                    <SelectTrigger className="text-xs h-9">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -232,7 +261,7 @@ export default function BetAnalyzerPage() {
 
           <Button variant="outline" size="sm" onClick={addLeg} disabled={legs.length >= 10} className="w-full">
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Add Leg
+            Add Leg {legs.length < 10 && <span className="text-muted-foreground ml-1">({legs.length}/10)</span>}
           </Button>
         </div>
 
@@ -260,17 +289,28 @@ export default function BetAnalyzerPage() {
           </p>
         )}
 
+        {/* Loading State */}
+        {isLoading && <AnalyzerLoadingState />}
+
         {/* Error */}
         {error && (
-          <Card className="border-destructive/50 bg-destructive/10">
-            <CardContent className="pt-4">
-              <p className="text-sm text-destructive">{error}</p>
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-destructive">{error}</p>
+                {error.includes("limit") && (
+                  <Button size="sm" variant="outline" className="mt-2" onClick={() => navigate("/premium")}>
+                    Go Premium
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
 
         {/* Results */}
-        {analysis && <AnalysisResult analysis={analysis} legs={legs} />}
+        {!isLoading && analysis && <AnalysisResult analysis={analysis} legs={legs} />}
 
         <p className="text-[10px] text-muted-foreground text-center px-4">
           AI analysis is data-driven and not a guarantee. Always gamble responsibly.

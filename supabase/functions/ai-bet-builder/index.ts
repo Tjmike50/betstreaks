@@ -23,7 +23,6 @@ serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // Get auth token from request
     const authHeader = req.headers.get("Authorization");
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
@@ -45,7 +44,6 @@ serve(async (req) => {
       isPremium = flags?.is_premium ?? false;
 
       if (!isPremium) {
-        // Check daily usage for free users (limit: 1/day)
         const today = new Date().toISOString().split("T")[0];
         const { data: usage } = await supabase
           .from("ai_usage")
@@ -63,20 +61,36 @@ serve(async (req) => {
       }
     }
 
-    // Fetch current NBA odds from The Odds API
-    const oddsUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
-    const oddsRes = await fetch(oddsUrl);
-    
-    let oddsData: any[] = [];
-    if (oddsRes.ok) {
-      oddsData = await oddsRes.json();
+    // Step 1: Fetch featured markets (h2h, spreads, totals) from main odds endpoint
+    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
+    const featuredRes = await fetch(featuredUrl);
+
+    let gamesData: any[] = [];
+    if (featuredRes.ok) {
+      gamesData = await featuredRes.json();
     } else {
-      console.error("Odds API error:", oddsRes.status, await oddsRes.text());
-      // Continue with AI even if odds API fails - AI will use general knowledge
+      console.error("Featured odds API error:", featuredRes.status, await featuredRes.text());
     }
 
-    // Summarize odds for AI context (keep it concise)
-    const oddsSummary = oddsData.slice(0, 10).map((game: any) => ({
+    // Step 2: Fetch player props per event (up to 3 events to save API quota)
+    let playerPropsData: any[] = [];
+    const eventsToFetch = gamesData.slice(0, 3);
+
+    for (const game of eventsToFetch) {
+      try {
+        const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`;
+        const propsRes = await fetch(propsUrl);
+        if (propsRes.ok) {
+          const propsData = await propsRes.json();
+          playerPropsData.push(propsData);
+        }
+      } catch (e) {
+        console.error("Props fetch error for event", game.id, e);
+      }
+    }
+
+    // Build concise odds summary for AI context
+    const oddsSummary = gamesData.slice(0, 8).map((game: any) => ({
       home: game.home_team,
       away: game.away_team,
       commence: game.commence_time,
@@ -94,6 +108,24 @@ serve(async (req) => {
       })),
     }));
 
+    // Build player props summary
+    const propsSummary = playerPropsData.map((event: any) => ({
+      home: event.home_team,
+      away: event.away_team,
+      bookmakers: event.bookmakers?.slice(0, 1).map((bm: any) => ({
+        name: bm.key,
+        markets: bm.markets?.slice(0, 4).map((m: any) => ({
+          key: m.key,
+          outcomes: m.outcomes?.slice(0, 10).map((o: any) => ({
+            name: o.name,
+            description: o.description,
+            price: o.price,
+            point: o.point,
+          })),
+        })),
+      })),
+    }));
+
     const systemPrompt = `You are an NBA betting analyst for BetStreaks. Generate structured bet slips based on user prompts and current odds data.
 
 RULES:
@@ -102,9 +134,13 @@ RULES:
 - Each slip has a risk_label: "safe", "balanced", or "aggressive"
 - Provide short reasoning for each leg (1-2 sentences)
 - Generate realistic estimated combined American odds
+- Use REAL player names and lines from the odds data when available
 
-CURRENT ODDS DATA:
+CURRENT GAME ODDS:
 ${JSON.stringify(oddsSummary)}
+
+CURRENT PLAYER PROPS:
+${JSON.stringify(propsSummary)}
 
 Respond with ONLY valid JSON matching this exact structure:
 {
@@ -164,8 +200,6 @@ Respond with ONLY valid JSON matching this exact structure:
 
     const aiData = await aiRes.json();
     let content = aiData.choices?.[0]?.message?.content || "";
-
-    // Clean markdown code fences if present
     content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
     let parsed: { slips: any[] };
@@ -222,13 +256,10 @@ Respond with ONLY valid JSON matching this exact structure:
     // Track usage for free users
     if (user && !isPremium) {
       const today = new Date().toISOString().split("T")[0];
-      await supabase.rpc("increment_ai_usage" as any, { p_user_id: user.id, p_date: today }).catch(() => {
-        // Fallback: upsert directly
-        supabase
-          .from("ai_usage")
-          .upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" })
-          .then(() => {});
-      });
+      supabase
+        .from("ai_usage")
+        .upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" })
+        .then(() => {});
     }
 
     return new Response(JSON.stringify({ slips: savedSlips }), {

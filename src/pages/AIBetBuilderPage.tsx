@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Sparkles, Send, Loader2, Shield, Zap, Target, Bookmark, Copy, RefreshCw, ArrowUp, ArrowDown, Repeat } from "lucide-react";
+import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useAIBetBuilder } from "@/hooks/useAIBetBuilder";
@@ -22,24 +22,33 @@ const QUICK_PROMPTS = [
 
 function getRiskColor(risk: string) {
   switch (risk) {
+    case "safe": return "border-green-500/40 bg-green-500/5";
+    case "balanced": return "border-yellow-500/40 bg-yellow-500/5";
+    case "aggressive": return "border-red-500/40 bg-red-500/5";
+    default: return "border-border/50";
+  }
+}
+
+function getRiskBadge(risk: string) {
+  switch (risk) {
     case "safe": return "bg-green-500/20 text-green-400 border-green-500/30";
     case "balanced": return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
     case "aggressive": return "bg-red-500/20 text-red-400 border-red-500/30";
-    default: return "bg-muted text-muted-foreground";
+    default: return "";
   }
 }
 
 function getRiskIcon(risk: string) {
   switch (risk) {
     case "safe": return Shield;
-    case "balanced": return Target;
     case "aggressive": return Zap;
     default: return Target;
   }
 }
 
-function SlipCard({ slip }: { slip: AISlip }) {
+function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
   const { user } = useAuth();
+  const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const RiskIcon = getRiskIcon(slip.risk_label);
 
@@ -56,69 +65,86 @@ function SlipCard({ slip }: { slip: AISlip }) {
     setSaving(false);
     if (error) {
       if (error.code === "23505") {
+        setSaved(true);
         toast({ title: "Already saved!" });
       } else {
         toast({ title: "Error saving", description: error.message, variant: "destructive" });
       }
     } else {
+      setSaved(true);
       toast({ title: "Slip saved!" });
     }
   };
 
   const handleCopy = () => {
-    const text = `${slip.slip_name} (${slip.estimated_odds})\n${slip.legs.map((l) => `• ${l.player_name} ${l.line} ${l.stat_type}`).join("\n")}`;
+    const text = `${slip.slip_name} (${slip.estimated_odds})\n${slip.legs.map((l) => `• ${l.player_name} ${l.line} ${l.stat_type} ${l.odds || ""}`).join("\n")}`;
     navigator.clipboard.writeText(text);
     toast({ title: "Copied to clipboard!" });
   };
 
   return (
-    <Card className="border-border/50 overflow-hidden">
-      <CardHeader className="pb-3">
+    <Card className={`overflow-hidden transition-all ${getRiskColor(slip.risk_label)}`}>
+      {/* Header bar */}
+      <div className="px-4 pt-4 pb-3 space-y-2">
         <div className="flex items-start justify-between gap-2">
-          <div className="space-y-1">
-            <CardTitle className="text-base font-semibold">{slip.slip_name}</CardTitle>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className={getRiskColor(slip.risk_label)}>
+          <div className="space-y-1.5 flex-1 min-w-0">
+            <h3 className="text-base font-bold leading-tight">{slip.slip_name}</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="outline" className={`text-[11px] ${getRiskBadge(slip.risk_label)}`}>
                 <RiskIcon className="h-3 w-3 mr-1" />
                 {slip.risk_label}
               </Badge>
               {slip.estimated_odds && (
-                <span className="text-sm font-mono font-bold text-primary">{slip.estimated_odds}</span>
+                <span className="text-lg font-mono font-black text-primary">{slip.estimated_odds}</span>
               )}
             </div>
           </div>
+          <span className="text-xs text-muted-foreground font-mono mt-1">#{index + 1}</span>
         </div>
         {slip.reasoning && (
-          <p className="text-xs text-muted-foreground mt-2">{slip.reasoning}</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">{slip.reasoning}</p>
         )}
-      </CardHeader>
-      <CardContent className="space-y-3 pt-0">
+      </div>
+
+      {/* Legs */}
+      <CardContent className="px-4 pb-4 pt-0 space-y-2">
         {slip.legs.map((leg, i) => (
-          <div key={i} className="bg-secondary/50 rounded-lg p-3 space-y-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+          <div key={i} className="bg-card/80 border border-border/30 rounded-lg p-3 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 {leg.team_abbr && (
-                  <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{leg.team_abbr}</span>
+                  <span className="text-[10px] font-mono font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded shrink-0">
+                    {leg.team_abbr}
+                  </span>
                 )}
-                <span className="text-sm font-medium">{leg.player_name}</span>
+                <span className="text-sm font-semibold truncate">{leg.player_name}</span>
               </div>
-              {leg.odds && <span className="text-xs font-mono text-muted-foreground">{leg.odds}</span>}
+              {leg.odds && (
+                <span className="text-xs font-mono font-bold text-muted-foreground shrink-0">{leg.odds}</span>
+              )}
             </div>
-            <div className="text-sm text-primary font-medium">
+            <div className="text-sm text-primary font-semibold">
               {leg.line} {leg.stat_type}
             </div>
             {leg.reasoning && (
-              <p className="text-xs text-muted-foreground">{leg.reasoning}</p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{leg.reasoning}</p>
             )}
           </div>
         ))}
 
-        <div className="flex items-center gap-2 pt-2 flex-wrap">
-          <Button size="sm" variant="outline" onClick={handleSave} disabled={saving}>
-            <Bookmark className="h-3.5 w-3.5 mr-1" />
-            Save
+        {/* Actions */}
+        <div className="flex items-center gap-2 pt-2">
+          <Button
+            size="sm"
+            variant={saved ? "default" : "outline"}
+            onClick={handleSave}
+            disabled={saving || saved}
+            className="text-xs"
+          >
+            {saved ? <BookmarkCheck className="h-3.5 w-3.5 mr-1" /> : <Bookmark className="h-3.5 w-3.5 mr-1" />}
+            {saved ? "Saved" : "Save"}
           </Button>
-          <Button size="sm" variant="outline" onClick={handleCopy}>
+          <Button size="sm" variant="outline" onClick={handleCopy} className="text-xs">
             <Copy className="h-3.5 w-3.5 mr-1" />
             Copy
           </Button>
@@ -128,11 +154,39 @@ function SlipCard({ slip }: { slip: AISlip }) {
   );
 }
 
+function BuilderLoadingState() {
+  return (
+    <div className="space-y-4">
+      <div className="text-center py-8 space-y-3">
+        <div className="relative mx-auto w-16 h-16">
+          <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
+          <div className="absolute inset-0 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <Brain className="absolute inset-0 m-auto h-6 w-6 text-primary" />
+        </div>
+        <p className="text-sm font-medium">Building your slips...</p>
+        <p className="text-xs text-muted-foreground">Analyzing live odds & player data</p>
+      </div>
+      {/* Skeleton cards */}
+      {[1, 2].map((i) => (
+        <Card key={i} className="border-border/30 animate-pulse">
+          <CardContent className="pt-4 space-y-3">
+            <div className="h-5 bg-muted rounded w-2/3" />
+            <div className="h-3 bg-muted rounded w-1/3" />
+            <div className="space-y-2">
+              <div className="h-16 bg-muted/50 rounded-lg" />
+              <div className="h-16 bg-muted/50 rounded-lg" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 export default function AIBetBuilderPage() {
   const [prompt, setPrompt] = useState("");
   const { slips, isLoading, error, buildSlips } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
-  const { user } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = () => {
@@ -140,6 +194,9 @@ export default function AIBetBuilderPage() {
     const slipCount = isPremium ? 3 : 1;
     buildSlips(prompt.trim(), slipCount);
   };
+
+  const isLimitError = error?.includes("free") || error?.includes("limit") || error?.includes("Upgrade");
+  const isApiError = error && !isLimitError;
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -183,11 +240,7 @@ export default function AIBetBuilderPage() {
               }
             }}
           />
-          <Button
-            onClick={handleSubmit}
-            disabled={isLoading || !prompt.trim()}
-            className="w-full"
-          >
+          <Button onClick={handleSubmit} disabled={isLoading || !prompt.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -211,30 +264,59 @@ export default function AIBetBuilderPage() {
           )}
         </div>
 
-        {/* Error */}
-        {error && (
-          <Card className="border-destructive/50 bg-destructive/10">
-            <CardContent className="pt-4">
-              <p className="text-sm text-destructive">{error}</p>
-              {error.includes("Upgrade") && (
-                <Button size="sm" variant="outline" className="mt-2" onClick={() => navigate("/premium")}>
+        {/* Error States */}
+        {isLimitError && (
+          <Card className="border-yellow-500/30 bg-yellow-500/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-yellow-400 shrink-0 mt-0.5" />
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-yellow-400">Daily limit reached</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" onClick={() => navigate("/premium")}>
                   Go Premium
                 </Button>
-              )}
+              </div>
             </CardContent>
           </Card>
         )}
 
+        {isApiError && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <WifiOff className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-destructive">Something went wrong</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" className="mt-2" onClick={handleSubmit}>
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Loading State */}
+        {isLoading && <BuilderLoadingState />}
+
         {/* Results */}
-        {slips.length > 0 && (
+        {!isLoading && slips.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" />
               Your AI Slips
+              <Badge variant="secondary" className="text-[10px]">{slips.length}</Badge>
             </h2>
-            {slips.map((slip) => (
-              <SlipCard key={slip.id} slip={slip} />
+            {slips.map((slip, i) => (
+              <SlipCard key={slip.id} slip={slip} index={i} />
             ))}
+          </div>
+        )}
+
+        {/* Empty state after generation with no results */}
+        {!isLoading && !error && slips.length === 0 && prompt && (
+          <div className="text-center py-8 text-muted-foreground">
+            <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">Enter a prompt and tap Generate to build slips</p>
           </div>
         )}
 
