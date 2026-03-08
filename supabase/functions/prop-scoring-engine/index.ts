@@ -1132,7 +1132,13 @@ serve(async (req) => {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
           const tmCtxForThreshold = threshold === thresholds[0] ? teammateCtx :
             computeTeammateContext(playerId, logs, stat, threshold, team, tmRosters, playerLogs);
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx);
+
+          // Compute market movement for this specific prop
+          const STAT_LABELS_REV: Record<string, string> = { pts: "Points", reb: "Rebounds", ast: "Assists", fg3m: "3-Pointers", stl: "Steals", blk: "Blocks" };
+          const playerName = logs[0]?.player_name || "";
+          const mktMovement = computeMarketMovement(playerName, STAT_LABELS_REV[stat] || stat, threshold, lineSnapshots);
+
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx, mktMovement);
           if (scored) allScored.push(scored);
         }
       }
