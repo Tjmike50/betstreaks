@@ -1077,7 +1077,18 @@ serve(async (req) => {
       teamGameDates[team] = [...dates].sort((a, b) => b.localeCompare(a));
     }
 
-    // 5. Score each player for each stat/threshold combo
+    // 4d. Fetch line snapshots for market movement analysis
+    let lineSnapshots: LineSnapshot[] = [];
+    {
+      const { data: snaps } = await supabase
+        .from("line_snapshots")
+        .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook, snapshot_at")
+        .eq("game_date", today)
+        .order("snapshot_at", { ascending: true });
+      if (snaps) lineSnapshots = snaps as LineSnapshot[];
+      console.log(`Loaded ${lineSnapshots.length} line snapshots for market movement analysis`);
+    }
+
     const statsToScore = stat_types || ["pts", "reb", "ast", "fg3m", "stl", "blk"];
     const allScored: ScoredProp[] = [];
 
