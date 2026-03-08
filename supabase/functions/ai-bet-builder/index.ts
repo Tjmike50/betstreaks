@@ -240,16 +240,22 @@ Respond with ONLY valid JSON matching this exact structure:
           "pick": "Over" | "Under",
           "odds": "-110",
           "reasoning": "1-2 sentences referencing actual hit rates, averages, and trends from the data",
-          "data_context": {
+           "data_context": {
             "season_avg": number,
             "last5_avg": number,
             "last10_hit_rate": "80%",
+            "line_hit_rate": "70% over 20 games",
             "vs_opponent": "75% in 4 games" | null,
+            "vs_opponent_sample": number | null,
             "home_away_split": "85% at home in 10 games" | null,
+            "home_away_sample": number | null,
+            "rest_note": "2 days rest" | "back-to-back" | null,
+            "opp_defense_note": "OPP allows 26.3 avg (15g)" | null,
             "confidence_score": number,
+            "value_score": number,
             "volatility_label": "low" | "medium" | "high",
             "sample_size": number,
-            "tags": ["hot_streak", "consistent"]
+            "tags": ["Hit 24.5+ in 7/10 last games", "consistent", "Strong home split (80% in 12g)"]
           }
         }
       ]
