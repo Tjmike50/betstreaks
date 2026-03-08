@@ -19,6 +19,9 @@ import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import ResponsibleGamblingPage from "./pages/ResponsibleGamblingPage";
 import FeedbackPage from "./pages/FeedbackPage";
+import AIBetBuilderPage from "./pages/AIBetBuilderPage";
+import BetAnalyzerPage from "./pages/BetAnalyzerPage";
+import SavedSlipsPage from "./pages/SavedSlipsPage";
 import NotFound from "./pages/NotFound";
 import { BottomNav } from "./components/BottomNav";
 
