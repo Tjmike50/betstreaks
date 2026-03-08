@@ -714,6 +714,183 @@ export default function AdminEvalPage() {
               </CardContent>
             </Card>
 
+            {/* ===== SCORING INSIGHTS SECTION ===== */}
+            <div className="pt-2 border-t border-border/30">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-base font-bold flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-primary" />
+                  Scoring Insights
+                </h2>
+                <Button size="sm" variant="outline" onClick={handleRunAnalysis} disabled={analyzingFactors} className="h-7 text-xs">
+                  {analyzingFactors ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Scale className="h-3 w-3 mr-1" />}
+                  Run Analysis
+                </Button>
+              </div>
+
+              {/* Active Weights */}
+              {activeWeights && (
+                <Card className="mb-3">
+                  <CardContent className="pt-4 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                      <Scale className="h-4 w-4 text-primary" />
+                      Active Weights: {activeWeights.label} (v{activeWeights.version})
+                    </h3>
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries(activeWeights.weights as Record<string, number>)
+                        .sort(([,a], [,b]) => b - a)
+                        .map(([factor, weight]) => (
+                          <Badge key={factor} variant="outline" className="text-[10px] font-mono">
+                            {factor}: {(weight * 100).toFixed(0)}%
+                          </Badge>
+                        ))}
+                    </div>
+                    {activeWeights.notes && <p className="text-[10px] text-muted-foreground">{activeWeights.notes}</p>}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Factor Analysis Results */}
+              {factorAnalysis && (
+                <>
+                  {/* Recommendations */}
+                  {factorAnalysis.recommendations && (factorAnalysis.recommendations as any[]).length > 0 && (
+                    <Card className="mb-3">
+                      <CardContent className="pt-4 space-y-2">
+                        <h3 className="text-sm font-semibold flex items-center gap-2">
+                          <AlertCircle className="h-4 w-4 text-primary" />
+                          Recommendations ({(factorAnalysis.recommendations as any[]).length})
+                        </h3>
+                        <div className="space-y-2">
+                          {(factorAnalysis.recommendations as any[]).map((rec: any, i: number) => (
+                            <div key={i} className="flex items-start gap-2 text-xs">
+                              <Badge variant={rec.priority === "high" ? "destructive" : rec.priority === "medium" ? "default" : "secondary"} className="text-[9px] shrink-0 mt-0.5">
+                                {rec.priority}
+                              </Badge>
+                              <div>
+                                <span className="font-medium">{rec.type.replace(/_/g, " ")}</span>
+                                <span className="text-muted-foreground ml-1">({rec.factor})</span>
+                                <p className="text-muted-foreground mt-0.5">{rec.detail}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Score Range Performance */}
+                  {factorAnalysis.score_range_performance && (
+                    <Card className="mb-3">
+                      <CardContent className="pt-4 space-y-2">
+                        <h3 className="text-sm font-semibold flex items-center gap-2">
+                          <Target className="h-4 w-4 text-primary" />
+                          Confidence Score → Actual Hit Rate
+                        </h3>
+                        <p className="text-[10px] text-muted-foreground">Does confidence score predict outcomes accurately?</p>
+                        {Object.entries(factorAnalysis.score_range_performance as Record<string, any>)
+                          .sort(([a], [b]) => a.localeCompare(b))
+                          .map(([band, data]: [string, any]) => (
+                            <div key={band} className="flex items-center justify-between">
+                              <span className="text-xs font-mono w-16">{band}</span>
+                              <HitRateBar rate={data.rate} total={data.total} />
+                            </div>
+                          ))}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Overstatement Analysis */}
+                  {factorAnalysis.overstatement_analysis && Object.keys(factorAnalysis.overstatement_analysis as object).length > 0 && (
+                    <Card className="mb-3">
+                      <CardContent className="pt-4 space-y-2">
+                        <h3 className="text-sm font-semibold flex items-center gap-2">
+                          <Eye className="h-4 w-4 text-primary" />
+                          Confidence Calibration
+                        </h3>
+                        <p className="text-[10px] text-muted-foreground">Positive = underconfident, Negative = overconfident</p>
+                        {Object.entries(factorAnalysis.overstatement_analysis as Record<string, any>)
+                          .sort(([a], [b]) => a.localeCompare(b))
+                          .map(([bucket, data]: [string, any]) => (
+                            <div key={bucket} className="flex items-center justify-between text-xs">
+                              <span className="font-mono w-16">{bucket}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-muted-foreground">actual: {data.actual_rate}%</span>
+                                <span className={`font-mono font-medium ${data.delta > 5 ? "text-green-400" : data.delta < -5 ? "text-red-400" : "text-muted-foreground"}`}>
+                                  {data.delta > 0 ? "+" : ""}{data.delta.toFixed(1)}pp
+                                </span>
+                                <span className="text-muted-foreground">({data.total})</span>
+                              </div>
+                            </div>
+                          ))}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Tag Signal Performance */}
+                  {factorAnalysis.factor_performance && (factorAnalysis.factor_performance as any).tag_signal && (
+                    <Card className="mb-3">
+                      <CardContent className="pt-4 space-y-2">
+                        <h3 className="text-sm font-semibold">Signal Tag Performance</h3>
+                        <p className="text-[10px] text-muted-foreground">Which reason tags actually predict outcomes?</p>
+                        {Object.entries((factorAnalysis.factor_performance as any).tag_signal as Record<string, any>)
+                          .filter(([_, v]: [string, any]) => v.total >= 3)
+                          .sort(([, a]: [string, any], [, b]: [string, any]) => (b.rate || 0) - (a.rate || 0))
+                          .map(([tag, data]: [string, any]) => (
+                            <div key={tag} className="flex items-center justify-between">
+                              <span className="text-xs truncate max-w-[120px]">{tag}</span>
+                              <HitRateBar rate={data.rate} total={data.total} />
+                            </div>
+                          ))}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Factor Predictiveness */}
+                  {factorAnalysis.factor_performance && (
+                    <Card className="mb-3">
+                      <CardContent className="pt-4 space-y-2">
+                        <h3 className="text-sm font-semibold">Factor Predictiveness (Bucket Spread)</h3>
+                        <p className="text-[10px] text-muted-foreground">Higher spread = more predictive factor</p>
+                        {Object.entries(factorAnalysis.factor_performance as Record<string, any>)
+                          .filter(([k]) => !["tag_signal", "stat_type", "home_away"].includes(k))
+                          .map(([factor, buckets]) => {
+                            const entries = Object.entries(buckets as Record<string, any>).filter(([_, v]: [string, any]) => v.total >= 5);
+                            if (entries.length < 2) return null;
+                            const rates = entries.map(([_, v]: [string, any]) => v.rate || 0);
+                            const spread = Math.max(...rates) - Math.min(...rates);
+                            return { factor, spread, entries };
+                          })
+                          .filter(Boolean)
+                          .sort((a: any, b: any) => b.spread - a.spread)
+                          .map((item: any) => (
+                            <div key={item.factor} className="flex items-center justify-between text-xs">
+                              <span className="font-medium w-24">{item.factor}</span>
+                              <div className="flex items-center gap-2">
+                                <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${item.spread > 15 ? "bg-green-500" : item.spread > 5 ? "bg-yellow-500" : "bg-red-500"}`}
+                                    style={{ width: `${Math.min(100, item.spread * 2)}%` }}
+                                  />
+                                </div>
+                                <span className="font-mono">{item.spread.toFixed(1)}pp</span>
+                              </div>
+                            </div>
+                          ))}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <p className="text-[10px] text-muted-foreground text-center">
+                    Analysis from {factorAnalysis.analysis_date} · {factorAnalysis.sample_size} props · {factorAnalysis.lookback_days}d lookback
+                  </p>
+                </>
+              )}
+
+              {!factorAnalysis && !factorLoading && (
+                <p className="text-xs text-muted-foreground text-center py-4">No analysis yet. Click "Run Analysis" to generate insights.</p>
+              )}
+            </div>
+
             {/* Recent Prop Outcomes */}
             <Card>
               <CardContent className="pt-4 space-y-2">
