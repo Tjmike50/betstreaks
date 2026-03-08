@@ -14,6 +14,184 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_daily_pick_legs: {
+        Row: {
+          daily_pick_id: string
+          id: string
+          leg_order: number
+          line: string
+          odds: string | null
+          pick: string
+          player_name: string
+          reasoning: string | null
+          stat_type: string
+          team_abbr: string | null
+        }
+        Insert: {
+          daily_pick_id: string
+          id?: string
+          leg_order?: number
+          line: string
+          odds?: string | null
+          pick: string
+          player_name: string
+          reasoning?: string | null
+          stat_type: string
+          team_abbr?: string | null
+        }
+        Update: {
+          daily_pick_id?: string
+          id?: string
+          leg_order?: number
+          line?: string
+          odds?: string | null
+          pick?: string
+          player_name?: string
+          reasoning?: string | null
+          stat_type?: string
+          team_abbr?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_daily_pick_legs_daily_pick_id_fkey"
+            columns: ["daily_pick_id"]
+            isOneToOne: false
+            referencedRelation: "ai_daily_picks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_daily_picks: {
+        Row: {
+          created_at: string
+          estimated_odds: string | null
+          id: string
+          pick_date: string
+          reasoning: string | null
+          risk_label: string
+          slip_name: string
+        }
+        Insert: {
+          created_at?: string
+          estimated_odds?: string | null
+          id?: string
+          pick_date?: string
+          reasoning?: string | null
+          risk_label: string
+          slip_name: string
+        }
+        Update: {
+          created_at?: string
+          estimated_odds?: string | null
+          id?: string
+          pick_date?: string
+          reasoning?: string | null
+          risk_label?: string
+          slip_name?: string
+        }
+        Relationships: []
+      }
+      ai_slip_legs: {
+        Row: {
+          id: string
+          leg_order: number
+          line: string
+          odds: string | null
+          pick: string
+          player_name: string
+          reasoning: string | null
+          slip_id: string
+          stat_type: string
+          team_abbr: string | null
+        }
+        Insert: {
+          id?: string
+          leg_order?: number
+          line: string
+          odds?: string | null
+          pick: string
+          player_name: string
+          reasoning?: string | null
+          slip_id: string
+          stat_type: string
+          team_abbr?: string | null
+        }
+        Update: {
+          id?: string
+          leg_order?: number
+          line?: string
+          odds?: string | null
+          pick?: string
+          player_name?: string
+          reasoning?: string | null
+          slip_id?: string
+          stat_type?: string
+          team_abbr?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_slip_legs_slip_id_fkey"
+            columns: ["slip_id"]
+            isOneToOne: false
+            referencedRelation: "ai_slips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_slips: {
+        Row: {
+          created_at: string
+          estimated_odds: string | null
+          id: string
+          prompt: string
+          reasoning: string | null
+          risk_label: string
+          slip_name: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          estimated_odds?: string | null
+          id?: string
+          prompt: string
+          reasoning?: string | null
+          risk_label?: string
+          slip_name: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          estimated_odds?: string | null
+          id?: string
+          prompt?: string
+          reasoning?: string | null
+          risk_label?: string
+          slip_name?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      ai_usage: {
+        Row: {
+          id: string
+          request_count: number
+          usage_date: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          request_count?: number
+          usage_date?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          request_count?: number
+          usage_date?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       analytics_events: {
         Row: {
           created_at: string
@@ -226,6 +404,35 @@ export type Database = {
           sport?: string | null
         }
         Relationships: []
+      }
+      saved_slips: {
+        Row: {
+          created_at: string
+          id: string
+          slip_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          slip_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          slip_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saved_slips_slip_id_fkey"
+            columns: ["slip_id"]
+            isOneToOne: false
+            referencedRelation: "ai_slips"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       streak_events: {
         Row: {

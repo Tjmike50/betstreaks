@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.healthcheck]
 verify_jwt = false
+
+[functions.ai-bet-builder]
+verify_jwt = false
+
+[functions.ai-bet-analyzer]
+verify_jwt = false
