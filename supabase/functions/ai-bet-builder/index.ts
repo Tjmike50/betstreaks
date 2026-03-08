@@ -229,6 +229,10 @@ CRITICAL RULES:
 - When teammate context is available (key_teammates_out, minutes_trend, role_label), reference it in reasoning
 - Do NOT draw teammate conclusions from fewer than 3 games without noting sample size
 - Include teammate_note in data_context when meaningful
+- When player_status is "questionable" or "doubtful", note the uncertainty in reasoning
+- Do NOT include players with status "out"
+- Prefer players with lineup_confidence "high" for safe slips
+- Note availability uncertainty in data_context when it affects the pick
 
 SCORED CANDIDATES (ranked by confidence):
 ${JSON.stringify(candidateSummary, null, 1)}
