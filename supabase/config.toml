@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.ai-bet-analyzer]
 verify_jwt = false
+
+[functions.prop-scoring-engine]
+verify_jwt = false
