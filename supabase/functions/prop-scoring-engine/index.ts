@@ -35,6 +35,15 @@ interface GameLog {
   wl: string | null;
 }
 
+interface TeammateContext {
+  minutes_trend: "up" | "down" | "stable" | null;
+  minutes_trend_note: string | null;
+  role_label: "starter" | "bench" | "mixed" | null;
+  key_teammates_out: string[];
+  teammate_notes: string[];
+  with_without_splits: { teammate: string; with_avg: number; without_avg: number; with_games: number; without_games: number }[];
+}
+
 interface ScoredProp {
   player_id: number;
   player_name: string;
@@ -67,7 +76,6 @@ interface ScoredProp {
   volatility_score: number;
   consistency_score: number;
   reason_tags: string[];
-  // New fields
   rest_days: number | null;
   back_to_back: boolean;
   games_last_7: number;
@@ -80,6 +88,12 @@ interface ScoredProp {
   line_hit_rate_l5: number | null;
   line_hit_rate_l10: number | null;
   line_hit_rate_season: number | null;
+  // Teammate context
+  minutes_trend: string | null;
+  minutes_trend_note: string | null;
+  role_label: string | null;
+  key_teammates_out: string[];
+  teammate_notes: string[];
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
@@ -118,17 +132,11 @@ function daysBetween(a: string, b: string): number {
   return Math.round(Math.abs(da.getTime() - db.getTime()) / 86400000);
 }
 
-/**
- * Compute rest/fatigue context from a player's sorted game logs (most recent first).
- */
 function computeRestContext(logs: GameLog[], today: string) {
   if (logs.length === 0) return { rest_days: null, back_to_back: false, games_last_7: 0, games_last_14: 0 };
-
   const lastGameDate = logs[0].game_date;
   const rest_days = daysBetween(today, lastGameDate);
   const back_to_back = rest_days <= 1;
-
-  const todayDate = new Date(today);
   let games_last_7 = 0, games_last_14 = 0;
   for (const g of logs) {
     const d = daysBetween(today, g.game_date);
@@ -136,23 +144,15 @@ function computeRestContext(logs: GameLog[], today: string) {
     if (d <= 14) games_last_14++;
     if (d > 14) break;
   }
-
   return { rest_days, back_to_back, games_last_7, games_last_14 };
 }
 
-/**
- * Compute rest-specific hit rate: how the player performs with similar rest days.
- */
 function computeRestHitRate(logs: GameLog[], statKey: string, threshold: number, restDays: number | null): { rate: number | null; sample: number } {
   if (restDays == null || logs.length < 5) return { rate: null, sample: 0 };
-
   const col = STAT_MAP[statKey];
   if (!col) return { rate: null, sample: 0 };
-
-  // Group: 0-1 = back-to-back, 2 = normal, 3+ = well-rested
   const bucket = restDays <= 1 ? "b2b" : restDays >= 3 ? "rested" : "normal";
   const vals: number[] = [];
-
   for (let i = 0; i < logs.length - 1; i++) {
     const val = (logs[i] as any)[col];
     if (val == null) continue;
@@ -161,24 +161,17 @@ function computeRestHitRate(logs: GameLog[], statKey: string, threshold: number,
     const gameBucket = gap <= 1 ? "b2b" : gap >= 3 ? "rested" : "normal";
     if (gameBucket === bucket) vals.push(val);
   }
-
   return { rate: calcHitRate(vals, threshold), sample: vals.length };
 }
 
-/**
- * Compute opponent defensive context: how much the opponent allows for this stat type.
- * Uses all game logs from players who faced this opponent.
- */
 function computeDefensiveContext(
   allPlayerLogs: Record<number, GameLog[]>,
   opponentAbbr: string | null,
   statKey: string
 ): { avg_allowed: number | null; games: number; note: string | null } {
   if (!opponentAbbr) return { avg_allowed: null, games: 0, note: null };
-
   const col = STAT_MAP[statKey];
   if (!col) return { avg_allowed: null, games: 0, note: null };
-
   const vals: number[] = [];
   for (const logs of Object.values(allPlayerLogs)) {
     for (const g of logs) {
@@ -189,11 +182,206 @@ function computeDefensiveContext(
       }
     }
   }
-
   if (vals.length < 5) return { avg_allowed: null, games: vals.length, note: vals.length > 0 ? "small_sample" : null };
-
   const avg = calcAvg(vals)!;
   return { avg_allowed: avg, games: vals.length, note: null };
+}
+
+// ===== TEAMMATE & LINEUP CONTEXT =====
+
+/**
+ * Build a map of game_date -> set of player_ids who played that game for a given team.
+ */
+function buildTeamGameRosters(
+  allPlayerLogs: Record<number, GameLog[]>,
+  teamAbbr: string
+): Map<string, Set<number>> {
+  const rosters = new Map<string, Set<number>>();
+  for (const [pidStr, logs] of Object.entries(allPlayerLogs)) {
+    const pid = Number(pidStr);
+    for (const g of logs) {
+      if (g.team_abbr !== teamAbbr) continue;
+      if (!rosters.has(g.game_date)) rosters.set(g.game_date, new Set());
+      rosters.get(g.game_date)!.add(pid);
+    }
+  }
+  return rosters;
+}
+
+/**
+ * Identify "key teammates" for a player: other players on the same team who appeared
+ * in a significant portion of games. Returns top teammates by appearance count.
+ */
+function identifyKeyTeammates(
+  playerId: number,
+  playerLogs: GameLog[],
+  teamRosters: Map<string, Set<number>>,
+  allPlayerLogs: Record<number, GameLog[]>
+): { pid: number; name: string; gamesPlayed: number; totalGames: number }[] {
+  const playerGameDates = new Set(playerLogs.map(g => g.game_date));
+  const teammateCounts: Record<number, { count: number; name: string }> = {};
+
+  for (const date of playerGameDates) {
+    const roster = teamRosters.get(date);
+    if (!roster) continue;
+    for (const pid of roster) {
+      if (pid === playerId) continue;
+      if (!teammateCounts[pid]) {
+        const tmLogs = allPlayerLogs[pid];
+        teammateCounts[pid] = { count: 0, name: tmLogs?.[0]?.player_name || `Player ${pid}` };
+      }
+      teammateCounts[pid].count++;
+    }
+  }
+
+  // Key teammates: played in >= 50% of this player's games AND have significant scoring (top by games played)
+  const total = playerGameDates.size;
+  return Object.entries(teammateCounts)
+    .filter(([_, v]) => v.count >= Math.max(3, total * 0.3))
+    .map(([pid, v]) => ({ pid: Number(pid), name: v.name, gamesPlayed: v.count, totalGames: total }))
+    .sort((a, b) => b.gamesPlayed - a.gamesPlayed)
+    .slice(0, 8); // top 8 teammates max
+}
+
+/**
+ * Compute teammate context: with/without splits for key teammates,
+ * minutes trend approximation, and role label.
+ */
+function computeTeammateContext(
+  playerId: number,
+  playerLogs: GameLog[],
+  statKey: string,
+  threshold: number,
+  teamAbbr: string,
+  teamRosters: Map<string, Set<number>>,
+  allPlayerLogs: Record<number, GameLog[]>
+): TeammateContext {
+  const result: TeammateContext = {
+    minutes_trend: null,
+    minutes_trend_note: null,
+    role_label: null,
+    key_teammates_out: [],
+    teammate_notes: [],
+    with_without_splits: [],
+  };
+
+  const col = STAT_MAP[statKey];
+  if (!col || playerLogs.length < 5) return result;
+
+  // --- Minutes trend approximation ---
+  // We don't have minutes directly, so approximate via total stat output (pts+reb+ast) as proxy
+  const recentProxy: number[] = [];
+  for (const g of playerLogs.slice(0, 15)) {
+    const total = (g.pts || 0) + (g.reb || 0) + (g.ast || 0);
+    recentProxy.push(total);
+  }
+
+  if (recentProxy.length >= 5) {
+    const last3Proxy = calcAvg(recentProxy.slice(0, 3)) || 0;
+    const last10Proxy = calcAvg(recentProxy.slice(0, Math.min(10, recentProxy.length))) || 0;
+
+    if (last10Proxy > 0) {
+      const ratio = last3Proxy / last10Proxy;
+      if (ratio > 1.15) {
+        result.minutes_trend = "up";
+        result.minutes_trend_note = "Usage/minutes trending up (L3 output +15% vs L10)";
+      } else if (ratio < 0.85) {
+        result.minutes_trend = "down";
+        result.minutes_trend_note = "Usage/minutes trending down (L3 output -15% vs L10)";
+      } else {
+        result.minutes_trend = "stable";
+      }
+    }
+  }
+
+  // --- Role label (starter vs bench) ---
+  // Approximate: if player appeared in most recent games consistently and has decent stat output, likely starter
+  const recentGames = playerLogs.slice(0, 10);
+  const avgOutput = calcAvg(recentProxy.slice(0, 10)) || 0;
+  const gamesIn10 = recentGames.length;
+
+  if (gamesIn10 >= 8 && avgOutput >= 15) {
+    result.role_label = "starter";
+  } else if (gamesIn10 >= 8 && avgOutput >= 8) {
+    result.role_label = "starter";
+  } else if (gamesIn10 >= 5 && avgOutput < 8) {
+    result.role_label = "bench";
+  } else {
+    result.role_label = "mixed";
+  }
+
+  // --- Key teammate with/without splits ---
+  const keyTeammates = identifyKeyTeammates(playerId, playerLogs, teamRosters, allPlayerLogs);
+
+  // For the most recent game, check which key teammates are missing (potential "out" detection)
+  const mostRecentDate = playerLogs[0]?.game_date;
+  const mostRecentRoster = teamRosters.get(mostRecentDate);
+
+  for (const tm of keyTeammates) {
+    // Check if this teammate missed recent games
+    const recentDates = playerLogs.slice(0, 5).map(g => g.game_date);
+    let missedRecent = 0;
+    for (const d of recentDates) {
+      const roster = teamRosters.get(d);
+      if (roster && !roster.has(tm.pid)) missedRecent++;
+    }
+
+    // Compute with/without splits for this stat
+    const withVals: number[] = [];
+    const withoutVals: number[] = [];
+
+    for (const g of playerLogs) {
+      const val = (g as any)[col];
+      if (val == null) continue;
+      const roster = teamRosters.get(g.game_date);
+      if (!roster) continue;
+      if (roster.has(tm.pid)) {
+        withVals.push(val);
+      } else {
+        withoutVals.push(val);
+      }
+    }
+
+    // Only report if we have meaningful sample for both
+    if (withVals.length >= 3 && withoutVals.length >= 3) {
+      const withAvg = calcAvg(withVals)!;
+      const withoutAvg = calcAvg(withoutVals)!;
+      const diff = withoutAvg - withAvg;
+      const pctDiff = withAvg > 0 ? (diff / withAvg) * 100 : 0;
+
+      result.with_without_splits.push({
+        teammate: tm.name,
+        with_avg: withAvg,
+        without_avg: withoutAvg,
+        with_games: withVals.length,
+        without_games: withoutVals.length,
+      });
+
+      // Only generate notes for meaningful differences with adequate sample
+      if (Math.abs(pctDiff) >= 15 && withoutVals.length >= 3) {
+        if (pctDiff > 0) {
+          result.teammate_notes.push(
+            `+${Math.round(pctDiff)}% without ${tm.name} (${withoutAvg} avg in ${withoutVals.length}g vs ${withAvg} in ${withVals.length}g)`
+          );
+        } else {
+          result.teammate_notes.push(
+            `${Math.round(pctDiff)}% without ${tm.name} (${withoutAvg} avg in ${withoutVals.length}g vs ${withAvg} in ${withVals.length}g)`
+          );
+        }
+      }
+    }
+
+    // Flag teammates who are potentially out (missed 3+ of last 5)
+    if (missedRecent >= 3 && tm.gamesPlayed >= tm.totalGames * 0.5) {
+      result.key_teammates_out.push(tm.name);
+    }
+  }
+
+  // Limit notes to most impactful
+  result.teammate_notes = result.teammate_notes.slice(0, 3);
+  result.with_without_splits = result.with_without_splits.slice(0, 3);
+
+  return result;
 }
 
 function scoreProp(
@@ -205,7 +393,8 @@ function scoreProp(
   restCtx: { rest_days: number | null; back_to_back: boolean; games_last_7: number; games_last_14: number },
   restHitCtx: { rate: number | null; sample: number },
   defCtx: { avg_allowed: number | null; games: number; note: string | null },
-  allPlayerLogs: Record<number, GameLog[]>
+  allPlayerLogs: Record<number, GameLog[]>,
+  teammateCtx: TeammateContext
 ): ScoredProp | null {
   if (games.length === 0) return null;
 
@@ -242,7 +431,6 @@ function scoreProp(
   const last15Avg = calcAvg(last15);
   const seasonAvg = calcAvg(allValues);
 
-  // Line-specific hit rates
   const last5HitRate = calcHitRate(last5, threshold);
   const last10HitRate = calcHitRate(last10, threshold);
   const last15HitRate = calcHitRate(last15, threshold);
@@ -256,7 +444,6 @@ function scoreProp(
   const homeHitRate = calcHitRate(homeValues, threshold);
   const awayHitRate = calcHitRate(awayValues, threshold);
 
-  // Volatility & consistency
   const stdDev = calcStdDev(allValues);
   const mean = seasonAvg || 0;
   const cv = mean > 0 ? (stdDev / mean) * 100 : 50;
@@ -267,29 +454,28 @@ function scoreProp(
   const sampleFactor = Math.min(1, allValues.length / 20);
 
   // Weight allocation (must sum to 1.0)
-  const W_RECENT = 0.25;      // L5 hit rate
-  const W_SEASON = 0.15;      // Season hit rate
-  const W_TREND = 0.15;       // L3 vs L10 trend
-  const W_OPP = 0.12;         // Opponent matchup
-  const W_VENUE = 0.10;       // Home/away
-  const W_REST = 0.08;        // Rest/fatigue
-  const W_DEF = 0.10;         // Defensive matchup
-  const W_CONSISTENCY = 0.05; // Consistency bonus
+  const W_RECENT = 0.22;
+  const W_SEASON = 0.13;
+  const W_TREND = 0.13;
+  const W_OPP = 0.10;
+  const W_VENUE = 0.08;
+  const W_REST = 0.07;
+  const W_DEF = 0.09;
+  const W_CONSISTENCY = 0.05;
+  const W_TEAMMATE = 0.08;  // New: teammate context weight
+  const W_MINUTES = 0.05;   // New: minutes/usage trend weight
 
   const recentHR = last5HitRate ?? 0;
   const seasonHR = seasonHitRate ?? 0;
   const trendHR = last3Avg && last10Avg ? (last3Avg > last10Avg ? 0.7 : last3Avg > last10Avg * 0.95 ? 0.5 : 0.3) : 0.5;
 
-  // Opponent split (sample-weighted)
   let oppFactor = 0.5;
   if (vsOpponentValues.length >= 3 && vsOpponentHitRate !== null) {
     oppFactor = vsOpponentHitRate;
   } else if (vsOpponentValues.length >= 1 && vsOpponentHitRate !== null) {
-    // Blend with season when sample is tiny
     oppFactor = vsOpponentHitRate * 0.3 + seasonHR * 0.7;
   }
 
-  // Venue split (sample-weighted)
   let venueFactor = 0.5;
   const venueHR = todayHomeAway === "home" ? homeHitRate : awayHitRate;
   const venueGames = todayHomeAway === "home" ? homeValues.length : awayValues.length;
@@ -299,27 +485,49 @@ function scoreProp(
     venueFactor = venueHR * 0.4 + seasonHR * 0.6;
   }
 
-  // Rest/fatigue factor
   let restFactor = 0.5;
   if (restHitCtx.sample >= 3 && restHitCtx.rate !== null) {
     restFactor = restHitCtx.rate;
   } else if (restCtx.back_to_back) {
-    restFactor = 0.4; // slight penalty for B2B
+    restFactor = 0.4;
   } else if (restCtx.rest_days != null && restCtx.rest_days >= 3) {
-    restFactor = 0.55; // slight boost for well-rested
+    restFactor = 0.55;
   }
 
-  // Defensive matchup factor
   let defFactor = 0.5;
   if (defCtx.avg_allowed !== null && defCtx.games >= 10 && mean > 0) {
-    // If opponent allows more than average for this stat, it's favorable
     defFactor = Math.min(1, Math.max(0, 0.5 + (defCtx.avg_allowed - threshold) / (threshold * 2)));
   } else if (defCtx.avg_allowed !== null && defCtx.games >= 5) {
     const raw = 0.5 + (defCtx.avg_allowed - threshold) / (threshold * 2);
-    defFactor = raw * 0.6 + 0.5 * 0.4; // blend toward neutral for smaller sample
+    defFactor = raw * 0.6 + 0.5 * 0.4;
   }
 
   const consistencyFactor = consistencyScore / 100;
+
+  // Teammate factor: if key teammates are out, use with/without data
+  let teammateFactor = 0.5;
+  if (teammateCtx.key_teammates_out.length > 0 && teammateCtx.with_without_splits.length > 0) {
+    // Check if being without key teammates is historically better or worse
+    for (const split of teammateCtx.with_without_splits) {
+      if (teammateCtx.key_teammates_out.includes(split.teammate) && split.without_games >= 3) {
+        const withoutHR = split.without_avg >= threshold ? 0.65 : 0.35;
+        teammateFactor = withoutHR;
+        break; // use first matching key teammate
+      }
+    }
+  } else if (teammateCtx.role_label === "starter") {
+    teammateFactor = 0.55; // slight boost for established starters
+  } else if (teammateCtx.role_label === "bench") {
+    teammateFactor = 0.4; // slight penalty for bench volatility
+  }
+
+  // Minutes/usage trend factor
+  let minutesFactor = 0.5;
+  if (teammateCtx.minutes_trend === "up") {
+    minutesFactor = 0.65;
+  } else if (teammateCtx.minutes_trend === "down") {
+    minutesFactor = 0.35;
+  }
 
   let rawConfidence = (
     recentHR * W_RECENT +
@@ -329,20 +537,33 @@ function scoreProp(
     venueFactor * W_VENUE +
     restFactor * W_REST +
     defFactor * W_DEF +
-    consistencyFactor * W_CONSISTENCY
+    consistencyFactor * W_CONSISTENCY +
+    teammateFactor * W_TEAMMATE +
+    minutesFactor * W_MINUTES
   ) * 100;
 
   rawConfidence *= sampleFactor;
   const confidenceScore = Math.round(Math.min(100, Math.max(0, rawConfidence)));
 
-  // Value score
   const avgOverThreshold = mean > 0 ? ((mean - threshold) / threshold) * 100 : 0;
-  const valueScore = Math.round(Math.min(100, Math.max(0, 50 + avgOverThreshold * 2)));
+  let valueRaw = 50 + avgOverThreshold * 2;
+  // Boost value if usage is trending up
+  if (teammateCtx.minutes_trend === "up") valueRaw += 5;
+  if (teammateCtx.key_teammates_out.length > 0) {
+    // Check if without-teammate avg is above threshold
+    for (const split of teammateCtx.with_without_splits) {
+      if (teammateCtx.key_teammates_out.includes(split.teammate) && split.without_games >= 3) {
+        if (split.without_avg > threshold) valueRaw += 5;
+        else valueRaw -= 3;
+        break;
+      }
+    }
+  }
+  const valueScore = Math.round(Math.min(100, Math.max(0, valueRaw)));
 
   // ===== RICH REASON TAGS =====
   const reasonTags: string[] = [];
 
-  // Line-specific hit rate tags
   if (last10HitRate !== null && last10.length >= 8) {
     const hits = Math.round(last10HitRate * last10.length);
     reasonTags.push(`Hit ${threshold}+ in ${hits}/${last10.length} last games`);
@@ -355,7 +576,6 @@ function scoreProp(
   if (consistencyScore >= 70) reasonTags.push("consistent");
   if (volatilityScore >= 70) reasonTags.push("volatile_recent_form");
 
-  // Opponent tags with sample size
   if (vsOpponentValues.length >= 3 && vsOpponentHitRate !== null && vsOpponentHitRate >= 0.7) {
     reasonTags.push(`Strong vs ${todayOpponent} (${vsOpponentValues.length}g)`);
   }
@@ -366,7 +586,6 @@ function scoreProp(
     reasonTags.push(`Weak sample vs ${todayOpponent} (${vsOpponentValues.length}g)`);
   }
 
-  // Home/away tags with sample
   if (todayHomeAway === "home" && homeHitRate !== null && homeValues.length >= 5 && homeHitRate >= 0.7) {
     reasonTags.push(`Strong home split (${Math.round(homeHitRate * 100)}% in ${homeValues.length}g)`);
   }
@@ -374,7 +593,6 @@ function scoreProp(
     reasonTags.push(`Strong away split (${Math.round(awayHitRate * 100)}% in ${awayValues.length}g)`);
   }
 
-  // Rest tags
   if (restCtx.back_to_back) reasonTags.push("back_to_back");
   if (restCtx.rest_days != null && restCtx.rest_days >= 3) {
     reasonTags.push(`${restCtx.rest_days} days rest`);
@@ -384,13 +602,26 @@ function scoreProp(
     reasonTags.push(`${Math.round(restHitCtx.rate * 100)}% hit on ${bucket} (${restHitCtx.sample}g)`);
   }
 
-  // Defensive context tags
   if (defCtx.avg_allowed !== null && defCtx.games >= 5) {
     if (defCtx.avg_allowed > threshold) {
       reasonTags.push(`OPP allows ${defCtx.avg_allowed} avg (${defCtx.games}g)`);
     } else {
       reasonTags.push(`OPP holds to ${defCtx.avg_allowed} avg (${defCtx.games}g)`);
     }
+  }
+
+  // Teammate reason tags
+  if (teammateCtx.minutes_trend === "up") reasonTags.push("minutes_trending_up");
+  if (teammateCtx.minutes_trend === "down") reasonTags.push("minutes_trending_down");
+  if (teammateCtx.role_label === "starter") reasonTags.push("starter");
+  if (teammateCtx.role_label === "bench") reasonTags.push("bench_role");
+
+  for (const note of teammateCtx.teammate_notes) {
+    reasonTags.push(note);
+  }
+
+  if (teammateCtx.key_teammates_out.length > 0) {
+    reasonTags.push(`Key out: ${teammateCtx.key_teammates_out.join(", ")}`);
   }
 
   if (allValues.length >= 15) reasonTags.push("large_sample");
@@ -440,6 +671,11 @@ function scoreProp(
     line_hit_rate_l5: last5HitRate,
     line_hit_rate_l10: last10HitRate,
     line_hit_rate_season: seasonHitRate,
+    minutes_trend: teammateCtx.minutes_trend,
+    minutes_trend_note: teammateCtx.minutes_trend_note,
+    role_label: teammateCtx.role_label,
+    key_teammates_out: teammateCtx.key_teammates_out,
+    teammate_notes: teammateCtx.teammate_notes,
   };
 }
 
@@ -513,11 +749,18 @@ serve(async (req) => {
       playerLogs[log.player_id].push(log);
     }
 
-    // 4. Score each player for each stat/threshold combo
+    // 4. Build team rosters for teammate analysis (once per team)
+    const teamRosters: Record<string, Map<string, Set<number>>> = {};
+    for (const team of teamsPlaying.length > 0 ? teamsPlaying : [...new Set(allLogs.map(l => l.team_abbr).filter(Boolean) as string[])]) {
+      teamRosters[team] = buildTeamGameRosters(playerLogs, team);
+    }
+
+    // 5. Score each player for each stat/threshold combo
     const statsToScore = stat_types || ["pts", "reb", "ast", "fg3m", "stl", "blk"];
     const allScored: ScoredProp[] = [];
 
     for (const [pidStr, logs] of Object.entries(playerLogs)) {
+      const playerId = Number(pidStr);
       const team = logs[0]?.team_abbr;
       if (!team) continue;
 
@@ -527,26 +770,32 @@ serve(async (req) => {
 
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
 
-      // Compute rest/fatigue context once per player
       const restCtx = computeRestContext(logs, today);
 
       for (const stat of statsToScore) {
         const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
         const defCtx = computeDefensiveContext(playerLogs, opponent, stat);
 
+        // Compute teammate context once per player/stat combo
+        const tmRosters = teamRosters[team] || new Map();
+        const teammateCtx = computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
+
         for (const threshold of thresholds) {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs);
+          // Re-derive teammate context with correct threshold for with/without split accuracy
+          const tmCtxForThreshold = threshold === thresholds[0] ? teammateCtx :
+            computeTeammateContext(playerId, logs, stat, threshold, team, tmRosters, playerLogs);
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold);
           if (scored) allScored.push(scored);
         }
       }
     }
 
-    // 5. Sort by confidence and return top N
+    // 6. Sort by confidence and return top N
     allScored.sort((a, b) => b.confidence_score - a.confidence_score);
     const topProps = allScored.slice(0, top_n);
 
-    // 6. Cache (fire-and-forget)
+    // 7. Cache (fire-and-forget)
     if (topProps.length > 0) {
       const rows = topProps.map((p) => ({
         game_date: today,

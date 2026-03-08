@@ -194,6 +194,12 @@ serve(async (req) => {
       rest_sample: p.rest_sample,
       opp_def_avg_allowed: p.opp_stat_avg_allowed,
       opp_def_games: p.opp_stat_games,
+      // Teammate/lineup context
+      minutes_trend: p.minutes_trend,
+      minutes_trend_note: p.minutes_trend_note,
+      role_label: p.role_label,
+      key_teammates_out: p.key_teammates_out || [],
+      teammate_notes: p.teammate_notes || [],
       tags: p.reason_tags,
       total_games: p.total_games,
     }));
@@ -216,6 +222,9 @@ CRITICAL RULES:
 - Reference rest/fatigue when it's meaningful (back-to-back, 3+ days rest)
 - Reference opponent defensive context when sample size >= 5 games
 - Use line-specific hit rates (not just averages) in reasoning
+- When teammate context is available (key_teammates_out, minutes_trend, role_label), reference it in reasoning
+- Do NOT draw teammate conclusions from fewer than 3 games without noting sample size
+- Include teammate_note in data_context when meaningful
 
 SCORED CANDIDATES (ranked by confidence):
 ${JSON.stringify(candidateSummary, null, 1)}
@@ -255,7 +264,10 @@ Respond with ONLY valid JSON matching this exact structure:
             "value_score": number,
             "volatility_label": "low" | "medium" | "high",
             "sample_size": number,
-            "tags": ["Hit 24.5+ in 7/10 last games", "consistent", "Strong home split (80% in 12g)"]
+            "teammate_note": "Key out: Player X — +20% without (5g)" | null,
+            "minutes_trend": "up" | "down" | "stable" | null,
+            "role_label": "starter" | "bench" | null,
+            "tags": ["Hit 24.5+ in 7/10 last games", "consistent", "Strong home split (80% in 12g)", "minutes_trending_up"]
           }
         }
       ]
