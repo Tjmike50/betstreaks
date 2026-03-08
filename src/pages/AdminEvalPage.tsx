@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar } from "lucide-react";
+import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar, Users, CheckCircle, AlertTriangle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
@@ -150,6 +150,7 @@ export default function AdminEvalPage() {
   const { isAdmin, isLoading: adminLoading } = useAdmin();
   const navigate = useNavigate();
   const [grading, setGrading] = useState(false);
+  const [refreshingAvail, setRefreshingAvail] = useState(false);
 
   const { data: propOutcomes = [], isLoading: propsLoading } = useQuery({
     queryKey: ["prop-outcomes"],
@@ -190,6 +191,76 @@ export default function AdminEvalPage() {
     },
     enabled: isAdmin,
   });
+
+  // Availability status query
+  const todayStr = new Date().toISOString().split("T")[0];
+  const { data: availStatus, isLoading: availLoading, refetch: refetchAvail } = useQuery({
+    queryKey: ["avail-status", todayStr],
+    queryFn: async () => {
+      // Get today's availability records
+      const { data: avail } = await supabase
+        .from("player_availability")
+        .select("player_id, player_name, team_abbr, status, updated_at")
+        .eq("game_date", todayStr);
+
+      // Get today's games for coverage check
+      const { data: games } = await supabase
+        .from("games_today")
+        .select("home_team_abbr, away_team_abbr")
+        .eq("game_date", todayStr)
+        .eq("sport", "NBA");
+
+      // Get availability refresh timestamp
+      const { data: refreshRow } = await supabase
+        .from("refresh_status")
+        .select("last_run")
+        .eq("id", 2)
+        .maybeSingle();
+
+      const teamsPlaying = new Set<string>();
+      for (const g of games || []) {
+        if (g.home_team_abbr) teamsPlaying.add(g.home_team_abbr);
+        if (g.away_team_abbr) teamsPlaying.add(g.away_team_abbr);
+      }
+
+      const teamsCovered = new Set((avail || []).map(a => a.team_abbr).filter(Boolean));
+      const teamsMissing = [...teamsPlaying].filter(t => !teamsCovered.has(t));
+
+      const statusBreakdown: Record<string, number> = {};
+      for (const a of avail || []) {
+        statusBreakdown[a.status] = (statusBreakdown[a.status] || 0) + 1;
+      }
+
+      const lastRefresh = refreshRow?.last_run ? new Date(refreshRow.last_run) : null;
+      const hoursSince = lastRefresh ? (Date.now() - lastRefresh.getTime()) / (1000 * 60 * 60) : null;
+
+      return {
+        total: avail?.length || 0,
+        teamsPlaying: teamsPlaying.size,
+        teamsCovered: teamsCovered.size,
+        teamsMissing,
+        statusBreakdown,
+        lastRefresh,
+        hoursSince,
+        isFresh: hoursSince !== null && hoursSince <= 6,
+      };
+    },
+    enabled: isAdmin,
+  });
+
+  const handleRefreshAvail = async () => {
+    setRefreshingAvail(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("refresh-availability", { body: {} });
+      if (error) throw error;
+      toast({ title: "Availability refreshed", description: `${data.records} records for ${data.teams_covered}/${data.teams_playing} teams` });
+      refetchAvail();
+    } catch (e) {
+      toast({ title: "Availability refresh failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRefreshingAvail(false);
+    }
+  };
 
   const handleGrade = async () => {
     const yesterday = new Date();
@@ -270,6 +341,61 @@ export default function AdminEvalPage() {
             Grade Yesterday
           </Button>
         </div>
+
+        {/* Availability Status */}
+        {!availLoading && availStatus && (
+          <Card className={availStatus.isFresh ? "border-border" : "border-yellow-500/30"}>
+            <CardContent className="pt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Users className="h-4 w-4 text-primary" />
+                  Player Availability
+                </h3>
+                <Button size="sm" variant="ghost" onClick={handleRefreshAvail} disabled={refreshingAvail} className="h-7 text-xs">
+                  {refreshingAvail ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  Refresh
+                </Button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-lg font-bold text-primary">{availStatus.total}</div>
+                  <div className="text-[10px] text-muted-foreground">Records</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-primary">{availStatus.teamsCovered}/{availStatus.teamsPlaying}</div>
+                  <div className="text-[10px] text-muted-foreground">Teams</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold flex items-center justify-center gap-1">
+                    {availStatus.isFresh ? (
+                      <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-green-500">Fresh</span></>
+                    ) : (
+                      <><AlertTriangle className="h-4 w-4 text-yellow-500" /><span className="text-yellow-500">Stale</span></>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {availStatus.hoursSince != null ? `${availStatus.hoursSince.toFixed(1)}h ago` : "Never"}
+                  </div>
+                </div>
+              </div>
+              {/* Status breakdown */}
+              {Object.keys(availStatus.statusBreakdown).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(availStatus.statusBreakdown).map(([status, count]) => (
+                    <Badge key={status} variant="outline" className="text-[10px]">
+                      {status}: {count}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              {availStatus.teamsMissing.length > 0 && (
+                <p className="text-[10px] text-yellow-500">
+                  Missing: {availStatus.teamsMissing.join(", ")}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {isLoading ? (
           <div className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
