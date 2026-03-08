@@ -192,6 +192,62 @@ export default function AdminEvalPage() {
     enabled: isAdmin,
   });
 
+  // Availability status query
+  const todayStr = new Date().toISOString().split("T")[0];
+  const { data: availStatus, isLoading: availLoading, refetch: refetchAvail } = useQuery({
+    queryKey: ["avail-status", todayStr],
+    queryFn: async () => {
+      // Get today's availability records
+      const { data: avail } = await supabase
+        .from("player_availability")
+        .select("player_id, player_name, team_abbr, status, updated_at")
+        .eq("game_date", todayStr);
+
+      // Get today's games for coverage check
+      const { data: games } = await supabase
+        .from("games_today")
+        .select("home_team_abbr, away_team_abbr")
+        .eq("game_date", todayStr)
+        .eq("sport", "NBA");
+
+      // Get availability refresh timestamp
+      const { data: refreshRow } = await supabase
+        .from("refresh_status")
+        .select("last_run")
+        .eq("id", 2)
+        .maybeSingle();
+
+      const teamsPlaying = new Set<string>();
+      for (const g of games || []) {
+        if (g.home_team_abbr) teamsPlaying.add(g.home_team_abbr);
+        if (g.away_team_abbr) teamsPlaying.add(g.away_team_abbr);
+      }
+
+      const teamsCovered = new Set((avail || []).map(a => a.team_abbr).filter(Boolean));
+      const teamsMissing = [...teamsPlaying].filter(t => !teamsCovered.has(t));
+
+      const statusBreakdown: Record<string, number> = {};
+      for (const a of avail || []) {
+        statusBreakdown[a.status] = (statusBreakdown[a.status] || 0) + 1;
+      }
+
+      const lastRefresh = refreshRow?.last_run ? new Date(refreshRow.last_run) : null;
+      const hoursSince = lastRefresh ? (Date.now() - lastRefresh.getTime()) / (1000 * 60 * 60) : null;
+
+      return {
+        total: avail?.length || 0,
+        teamsPlaying: teamsPlaying.size,
+        teamsCovered: teamsCovered.size,
+        teamsMissing,
+        statusBreakdown,
+        lastRefresh,
+        hoursSince,
+        isFresh: hoursSince !== null && hoursSince <= 6,
+      };
+    },
+    enabled: isAdmin,
+  });
+
   const handleGrade = async () => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
