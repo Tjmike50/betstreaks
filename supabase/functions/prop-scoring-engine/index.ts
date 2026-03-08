@@ -44,6 +44,23 @@ interface TeammateContext {
   with_without_splits: { teammate: string; with_avg: number; without_avg: number; with_games: number; without_games: number }[];
 }
 
+interface PlayerAvailability {
+  player_id: number;
+  player_name: string;
+  team_abbr: string | null;
+  status: string;  // active, questionable, probable, doubtful, out
+  reason: string | null;
+  source: string;
+  confidence: string;
+}
+
+interface AvailabilityContext {
+  player_status: string | null;
+  availability_notes: string[];
+  lineup_confidence: string;  // high, medium, low
+  key_teammate_statuses: { name: string; status: string }[];
+}
+
 interface ScoredProp {
   player_id: number;
   player_name: string;
