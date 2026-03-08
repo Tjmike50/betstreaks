@@ -835,6 +835,11 @@ function scoreProp(
     reasonTags.push("uncertain_lineup");
   }
 
+  // Market movement reason tags
+  if (marketMovement?.movement_note) {
+    reasonTags.push(marketMovement.movement_note);
+  }
+
   return {
     player_id: games[0].player_id,
     player_name: games[0].player_name || "",
@@ -887,6 +892,7 @@ function scoreProp(
     player_status: availCtx.player_status,
     availability_notes: availCtx.availability_notes,
     lineup_confidence: availCtx.lineup_confidence,
+    market_movement: marketMovement,
   };
 }
 
