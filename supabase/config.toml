@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.prop-scoring-engine]
 verify_jwt = false
+
+[functions.grade-outcomes]
+verify_jwt = false
