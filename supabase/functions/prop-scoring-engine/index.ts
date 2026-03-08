@@ -617,16 +617,17 @@ function scoreProp(
   const sampleFactor = Math.min(1, allValues.length / 20);
 
   // Weight allocation (must sum to 1.0)
-  const W_RECENT = 0.22;
-  const W_SEASON = 0.13;
-  const W_TREND = 0.13;
-  const W_OPP = 0.10;
+  const W_RECENT = 0.21;
+  const W_SEASON = 0.12;
+  const W_TREND = 0.12;
+  const W_OPP = 0.09;
   const W_VENUE = 0.08;
-  const W_REST = 0.07;
+  const W_REST = 0.06;
   const W_DEF = 0.09;
   const W_CONSISTENCY = 0.05;
-  const W_TEAMMATE = 0.08;  // New: teammate context weight
-  const W_MINUTES = 0.05;   // New: minutes/usage trend weight
+  const W_TEAMMATE = 0.07;
+  const W_MINUTES = 0.05;
+  const W_MARKET = 0.06;  // Market movement weight
 
   const recentHR = last5HitRate ?? 0;
   const seasonHR = seasonHitRate ?? 0;
