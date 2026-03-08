@@ -13,6 +13,14 @@ const STAT_MAP: Record<string, string> = {
   pts: "pts", reb: "reb", ast: "ast", fg3m: "fg3m", stl: "stl", blk: "blk",
 };
 
+function bucketLabel(score: number | null): string {
+  if (score == null) return "N/A";
+  if (score >= 70) return "70-100";
+  if (score >= 50) return "50-69";
+  if (score >= 30) return "30-49";
+  return "0-29";
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -22,9 +30,14 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     const body = await req.json().catch(() => ({}));
-    const { game_date } = body;
+    let { game_date } = body;
 
-    if (!game_date) throw new Error("game_date is required (YYYY-MM-DD)");
+    // Default to yesterday if no date provided
+    if (!game_date) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      game_date = yesterday.toISOString().split("T")[0];
+    }
 
     // 1. Get actual game results for that date
     const { data: gameLogs, error: logsErr } = await supabase
@@ -35,7 +48,7 @@ serve(async (req) => {
     if (logsErr) throw new Error(`Failed to fetch game logs: ${logsErr.message}`);
     if (!gameLogs || gameLogs.length === 0) {
       return new Response(
-        JSON.stringify({ message: "No game logs found for this date", graded_props: 0, graded_slips: 0 }),
+        JSON.stringify({ message: "No game logs found for this date", game_date, graded_props: 0, graded_slips: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -44,12 +57,8 @@ serve(async (req) => {
     const actualResults: Record<number, Record<string, number>> = {};
     for (const log of gameLogs) {
       actualResults[log.player_id] = {
-        pts: log.pts ?? 0,
-        reb: log.reb ?? 0,
-        ast: log.ast ?? 0,
-        fg3m: log.fg3m ?? 0,
-        stl: log.stl ?? 0,
-        blk: log.blk ?? 0,
+        pts: log.pts ?? 0, reb: log.reb ?? 0, ast: log.ast ?? 0,
+        fg3m: log.fg3m ?? 0, stl: log.stl ?? 0, blk: log.blk ?? 0,
       };
     }
 
@@ -60,8 +69,8 @@ serve(async (req) => {
       .eq("game_date", game_date);
 
     let gradedProps = 0;
+    const gradedPropRows: any[] = [];
     if (propScores && propScores.length > 0) {
-      const propRows = [];
       for (const p of propScores) {
         const actual = actualResults[p.player_id];
         if (!actual) continue;
@@ -72,7 +81,7 @@ serve(async (req) => {
 
         const hit = actualValue >= p.threshold;
 
-        propRows.push({
+        const row = {
           game_date,
           player_id: p.player_id,
           player_name: p.player_name,
@@ -91,20 +100,20 @@ serve(async (req) => {
           hit,
           graded_at: new Date().toISOString(),
           reason_tags: p.reason_tags || [],
-        });
+        };
+        gradedPropRows.push(row);
       }
 
-      if (propRows.length > 0) {
+      if (gradedPropRows.length > 0) {
         const { error: upsertErr } = await supabase
           .from("prop_outcomes")
-          .upsert(propRows, { onConflict: "game_date,player_id,stat_type,threshold" });
+          .upsert(gradedPropRows, { onConflict: "game_date,player_id,stat_type,threshold" });
         if (upsertErr) console.error("Prop outcomes upsert error:", upsertErr);
-        else gradedProps = propRows.length;
+        else gradedProps = gradedPropRows.length;
       }
     }
 
     // 3. Grade slip outcomes
-    // Find slips generated on or for this game_date
     const dateStart = `${game_date}T00:00:00.000Z`;
     const dateEnd = `${game_date}T23:59:59.999Z`;
 
@@ -115,6 +124,8 @@ serve(async (req) => {
       .lte("created_at", dateEnd);
 
     let gradedSlips = 0;
+    const slipResults: { risk_label: string; slip_hit: boolean | null }[] = [];
+
     if (slips && slips.length > 0) {
       for (const slip of slips) {
         const { data: legs } = await supabase
@@ -125,13 +136,11 @@ serve(async (req) => {
 
         if (!legs || legs.length === 0) continue;
 
-        // Grade each leg
         const legOutcomes = [];
         let legsHit = 0;
         let firstFailed: number | null = null;
 
         for (const leg of legs) {
-          // Find player in game logs by name match
           const playerLog = gameLogs.find(
             (g) => g.player_name?.toLowerCase() === leg.player_name?.toLowerCase()
           );
@@ -163,14 +172,13 @@ serve(async (req) => {
             pick: leg.pick,
             actual_value: actualValue,
             hit,
-            confidence_score: null, // Could be enriched later
+            confidence_score: null,
           });
         }
 
         const allGraded = legOutcomes.every((l) => l.hit !== null);
         const slipHit = allGraded ? legOutcomes.every((l) => l.hit === true) : null;
 
-        // Insert slip outcome
         const { data: slipOutcome, error: soErr } = await supabase
           .from("slip_outcomes")
           .insert({
@@ -194,7 +202,6 @@ serve(async (req) => {
           continue;
         }
 
-        // Insert leg outcomes
         if (slipOutcome) {
           const legRows = legOutcomes.map((l) => ({
             ...l,
@@ -206,7 +213,65 @@ serve(async (req) => {
           if (legErr) console.error("Slip leg outcomes insert error:", legErr);
           else gradedSlips++;
         }
+
+        slipResults.push({ risk_label: slip.risk_label, slip_hit: slipHit });
       }
+    }
+
+    // 4. Generate daily snapshot
+    const propHits = gradedPropRows.filter(p => p.hit === true).length;
+    const propTotal = gradedPropRows.length;
+    const slipHitsCount = slipResults.filter(s => s.slip_hit === true).length;
+    const slipTotalCount = slipResults.filter(s => s.slip_hit != null).length;
+
+    // Confidence buckets
+    const confBuckets: Record<string, { hit: number; total: number }> = {};
+    const valBuckets: Record<string, { hit: number; total: number }> = {};
+    const statBuckets: Record<string, { hit: number; total: number }> = {};
+    const riskBuckets: Record<string, { hit: number; total: number }> = {};
+
+    for (const p of gradedPropRows) {
+      const cb = bucketLabel(p.confidence_score);
+      if (!confBuckets[cb]) confBuckets[cb] = { hit: 0, total: 0 };
+      confBuckets[cb].total++;
+      if (p.hit) confBuckets[cb].hit++;
+
+      const vb = bucketLabel(p.value_score);
+      if (!valBuckets[vb]) valBuckets[vb] = { hit: 0, total: 0 };
+      valBuckets[vb].total++;
+      if (p.hit) valBuckets[vb].hit++;
+
+      if (!statBuckets[p.stat_type]) statBuckets[p.stat_type] = { hit: 0, total: 0 };
+      statBuckets[p.stat_type].total++;
+      if (p.hit) statBuckets[p.stat_type].hit++;
+    }
+
+    for (const s of slipResults) {
+      if (s.slip_hit == null) continue;
+      if (!riskBuckets[s.risk_label]) riskBuckets[s.risk_label] = { hit: 0, total: 0 };
+      riskBuckets[s.risk_label].total++;
+      if (s.slip_hit) riskBuckets[s.risk_label].hit++;
+    }
+
+    if (propTotal > 0 || slipTotalCount > 0) {
+      const { error: snapErr } = await supabase
+        .from("eval_daily_snapshots")
+        .upsert({
+          snapshot_date: game_date,
+          prop_total: propTotal,
+          prop_hits: propHits,
+          prop_hit_rate: propTotal > 0 ? Math.round((propHits / propTotal) * 10000) / 100 : null,
+          slip_total: slipTotalCount,
+          slip_hits: slipHitsCount,
+          slip_hit_rate: slipTotalCount > 0 ? Math.round((slipHitsCount / slipTotalCount) * 10000) / 100 : null,
+          confidence_buckets: confBuckets,
+          value_buckets: valBuckets,
+          stat_type_buckets: statBuckets,
+          risk_label_buckets: riskBuckets,
+        }, { onConflict: "snapshot_date" });
+
+      if (snapErr) console.error("Snapshot upsert error:", snapErr);
+      else console.log(`Daily snapshot saved for ${game_date}`);
     }
 
     return new Response(
@@ -214,6 +279,7 @@ serve(async (req) => {
         game_date,
         graded_props: gradedProps,
         graded_slips: gradedSlips,
+        snapshot_saved: propTotal > 0 || slipTotalCount > 0,
         total_game_logs: gameLogs.length,
         total_prop_scores: propScores?.length || 0,
         total_slips: slips?.length || 0,

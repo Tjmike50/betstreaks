@@ -6,8 +6,9 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart3, TrendingUp, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw } from "lucide-react";
+import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 interface PropOutcome {
   id: string;
@@ -35,6 +36,20 @@ interface SlipOutcome {
   prompt: string | null;
 }
 
+interface DailySnapshot {
+  snapshot_date: string;
+  prop_total: number;
+  prop_hits: number;
+  prop_hit_rate: number | null;
+  slip_total: number;
+  slip_hits: number;
+  slip_hit_rate: number | null;
+  confidence_buckets: any;
+  value_buckets: any;
+  stat_type_buckets: any;
+  risk_label_buckets: any;
+}
+
 function bucketLabel(score: number | null): string {
   if (score == null) return "N/A";
   if (score >= 70) return "70-100";
@@ -50,7 +65,6 @@ function computeBucketStats(props: PropOutcome[], field: "confidence_score" | "v
     "30-49": { hit: 0, total: 0 },
     "0-29": { hit: 0, total: 0 },
   };
-
   for (const p of props) {
     if (p.hit == null) continue;
     const b = bucketLabel(p[field]);
@@ -58,11 +72,8 @@ function computeBucketStats(props: PropOutcome[], field: "confidence_score" | "v
     buckets[b].total++;
     if (p.hit) buckets[b].hit++;
   }
-
   return Object.entries(buckets).map(([range, { hit, total }]) => ({
-    range,
-    hit,
-    total,
+    range, hit, total,
     rate: total > 0 ? Math.round((hit / total) * 100) : null,
   }));
 }
@@ -89,10 +100,7 @@ function computeRiskStats(slips: SlipOutcome[]) {
     if (s.slip_hit) stats[s.risk_label].hit++;
   }
   return Object.entries(stats).map(([label, { hit, total }]) => ({
-    label,
-    hit,
-    total,
-    rate: Math.round((hit / total) * 100),
+    label, hit, total, rate: Math.round((hit / total) * 100),
   }));
 }
 
@@ -120,6 +128,22 @@ function HitRateBar({ rate, total }: { rate: number | null; total: number }) {
       <span className="text-xs font-mono">{rate}% ({total})</span>
     </div>
   );
+}
+
+function TrendIndicator({ snapshots, field }: { snapshots: DailySnapshot[]; field: "prop_hit_rate" | "slip_hit_rate" }) {
+  if (snapshots.length < 2) return null;
+  const recent = snapshots.slice(0, 3).filter(s => s[field] != null);
+  const older = snapshots.slice(3, 7).filter(s => s[field] != null);
+  if (recent.length === 0 || older.length === 0) return null;
+
+  const recentAvg = recent.reduce((s, r) => s + (r[field] || 0), 0) / recent.length;
+  const olderAvg = older.reduce((s, r) => s + (r[field] || 0), 0) / older.length;
+  const diff = recentAvg - olderAvg;
+
+  if (Math.abs(diff) < 1) return <span className="text-[10px] text-muted-foreground ml-1">→ stable</span>;
+  return diff > 0
+    ? <span className="text-[10px] text-green-400 ml-1 flex items-center gap-0.5"><TrendingUp className="h-3 w-3" />+{diff.toFixed(1)}%</span>
+    : <span className="text-[10px] text-red-400 ml-1 flex items-center gap-0.5"><TrendingDown className="h-3 w-3" />{diff.toFixed(1)}%</span>;
 }
 
 export default function AdminEvalPage() {
@@ -150,6 +174,19 @@ export default function AdminEvalPage() {
         .order("game_date", { ascending: false })
         .limit(200);
       return (data || []) as SlipOutcome[];
+    },
+    enabled: isAdmin,
+  });
+
+  const { data: snapshots = [], isLoading: snapsLoading } = useQuery({
+    queryKey: ["eval-snapshots"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("eval_daily_snapshots")
+        .select("*")
+        .order("snapshot_date", { ascending: true })
+        .limit(90);
+      return (data || []) as DailySnapshot[];
     },
     enabled: isAdmin,
   });
@@ -187,7 +224,7 @@ export default function AdminEvalPage() {
     );
   }
 
-  const isLoading = propsLoading || slipsLoading;
+  const isLoading = propsLoading || slipsLoading || snapsLoading;
   const confidenceStats = computeBucketStats(propOutcomes, "confidence_score");
   const valueStats = computeBucketStats(propOutcomes, "value_score");
   const volatilityStats = computeBucketStats(propOutcomes, "volatility_score");
@@ -202,6 +239,19 @@ export default function AdminEvalPage() {
   const totalSlips = slipOutcomes.filter((s) => s.slip_hit != null).length;
   const slipHits = slipOutcomes.filter((s) => s.slip_hit === true).length;
   const slipHitRate = totalSlips > 0 ? Math.round((slipHits / totalSlips) * 100) : null;
+
+  // Prepare chart data from snapshots
+  const chartData = snapshots
+    .filter(s => s.prop_hit_rate != null || s.slip_hit_rate != null)
+    .map(s => ({
+      date: s.snapshot_date.slice(5), // MM-DD
+      props: s.prop_hit_rate,
+      slips: s.slip_hit_rate,
+      propN: s.prop_total,
+      slipN: s.slip_total,
+    }));
+
+  const sortedSnapshots = [...snapshots].sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date));
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -225,21 +275,96 @@ export default function AdminEvalPage() {
           <div className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
         ) : (
           <>
-            {/* Overview Cards */}
+            {/* Overview Cards with Trends */}
             <div className="grid grid-cols-2 gap-3">
               <Card>
                 <CardContent className="pt-4 text-center">
-                  <div className="text-2xl font-bold text-primary">{overallHitRate != null ? `${overallHitRate}%` : "—"}</div>
+                  <div className="text-2xl font-bold text-primary flex items-center justify-center">
+                    {overallHitRate != null ? `${overallHitRate}%` : "—"}
+                    <TrendIndicator snapshots={sortedSnapshots} field="prop_hit_rate" />
+                  </div>
                   <div className="text-xs text-muted-foreground">Prop Hit Rate ({totalProps})</div>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="pt-4 text-center">
-                  <div className="text-2xl font-bold text-primary">{slipHitRate != null ? `${slipHitRate}%` : "—"}</div>
+                  <div className="text-2xl font-bold text-primary flex items-center justify-center">
+                    {slipHitRate != null ? `${slipHitRate}%` : "—"}
+                    <TrendIndicator snapshots={sortedSnapshots} field="slip_hit_rate" />
+                  </div>
                   <div className="text-xs text-muted-foreground">Slip Hit Rate ({totalSlips})</div>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Hit Rate Trend Chart */}
+            {chartData.length > 1 && (
+              <Card>
+                <CardContent className="pt-4 space-y-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-primary" />
+                    Hit Rate Over Time
+                  </h3>
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                        <Tooltip
+                          contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                          formatter={(value: number, name: string) => [`${value}%`, name === "props" ? "Prop Hit Rate" : "Slip Hit Rate"]}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Line type="monotone" dataKey="props" name="Props" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="slips" name="Slips" stroke="hsl(var(--destructive))" strokeWidth={2} dot={{ r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Daily Snapshot Table */}
+            {sortedSnapshots.length > 0 && (
+              <Card>
+                <CardContent className="pt-4 space-y-2">
+                  <h3 className="text-sm font-semibold">Daily Snapshots</h3>
+                  <div className="max-h-48 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-muted-foreground border-b border-border/30">
+                          <th className="text-left py-1 font-medium">Date</th>
+                          <th className="text-center py-1 font-medium">Props</th>
+                          <th className="text-center py-1 font-medium">Prop %</th>
+                          <th className="text-center py-1 font-medium">Slips</th>
+                          <th className="text-center py-1 font-medium">Slip %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedSnapshots.slice(0, 30).map(s => (
+                          <tr key={s.snapshot_date} className="border-b border-border/10">
+                            <td className="py-1 font-mono">{s.snapshot_date.slice(5)}</td>
+                            <td className="text-center">{s.prop_hits}/{s.prop_total}</td>
+                            <td className="text-center font-mono">
+                              <span className={s.prop_hit_rate != null ? (s.prop_hit_rate >= 50 ? "text-green-400" : "text-red-400") : "text-muted-foreground"}>
+                                {s.prop_hit_rate != null ? `${s.prop_hit_rate}%` : "—"}
+                              </span>
+                            </td>
+                            <td className="text-center">{s.slip_hits}/{s.slip_total}</td>
+                            <td className="text-center font-mono">
+                              <span className={s.slip_hit_rate != null ? (s.slip_hit_rate >= 30 ? "text-green-400" : "text-red-400") : "text-muted-foreground"}>
+                                {s.slip_hit_rate != null ? `${s.slip_hit_rate}%` : "—"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Confidence Score Buckets */}
             <Card>

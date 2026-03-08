@@ -246,6 +246,54 @@ export type Database = {
         }
         Relationships: []
       }
+      eval_daily_snapshots: {
+        Row: {
+          confidence_buckets: Json | null
+          created_at: string
+          id: string
+          prop_hit_rate: number | null
+          prop_hits: number
+          prop_total: number
+          risk_label_buckets: Json | null
+          slip_hit_rate: number | null
+          slip_hits: number
+          slip_total: number
+          snapshot_date: string
+          stat_type_buckets: Json | null
+          value_buckets: Json | null
+        }
+        Insert: {
+          confidence_buckets?: Json | null
+          created_at?: string
+          id?: string
+          prop_hit_rate?: number | null
+          prop_hits?: number
+          prop_total?: number
+          risk_label_buckets?: Json | null
+          slip_hit_rate?: number | null
+          slip_hits?: number
+          slip_total?: number
+          snapshot_date: string
+          stat_type_buckets?: Json | null
+          value_buckets?: Json | null
+        }
+        Update: {
+          confidence_buckets?: Json | null
+          created_at?: string
+          id?: string
+          prop_hit_rate?: number | null
+          prop_hits?: number
+          prop_total?: number
+          risk_label_buckets?: Json | null
+          slip_hit_rate?: number | null
+          slip_hits?: number
+          slip_total?: number
+          snapshot_date?: string
+          stat_type_buckets?: Json | null
+          value_buckets?: Json | null
+        }
+        Relationships: []
+      }
       favorite_players: {
         Row: {
           created_at: string
