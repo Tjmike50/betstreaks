@@ -171,6 +171,8 @@ serve(async (req) => {
       season_hit_rate: p.season_hit_rate != null ? `${Math.round(p.season_hit_rate * 100)}%` : null,
       last10_hit_rate: p.last10_hit_rate != null ? `${Math.round(p.last10_hit_rate * 100)}%` : null,
       last5_hit_rate: p.last5_hit_rate != null ? `${Math.round(p.last5_hit_rate * 100)}%` : null,
+      line_hit_rate_l10: p.line_hit_rate_l10 != null ? `${Math.round(p.line_hit_rate_l10 * 100)}%` : null,
+      line_hit_rate_season: p.line_hit_rate_season != null ? `${Math.round(p.line_hit_rate_season * 100)}%` : null,
       vs_opponent: p.vs_opponent_games > 0 ? {
         avg: p.vs_opponent_avg,
         hit_rate: p.vs_opponent_hit_rate != null ? `${Math.round(p.vs_opponent_hit_rate * 100)}%` : null,
@@ -185,6 +187,13 @@ serve(async (req) => {
         hit_rate: p.away_hit_rate != null ? `${Math.round(p.away_hit_rate * 100)}%` : null,
         games: p.away_games,
       },
+      rest_days: p.rest_days,
+      back_to_back: p.back_to_back,
+      games_last_7: p.games_last_7,
+      rest_hit_rate: p.rest_hit_rate != null ? `${Math.round(p.rest_hit_rate * 100)}%` : null,
+      rest_sample: p.rest_sample,
+      opp_def_avg_allowed: p.opp_stat_avg_allowed,
+      opp_def_games: p.opp_stat_games,
       tags: p.reason_tags,
       total_games: p.total_games,
     }));
