@@ -896,6 +896,83 @@ function scoreProp(
   };
 }
 
+// ===== MARKET MOVEMENT ANALYSIS =====
+
+interface LineSnapshot {
+  player_name: string;
+  stat_type: string;
+  threshold: number;
+  over_odds: string | null;
+  under_odds: string | null;
+  sportsbook: string;
+  snapshot_at: string;
+}
+
+function parseAmericanOdds(odds: string | null): number | null {
+  if (!odds) return null;
+  const n = parseInt(odds, 10);
+  if (isNaN(n)) return null;
+  return n;
+}
+
+function computeMarketMovement(
+  playerName: string,
+  statType: string,
+  threshold: number,
+  snapshots: LineSnapshot[]
+): MarketMovement | null {
+  // Filter relevant snapshots
+  const relevant = snapshots
+    .filter(s => s.player_name === playerName && s.stat_type === statType && Number(s.threshold) === threshold)
+    .sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
+
+  if (relevant.length < 2) return null;
+
+  const opening = relevant[0];
+  const current = relevant[relevant.length - 1];
+
+  const openOdds = parseAmericanOdds(opening.over_odds);
+  const currOdds = parseAmericanOdds(current.over_odds);
+
+  let odds_improved: boolean | null = null;
+  if (openOdds != null && currOdds != null) {
+    // For over bets: higher American odds = better value (e.g., -110 → +100 is better)
+    odds_improved = currOdds > openOdds;
+  }
+
+  const openThreshold = Number(opening.threshold);
+  const currThreshold = Number(current.threshold);
+  let line_moved: "up" | "down" | "unchanged" | null = null;
+  if (openThreshold !== currThreshold) {
+    line_moved = currThreshold > openThreshold ? "up" : "down";
+  } else {
+    line_moved = "unchanged";
+  }
+
+  // Generate movement note
+  let movement_note: string | null = null;
+  if (odds_improved === true && openOdds != null && currOdds != null) {
+    movement_note = `Value improved: ${opening.over_odds} → ${current.over_odds}`;
+  } else if (odds_improved === false && openOdds != null && currOdds != null) {
+    movement_note = `Value worsened: ${opening.over_odds} → ${current.over_odds}`;
+  }
+  if (line_moved === "up") {
+    movement_note = (movement_note ? movement_note + "; " : "") + `Line moved up from ${openThreshold}`;
+  } else if (line_moved === "down") {
+    movement_note = (movement_note ? movement_note + "; " : "") + `Line moved down from ${openThreshold}`;
+  }
+
+  return {
+    opening_line: openThreshold,
+    current_line: currThreshold,
+    line_moved,
+    opening_odds: opening.over_odds,
+    current_odds: current.over_odds,
+    odds_improved,
+    movement_note,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
