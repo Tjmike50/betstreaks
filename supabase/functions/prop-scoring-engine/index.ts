@@ -272,55 +272,64 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     const body = await req.json().catch(() => ({}));
-    const { game_date, top_n = 40, stat_types, thresholds_override } = body;
+    const { game_date, top_n = 40, stat_types, thresholds_override, matchups } = body;
+    // matchups: optional array of { home_team: "LAL", away_team: "GSW" } from odds API
 
     const today = game_date || new Date().toISOString().split("T")[0];
 
-    // 1. Get today's games
-    const { data: games } = await supabase
-      .from("games_today")
-      .select("*")
-      .eq("game_date", today);
-
-    if (!games || games.length === 0) {
-      return new Response(
-        JSON.stringify({ scored_props: [], message: "No games found for today" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Build set of team abbreviations playing today with their opponents
+    // 1. Build team matchups - prefer caller-provided matchups, fallback to games_today
     const teamMatchups: Record<string, { opponent: string; homeAway: string }> = {};
-    for (const g of games) {
-      if (g.home_team_abbr) {
-        teamMatchups[g.home_team_abbr] = { opponent: g.away_team_abbr || "", homeAway: "home" };
+
+    if (matchups && Array.isArray(matchups) && matchups.length > 0) {
+      for (const m of matchups) {
+        if (m.home_team) teamMatchups[m.home_team] = { opponent: m.away_team || "", homeAway: "home" };
+        if (m.away_team) teamMatchups[m.away_team] = { opponent: m.home_team || "", homeAway: "away" };
       }
-      if (g.away_team_abbr) {
-        teamMatchups[g.away_team_abbr] = { opponent: g.home_team_abbr || "", homeAway: "away" };
+    } else {
+      const { data: games } = await supabase
+        .from("games_today")
+        .select("*")
+        .eq("game_date", today);
+
+      if (games) {
+        for (const g of games) {
+          if (g.home_team_abbr) teamMatchups[g.home_team_abbr] = { opponent: g.away_team_abbr || "", homeAway: "home" };
+          if (g.away_team_abbr) teamMatchups[g.away_team_abbr] = { opponent: g.home_team_abbr || "", homeAway: "away" };
+        }
       }
     }
 
-    const teamsPlaying = Object.keys(teamMatchups);
+    let teamsPlaying = Object.keys(teamMatchups);
+
+    // If no team matchups found, fallback to scoring ALL active players
+    let scoringAllPlayers = false;
     if (teamsPlaying.length === 0) {
-      return new Response(
-        JSON.stringify({ scored_props: [], message: "No team matchups found" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      scoringAllPlayers = true;
     }
 
-    // 2. Get all player game logs for players on teams playing today
-    // We need recent games, fetching up to 1000 rows per team batch
+    // 2. Get player game logs
     const allLogs: GameLog[] = [];
-    // Fetch in batches to avoid the 1000-row limit
-    for (const team of teamsPlaying) {
+
+    if (scoringAllPlayers) {
+      // Fetch all recent game logs (last 30 days worth)
       const { data: logs } = await supabase
         .from("player_recent_games")
         .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
-        .eq("team_abbr", team)
         .order("game_date", { ascending: false })
-        .limit(500);
+        .limit(1000);
 
       if (logs) allLogs.push(...(logs as GameLog[]));
+    } else {
+      for (const team of teamsPlaying) {
+        const { data: logs } = await supabase
+          .from("player_recent_games")
+          .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
+          .eq("team_abbr", team)
+          .order("game_date", { ascending: false })
+          .limit(500);
+
+        if (logs) allLogs.push(...(logs as GameLog[]));
+      }
     }
 
     if (allLogs.length === 0) {
