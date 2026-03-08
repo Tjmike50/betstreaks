@@ -309,6 +309,45 @@ export type Database = {
         }
         Relationships: []
       }
+      player_availability: {
+        Row: {
+          confidence: string | null
+          game_date: string
+          id: string
+          player_id: number
+          player_name: string
+          reason: string | null
+          source: string | null
+          status: string
+          team_abbr: string | null
+          updated_at: string
+        }
+        Insert: {
+          confidence?: string | null
+          game_date?: string
+          id?: string
+          player_id: number
+          player_name: string
+          reason?: string | null
+          source?: string | null
+          status?: string
+          team_abbr?: string | null
+          updated_at?: string
+        }
+        Update: {
+          confidence?: string | null
+          game_date?: string
+          id?: string
+          player_id?: number
+          player_name?: string
+          reason?: string | null
+          source?: string | null
+          status?: string
+          team_abbr?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       player_prop_scores: {
         Row: {
           away_avg: number | null

@@ -44,6 +44,23 @@ interface TeammateContext {
   with_without_splits: { teammate: string; with_avg: number; without_avg: number; with_games: number; without_games: number }[];
 }
 
+interface PlayerAvailability {
+  player_id: number;
+  player_name: string;
+  team_abbr: string | null;
+  status: string;  // active, questionable, probable, doubtful, out
+  reason: string | null;
+  source: string;
+  confidence: string;
+}
+
+interface AvailabilityContext {
+  player_status: string | null;
+  availability_notes: string[];
+  lineup_confidence: string;  // high, medium, low
+  key_teammate_statuses: { name: string; status: string }[];
+}
+
 interface ScoredProp {
   player_id: number;
   player_name: string;
@@ -94,6 +111,10 @@ interface ScoredProp {
   role_label: string | null;
   key_teammates_out: string[];
   teammate_notes: string[];
+  // Availability context
+  player_status: string | null;
+  availability_notes: string[];
+  lineup_confidence: string | null;
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
@@ -384,6 +405,134 @@ function computeTeammateContext(
   return result;
 }
 
+/**
+ * Derive player availability from game log patterns when no explicit status exists.
+ * Checks for missed games, irregular gaps, and recent inactivity.
+ */
+function deriveAvailabilityFromLogs(
+  playerId: number,
+  playerLogs: GameLog[],
+  today: string,
+  teamGameDates: string[]
+): { status: string; reason: string | null; confidence: string } {
+  if (playerLogs.length === 0) return { status: "unknown", reason: "no game data", confidence: "low" };
+
+  const lastGameDate = playerLogs[0].game_date;
+  const daysSinceLast = daysBetween(today, lastGameDate);
+
+  // If player hasn't played in 10+ days, likely out
+  if (daysSinceLast >= 10) {
+    return { status: "out", reason: `no game in ${daysSinceLast} days`, confidence: "medium" };
+  }
+
+  // Check if player missed recent team games
+  const recentTeamGames = teamGameDates.filter(d => {
+    const gap = daysBetween(today, d);
+    return gap <= 14 && gap > 0;
+  }).sort((a, b) => b.localeCompare(a));
+
+  const playerGameDates = new Set(playerLogs.map(g => g.game_date));
+  let missedRecent = 0;
+  for (const d of recentTeamGames.slice(0, 5)) {
+    if (!playerGameDates.has(d)) missedRecent++;
+  }
+
+  if (missedRecent >= 3 && recentTeamGames.length >= 4) {
+    return { status: "doubtful", reason: `missed ${missedRecent} of last ${Math.min(5, recentTeamGames.length)} team games`, confidence: "medium" };
+  }
+
+  if (daysSinceLast >= 5) {
+    return { status: "questionable", reason: `${daysSinceLast} days since last game`, confidence: "low" };
+  }
+
+  return { status: "active", reason: null, confidence: "high" };
+}
+
+/**
+ * Compute availability context for a player, incorporating teammate availability.
+ */
+function computeAvailabilityContext(
+  playerId: number,
+  playerLogs: GameLog[],
+  teamAbbr: string,
+  availabilityMap: Map<number, PlayerAvailability>,
+  keyTeammateIds: number[],
+  allPlayerLogs: Record<number, GameLog[]>,
+  today: string,
+  teamGameDates: string[]
+): AvailabilityContext {
+  const result: AvailabilityContext = {
+    player_status: null,
+    availability_notes: [],
+    lineup_confidence: "high",
+    key_teammate_statuses: [],
+  };
+
+  // Check explicit availability first
+  const explicit = availabilityMap.get(playerId);
+  if (explicit) {
+    result.player_status = explicit.status;
+    if (explicit.status === "out") {
+      result.lineup_confidence = "high";
+      result.availability_notes.push(`Player OUT${explicit.reason ? ` (${explicit.reason})` : ""}`);
+      return result;
+    }
+    if (explicit.status === "doubtful") {
+      result.lineup_confidence = "low";
+      result.availability_notes.push(`Player DOUBTFUL${explicit.reason ? ` (${explicit.reason})` : ""}`);
+    } else if (explicit.status === "questionable") {
+      result.lineup_confidence = "medium";
+      result.availability_notes.push(`Player QUESTIONABLE${explicit.reason ? ` (${explicit.reason})` : ""}`);
+    } else if (explicit.status === "probable") {
+      result.lineup_confidence = "high";
+      result.availability_notes.push("Player PROBABLE");
+    } else {
+      result.player_status = "active";
+    }
+  } else {
+    // Derive from game logs
+    const derived = deriveAvailabilityFromLogs(playerId, playerLogs, today, teamGameDates);
+    result.player_status = derived.status;
+    if (derived.status !== "active") {
+      result.lineup_confidence = derived.confidence === "medium" ? "low" : "medium";
+      result.availability_notes.push(`Derived ${derived.status}${derived.reason ? `: ${derived.reason}` : ""}`);
+    }
+  }
+
+  // Check key teammate availability
+  for (const tmId of keyTeammateIds) {
+    const tmExplicit = availabilityMap.get(tmId);
+    const tmLogs = allPlayerLogs[tmId] || [];
+    let tmStatus: string;
+    let tmName: string;
+
+    if (tmExplicit) {
+      tmStatus = tmExplicit.status;
+      tmName = tmExplicit.player_name;
+    } else {
+      const derived = deriveAvailabilityFromLogs(tmId, tmLogs, today, teamGameDates);
+      tmStatus = derived.status;
+      tmName = tmLogs[0]?.player_name || `Player ${tmId}`;
+    }
+
+    if (tmStatus !== "active" && tmStatus !== "probable") {
+      result.key_teammate_statuses.push({ name: tmName, status: tmStatus });
+
+      if (tmStatus === "questionable") {
+        result.availability_notes.push(`Key teammate ${tmName} questionable`);
+        if (result.lineup_confidence === "high") result.lineup_confidence = "medium";
+      } else if (tmStatus === "doubtful" || tmStatus === "out") {
+        result.availability_notes.push(`Key teammate ${tmName} ${tmStatus}`);
+      }
+    }
+  }
+
+  // Cap notes
+  result.availability_notes = result.availability_notes.slice(0, 4);
+
+  return result;
+}
+
 function scoreProp(
   games: GameLog[],
   statKey: string,
@@ -394,7 +543,8 @@ function scoreProp(
   restHitCtx: { rate: number | null; sample: number },
   defCtx: { avg_allowed: number | null; games: number; note: string | null },
   allPlayerLogs: Record<number, GameLog[]>,
-  teammateCtx: TeammateContext
+  teammateCtx: TeammateContext,
+  availCtx: AvailabilityContext
 ): ScoredProp | null {
   if (games.length === 0) return null;
 
@@ -543,6 +693,23 @@ function scoreProp(
   ) * 100;
 
   rawConfidence *= sampleFactor;
+
+  // Availability penalty: reduce confidence for uncertain lineups
+  if (availCtx.player_status === "questionable") rawConfidence *= 0.75;
+  else if (availCtx.player_status === "doubtful") rawConfidence *= 0.5;
+  else if (availCtx.player_status === "out") rawConfidence *= 0.1;
+
+  // Reduce confidence when key teammate status is uncertain
+  const uncertainTeammates = availCtx.key_teammate_statuses.filter(
+    t => t.status === "questionable" || t.status === "doubtful"
+  );
+  if (uncertainTeammates.length > 0) {
+    rawConfidence *= Math.max(0.7, 1 - uncertainTeammates.length * 0.1);
+  }
+
+  if (availCtx.lineup_confidence === "low") rawConfidence *= 0.85;
+  else if (availCtx.lineup_confidence === "medium") rawConfidence *= 0.92;
+
   const confidenceScore = Math.round(Math.min(100, Math.max(0, rawConfidence)));
 
   const avgOverThreshold = mean > 0 ? ((mean - threshold) / threshold) * 100 : 0;
@@ -627,6 +794,14 @@ function scoreProp(
   if (allValues.length >= 15) reasonTags.push("large_sample");
   if (allValues.length < 8) reasonTags.push("small_sample");
 
+  // Availability reason tags
+  for (const note of availCtx.availability_notes) {
+    reasonTags.push(note);
+  }
+  if (availCtx.lineup_confidence === "low") {
+    reasonTags.push("uncertain_lineup");
+  }
+
   return {
     player_id: games[0].player_id,
     player_name: games[0].player_name || "",
@@ -676,6 +851,9 @@ function scoreProp(
     role_label: teammateCtx.role_label,
     key_teammates_out: teammateCtx.key_teammates_out,
     teammate_notes: teammateCtx.teammate_notes,
+    player_status: availCtx.player_status,
+    availability_notes: availCtx.availability_notes,
+    lineup_confidence: availCtx.lineup_confidence,
   };
 }
 
@@ -751,8 +929,36 @@ serve(async (req) => {
 
     // 4. Build team rosters for teammate analysis (once per team)
     const teamRosters: Record<string, Map<string, Set<number>>> = {};
-    for (const team of teamsPlaying.length > 0 ? teamsPlaying : [...new Set(allLogs.map(l => l.team_abbr).filter(Boolean) as string[])]) {
+    const allTeams = teamsPlaying.length > 0 ? teamsPlaying : [...new Set(allLogs.map(l => l.team_abbr).filter(Boolean) as string[])];
+    for (const team of allTeams) {
       teamRosters[team] = buildTeamGameRosters(playerLogs, team);
+    }
+
+    // 4b. Fetch player availability data
+    const availabilityMap = new Map<number, PlayerAvailability>();
+    {
+      const { data: avail } = await supabase
+        .from("player_availability")
+        .select("player_id, player_name, team_abbr, status, reason, source, confidence")
+        .eq("game_date", today);
+      if (avail) {
+        for (const a of avail) {
+          availabilityMap.set(a.player_id, a as PlayerAvailability);
+        }
+      }
+      console.log(`Loaded ${availabilityMap.size} explicit availability records for ${today}`);
+    }
+
+    // 4c. Build team game date sets for availability derivation
+    const teamGameDates: Record<string, string[]> = {};
+    for (const team of allTeams) {
+      const dates = new Set<string>();
+      for (const logs of Object.values(playerLogs)) {
+        for (const g of logs) {
+          if (g.team_abbr === team) dates.add(g.game_date);
+        }
+      }
+      teamGameDates[team] = [...dates].sort((a, b) => b.localeCompare(a));
     }
 
     // 5. Score each player for each stat/threshold combo
@@ -770,22 +976,36 @@ serve(async (req) => {
 
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
 
+      // Skip players who are confirmed OUT
+      const explicitStatus = availabilityMap.get(playerId);
+      if (explicitStatus?.status === "out") continue;
+
       const restCtx = computeRestContext(logs, today);
 
       for (const stat of statsToScore) {
         const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
         const defCtx = computeDefensiveContext(playerLogs, opponent, stat);
 
-        // Compute teammate context once per player/stat combo
         const tmRosters = teamRosters[team] || new Map();
         const teammateCtx = computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
 
+        // Identify key teammate IDs for availability check
+        const keyTmIds = teammateCtx.with_without_splits.map(s => {
+          for (const [pid, pLogs] of Object.entries(playerLogs)) {
+            if (pLogs[0]?.player_name === s.teammate) return Number(pid);
+          }
+          return -1;
+        }).filter(id => id > 0);
+
+        const availCtx = computeAvailabilityContext(
+          playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || []
+        );
+
         for (const threshold of thresholds) {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
-          // Re-derive teammate context with correct threshold for with/without split accuracy
           const tmCtxForThreshold = threshold === thresholds[0] ? teammateCtx :
             computeTeammateContext(playerId, logs, stat, threshold, team, tmRosters, playerLogs);
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold);
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx);
           if (scored) allScored.push(scored);
         }
       }

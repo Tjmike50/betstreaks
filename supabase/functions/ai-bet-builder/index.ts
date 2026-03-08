@@ -200,6 +200,10 @@ serve(async (req) => {
       role_label: p.role_label,
       key_teammates_out: p.key_teammates_out || [],
       teammate_notes: p.teammate_notes || [],
+      // Availability context
+      player_status: p.player_status,
+      availability_notes: p.availability_notes || [],
+      lineup_confidence: p.lineup_confidence,
       tags: p.reason_tags,
       total_games: p.total_games,
     }));
@@ -225,6 +229,10 @@ CRITICAL RULES:
 - When teammate context is available (key_teammates_out, minutes_trend, role_label), reference it in reasoning
 - Do NOT draw teammate conclusions from fewer than 3 games without noting sample size
 - Include teammate_note in data_context when meaningful
+- When player_status is "questionable" or "doubtful", note the uncertainty in reasoning
+- Do NOT include players with status "out"
+- Prefer players with lineup_confidence "high" for safe slips
+- Note availability uncertainty in data_context when it affects the pick
 
 SCORED CANDIDATES (ranked by confidence):
 ${JSON.stringify(candidateSummary, null, 1)}
@@ -267,6 +275,8 @@ Respond with ONLY valid JSON matching this exact structure:
             "teammate_note": "Key out: Player X — +20% without (5g)" | null,
             "minutes_trend": "up" | "down" | "stable" | null,
             "role_label": "starter" | "bench" | null,
+            "availability_note": "Key teammate X questionable" | "Player PROBABLE" | null,
+            "lineup_confidence": "high" | "medium" | "low" | null,
             "tags": ["Hit 24.5+ in 7/10 last games", "consistent", "Strong home split (80% in 12g)", "minutes_trending_up"]
           }
         }

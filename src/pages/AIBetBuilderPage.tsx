@@ -83,6 +83,9 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
   if (ctx.minutes_trend === "down") chips.push({ label: "📉 Usage trending down", color: "bg-red-500/10 text-red-400" });
   if (ctx.role_label === "starter") chips.push({ label: "Starter", color: "bg-primary/10 text-primary" });
   if (ctx.role_label === "bench") chips.push({ label: "Bench", color: "bg-muted text-muted-foreground" });
+  if (ctx.availability_note) chips.push({ label: ctx.availability_note, color: "bg-amber-500/10 text-amber-400" });
+  if (ctx.lineup_confidence === "low") chips.push({ label: "⚠ Uncertain lineup", color: "bg-red-500/10 text-red-400" });
+  if (ctx.lineup_confidence === "medium") chips.push({ label: "Lineup TBD", color: "bg-yellow-500/10 text-yellow-400" });
 
   if (ctx.tags?.length) {
     for (const tag of ctx.tags.slice(0, 3)) {
