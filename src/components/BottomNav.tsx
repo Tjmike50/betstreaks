@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Flame, Star, Bell, User, Calendar, Heart } from "lucide-react";
+import { Flame, Bell, User, Calendar, Heart, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlerts } from "@/hooks/useAlerts";
 
