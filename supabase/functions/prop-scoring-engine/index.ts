@@ -71,6 +71,13 @@ interface MarketMovement {
   movement_note: string | null;
 }
 
+interface FactorAudit {
+  factor: string;
+  raw_value: number;
+  weight: number;
+  weighted_contribution: number;
+}
+
 interface ScoredProp {
   player_id: number;
   player_name: string;
@@ -127,6 +134,8 @@ interface ScoredProp {
   lineup_confidence: string | null;
   // Market movement
   market_movement: MarketMovement | null;
+  // Scoring audit
+  scoring_audit: FactorAudit[] | null;
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
@@ -714,19 +723,29 @@ function scoreProp(
     }
   }
 
-  let rawConfidence = (
-    recentHR * W_RECENT +
-    seasonHR * W_SEASON +
-    trendHR * W_TREND +
-    oppFactor * W_OPP +
-    venueFactor * W_VENUE +
-    restFactor * W_REST +
-    defFactor * W_DEF +
-    consistencyFactor * W_CONSISTENCY +
-    teammateFactor * W_TEAMMATE +
-    minutesFactor * W_MINUTES +
-    marketFactor * W_MARKET
-  ) * 100;
+  // Build scoring audit breakdown
+  const auditFactors: { name: string; value: number; weight: number }[] = [
+    { name: "recent", value: recentHR, weight: W_RECENT },
+    { name: "season", value: seasonHR, weight: W_SEASON },
+    { name: "trend", value: trendHR, weight: W_TREND },
+    { name: "opponent", value: oppFactor, weight: W_OPP },
+    { name: "venue", value: venueFactor, weight: W_VENUE },
+    { name: "rest", value: restFactor, weight: W_REST },
+    { name: "defense", value: defFactor, weight: W_DEF },
+    { name: "consistency", value: consistencyFactor, weight: W_CONSISTENCY },
+    { name: "teammate", value: teammateFactor, weight: W_TEAMMATE },
+    { name: "minutes", value: minutesFactor, weight: W_MINUTES },
+    { name: "market", value: marketFactor, weight: W_MARKET },
+  ];
+
+  const scoringAudit: FactorAudit[] = auditFactors.map(f => ({
+    factor: f.name,
+    raw_value: Math.round(f.value * 1000) / 1000,
+    weight: f.weight,
+    weighted_contribution: Math.round(f.value * f.weight * 10000) / 100,
+  }));
+
+  let rawConfidence = auditFactors.reduce((sum, f) => sum + f.value * f.weight, 0) * 100;
 
   rawConfidence *= sampleFactor;
 
@@ -900,6 +919,7 @@ function scoreProp(
     availability_notes: availCtx.availability_notes,
     lineup_confidence: availCtx.lineup_confidence,
     market_movement: marketMovement,
+    scoring_audit: scoringAudit,
   };
 }
 

@@ -294,6 +294,42 @@ export type Database = {
         }
         Relationships: []
       }
+      factor_analysis_snapshots: {
+        Row: {
+          analysis_date: string
+          created_at: string
+          factor_performance: Json
+          id: string
+          lookback_days: number
+          overstatement_analysis: Json
+          recommendations: Json
+          sample_size: number
+          score_range_performance: Json
+        }
+        Insert: {
+          analysis_date?: string
+          created_at?: string
+          factor_performance?: Json
+          id?: string
+          lookback_days?: number
+          overstatement_analysis?: Json
+          recommendations?: Json
+          sample_size?: number
+          score_range_performance?: Json
+        }
+        Update: {
+          analysis_date?: string
+          created_at?: string
+          factor_performance?: Json
+          id?: string
+          lookback_days?: number
+          overstatement_analysis?: Json
+          recommendations?: Json
+          sample_size?: number
+          score_range_performance?: Json
+        }
+        Relationships: []
+      }
       favorite_players: {
         Row: {
           created_at: string
@@ -742,6 +778,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      scoring_weights: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          label: string
+          notes: string | null
+          version: number
+          weights: Json
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          label?: string
+          notes?: string | null
+          version?: number
+          weights?: Json
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          label?: string
+          notes?: string | null
+          version?: number
+          weights?: Json
+        }
+        Relationships: []
       }
       slip_leg_outcomes: {
         Row: {
