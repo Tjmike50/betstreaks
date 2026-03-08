@@ -332,7 +332,8 @@ Respond with ONLY valid JSON matching this exact structure:
             "role_label": "starter" | "bench" | null,
             "availability_note": "Key teammate X questionable" | "Player PROBABLE" | null,
             "lineup_confidence": "high" | "medium" | "low" | null,
-            "tags": ["Hit 24.5+ in 7/10 last games", "consistent", "Strong home split (80% in 12g)", "minutes_trending_up"]
+            "market_note": "Value improved: -110 → +100" | "Line moved up from 24.5" | null,
+            "tags": ["Hit 24.5+ in 7/10 last games", "consistent", "Strong home split (80% in 12g)", "minutes_trending_up", "Value improved: -110 → +100"]
           }
         }
       ]
