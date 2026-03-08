@@ -285,6 +285,9 @@ CRITICAL RULES:
 - Do NOT include players with status "out"
 - Prefer players with lineup_confidence "high" for safe slips
 - Note availability uncertainty in data_context when it affects the pick
+- When market_movement data is available, reference it in reasoning (e.g., "value improved since open", "line moved against us")
+- Do NOT let market movement override strong statistical evidence — it's one factor among many
+- Include market_note in data_context when movement is meaningful
 
 SCORED CANDIDATES (ranked by confidence):
 ${JSON.stringify(candidateSummary, null, 1)}
