@@ -150,6 +150,7 @@ export default function AdminEvalPage() {
   const { isAdmin, isLoading: adminLoading } = useAdmin();
   const navigate = useNavigate();
   const [grading, setGrading] = useState(false);
+  const [refreshingAvail, setRefreshingAvail] = useState(false);
 
   const { data: propOutcomes = [], isLoading: propsLoading } = useQuery({
     queryKey: ["prop-outcomes"],
