@@ -693,6 +693,23 @@ function scoreProp(
   ) * 100;
 
   rawConfidence *= sampleFactor;
+
+  // Availability penalty: reduce confidence for uncertain lineups
+  if (availCtx.player_status === "questionable") rawConfidence *= 0.75;
+  else if (availCtx.player_status === "doubtful") rawConfidence *= 0.5;
+  else if (availCtx.player_status === "out") rawConfidence *= 0.1;
+
+  // Reduce confidence when key teammate status is uncertain
+  const uncertainTeammates = availCtx.key_teammate_statuses.filter(
+    t => t.status === "questionable" || t.status === "doubtful"
+  );
+  if (uncertainTeammates.length > 0) {
+    rawConfidence *= Math.max(0.7, 1 - uncertainTeammates.length * 0.1);
+  }
+
+  if (availCtx.lineup_confidence === "low") rawConfidence *= 0.85;
+  else if (availCtx.lineup_confidence === "medium") rawConfidence *= 0.92;
+
   const confidenceScore = Math.round(Math.min(100, Math.max(0, rawConfidence)));
 
   const avgOverThreshold = mean > 0 ? ((mean - threshold) / threshold) * 100 : 0;
