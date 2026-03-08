@@ -405,6 +405,134 @@ function computeTeammateContext(
   return result;
 }
 
+/**
+ * Derive player availability from game log patterns when no explicit status exists.
+ * Checks for missed games, irregular gaps, and recent inactivity.
+ */
+function deriveAvailabilityFromLogs(
+  playerId: number,
+  playerLogs: GameLog[],
+  today: string,
+  teamGameDates: string[]
+): { status: string; reason: string | null; confidence: string } {
+  if (playerLogs.length === 0) return { status: "unknown", reason: "no game data", confidence: "low" };
+
+  const lastGameDate = playerLogs[0].game_date;
+  const daysSinceLast = daysBetween(today, lastGameDate);
+
+  // If player hasn't played in 10+ days, likely out
+  if (daysSinceLast >= 10) {
+    return { status: "out", reason: `no game in ${daysSinceLast} days`, confidence: "medium" };
+  }
+
+  // Check if player missed recent team games
+  const recentTeamGames = teamGameDates.filter(d => {
+    const gap = daysBetween(today, d);
+    return gap <= 14 && gap > 0;
+  }).sort((a, b) => b.localeCompare(a));
+
+  const playerGameDates = new Set(playerLogs.map(g => g.game_date));
+  let missedRecent = 0;
+  for (const d of recentTeamGames.slice(0, 5)) {
+    if (!playerGameDates.has(d)) missedRecent++;
+  }
+
+  if (missedRecent >= 3 && recentTeamGames.length >= 4) {
+    return { status: "doubtful", reason: `missed ${missedRecent} of last ${Math.min(5, recentTeamGames.length)} team games`, confidence: "medium" };
+  }
+
+  if (daysSinceLast >= 5) {
+    return { status: "questionable", reason: `${daysSinceLast} days since last game`, confidence: "low" };
+  }
+
+  return { status: "active", reason: null, confidence: "high" };
+}
+
+/**
+ * Compute availability context for a player, incorporating teammate availability.
+ */
+function computeAvailabilityContext(
+  playerId: number,
+  playerLogs: GameLog[],
+  teamAbbr: string,
+  availabilityMap: Map<number, PlayerAvailability>,
+  keyTeammateIds: number[],
+  allPlayerLogs: Record<number, GameLog[]>,
+  today: string,
+  teamGameDates: string[]
+): AvailabilityContext {
+  const result: AvailabilityContext = {
+    player_status: null,
+    availability_notes: [],
+    lineup_confidence: "high",
+    key_teammate_statuses: [],
+  };
+
+  // Check explicit availability first
+  const explicit = availabilityMap.get(playerId);
+  if (explicit) {
+    result.player_status = explicit.status;
+    if (explicit.status === "out") {
+      result.lineup_confidence = "high";
+      result.availability_notes.push(`Player OUT${explicit.reason ? ` (${explicit.reason})` : ""}`);
+      return result;
+    }
+    if (explicit.status === "doubtful") {
+      result.lineup_confidence = "low";
+      result.availability_notes.push(`Player DOUBTFUL${explicit.reason ? ` (${explicit.reason})` : ""}`);
+    } else if (explicit.status === "questionable") {
+      result.lineup_confidence = "medium";
+      result.availability_notes.push(`Player QUESTIONABLE${explicit.reason ? ` (${explicit.reason})` : ""}`);
+    } else if (explicit.status === "probable") {
+      result.lineup_confidence = "high";
+      result.availability_notes.push("Player PROBABLE");
+    } else {
+      result.player_status = "active";
+    }
+  } else {
+    // Derive from game logs
+    const derived = deriveAvailabilityFromLogs(playerId, playerLogs, today, teamGameDates);
+    result.player_status = derived.status;
+    if (derived.status !== "active") {
+      result.lineup_confidence = derived.confidence === "medium" ? "low" : "medium";
+      result.availability_notes.push(`Derived ${derived.status}${derived.reason ? `: ${derived.reason}` : ""}`);
+    }
+  }
+
+  // Check key teammate availability
+  for (const tmId of keyTeammateIds) {
+    const tmExplicit = availabilityMap.get(tmId);
+    const tmLogs = allPlayerLogs[tmId] || [];
+    let tmStatus: string;
+    let tmName: string;
+
+    if (tmExplicit) {
+      tmStatus = tmExplicit.status;
+      tmName = tmExplicit.player_name;
+    } else {
+      const derived = deriveAvailabilityFromLogs(tmId, tmLogs, today, teamGameDates);
+      tmStatus = derived.status;
+      tmName = tmLogs[0]?.player_name || `Player ${tmId}`;
+    }
+
+    if (tmStatus !== "active" && tmStatus !== "probable") {
+      result.key_teammate_statuses.push({ name: tmName, status: tmStatus });
+
+      if (tmStatus === "questionable") {
+        result.availability_notes.push(`Key teammate ${tmName} questionable`);
+        if (result.lineup_confidence === "high") result.lineup_confidence = "medium";
+      } else if (tmStatus === "doubtful" || tmStatus === "out") {
+        result.availability_notes.push(`Key teammate ${tmName} ${tmStatus}`);
+      }
+    }
+  }
+
+  // Cap notes
+  result.availability_notes = result.availability_notes.slice(0, 4);
+
+  return result;
+}
+
 function scoreProp(
   games: GameLog[],
   statKey: string,
@@ -415,7 +543,8 @@ function scoreProp(
   restHitCtx: { rate: number | null; sample: number },
   defCtx: { avg_allowed: number | null; games: number; note: string | null },
   allPlayerLogs: Record<number, GameLog[]>,
-  teammateCtx: TeammateContext
+  teammateCtx: TeammateContext,
+  availCtx: AvailabilityContext
 ): ScoredProp | null {
   if (games.length === 0) return null;
 
