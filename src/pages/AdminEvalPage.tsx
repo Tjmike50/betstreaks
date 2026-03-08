@@ -44,10 +44,10 @@ interface DailySnapshot {
   slip_total: number;
   slip_hits: number;
   slip_hit_rate: number | null;
-  confidence_buckets: Record<string, { hit: number; total: number }>;
-  value_buckets: Record<string, { hit: number; total: number }>;
-  stat_type_buckets: Record<string, { hit: number; total: number }>;
-  risk_label_buckets: Record<string, { hit: number; total: number }>;
+  confidence_buckets: any;
+  value_buckets: any;
+  stat_type_buckets: any;
+  risk_label_buckets: any;
 }
 
 function bucketLabel(score: number | null): string {
