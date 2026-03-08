@@ -248,6 +248,56 @@ export default function AdminEvalPage() {
     enabled: isAdmin,
   });
 
+  // Line snapshot status query
+  const { data: snapStatus, isLoading: snapLoading, refetch: refetchSnap } = useQuery({
+    queryKey: ["snap-status", todayStr],
+    queryFn: async () => {
+      const { count: totalToday } = await supabase
+        .from("line_snapshots")
+        .select("id", { count: "exact", head: true })
+        .eq("game_date", todayStr);
+
+      const { data: uniqueProps } = await supabase
+        .from("line_snapshots")
+        .select("player_name, stat_type")
+        .eq("game_date", todayStr);
+
+      const uniqueKeys = new Set((uniqueProps || []).map(p => `${p.player_name}|${p.stat_type}`));
+
+      const { data: refreshRow } = await supabase
+        .from("refresh_status")
+        .select("last_run")
+        .eq("id", 3)
+        .maybeSingle();
+
+      const lastRefresh = refreshRow?.last_run ? new Date(refreshRow.last_run) : null;
+      const hoursSince = lastRefresh ? (Date.now() - lastRefresh.getTime()) / (1000 * 60 * 60) : null;
+
+      return {
+        totalToday: totalToday || 0,
+        uniqueProps: uniqueKeys.size,
+        lastRefresh,
+        hoursSince,
+      };
+    },
+    enabled: isAdmin,
+  });
+
+  const [refreshingSnap, setRefreshingSnap] = useState(false);
+  const handleRefreshSnap = async () => {
+    setRefreshingSnap(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("collect-line-snapshots", { body: {} });
+      if (error) throw error;
+      toast({ title: "Snapshots collected", description: `${data.new_snapshots} new, ${data.skipped_dupes} dupes skipped` });
+      refetchSnap();
+    } catch (e) {
+      toast({ title: "Snapshot collection failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRefreshingSnap(false);
+    }
+  };
+
   const handleRefreshAvail = async () => {
     setRefreshingAvail(true);
     try {
