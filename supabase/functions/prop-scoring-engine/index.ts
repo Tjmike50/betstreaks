@@ -929,8 +929,36 @@ serve(async (req) => {
 
     // 4. Build team rosters for teammate analysis (once per team)
     const teamRosters: Record<string, Map<string, Set<number>>> = {};
-    for (const team of teamsPlaying.length > 0 ? teamsPlaying : [...new Set(allLogs.map(l => l.team_abbr).filter(Boolean) as string[])]) {
+    const allTeams = teamsPlaying.length > 0 ? teamsPlaying : [...new Set(allLogs.map(l => l.team_abbr).filter(Boolean) as string[])];
+    for (const team of allTeams) {
       teamRosters[team] = buildTeamGameRosters(playerLogs, team);
+    }
+
+    // 4b. Fetch player availability data
+    const availabilityMap = new Map<number, PlayerAvailability>();
+    {
+      const { data: avail } = await supabase
+        .from("player_availability")
+        .select("player_id, player_name, team_abbr, status, reason, source, confidence")
+        .eq("game_date", today);
+      if (avail) {
+        for (const a of avail) {
+          availabilityMap.set(a.player_id, a as PlayerAvailability);
+        }
+      }
+      console.log(`Loaded ${availabilityMap.size} explicit availability records for ${today}`);
+    }
+
+    // 4c. Build team game date sets for availability derivation
+    const teamGameDates: Record<string, string[]> = {};
+    for (const team of allTeams) {
+      const dates = new Set<string>();
+      for (const logs of Object.values(playerLogs)) {
+        for (const g of logs) {
+          if (g.team_abbr === team) dates.add(g.game_date);
+        }
+      }
+      teamGameDates[team] = [...dates].sort((a, b) => b.localeCompare(a));
     }
 
     // 5. Score each player for each stat/threshold combo
@@ -948,22 +976,36 @@ serve(async (req) => {
 
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
 
+      // Skip players who are confirmed OUT
+      const explicitStatus = availabilityMap.get(playerId);
+      if (explicitStatus?.status === "out") continue;
+
       const restCtx = computeRestContext(logs, today);
 
       for (const stat of statsToScore) {
         const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
         const defCtx = computeDefensiveContext(playerLogs, opponent, stat);
 
-        // Compute teammate context once per player/stat combo
         const tmRosters = teamRosters[team] || new Map();
         const teammateCtx = computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
 
+        // Identify key teammate IDs for availability check
+        const keyTmIds = teammateCtx.with_without_splits.map(s => {
+          for (const [pid, pLogs] of Object.entries(playerLogs)) {
+            if (pLogs[0]?.player_name === s.teammate) return Number(pid);
+          }
+          return -1;
+        }).filter(id => id > 0);
+
+        const availCtx = computeAvailabilityContext(
+          playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || []
+        );
+
         for (const threshold of thresholds) {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
-          // Re-derive teammate context with correct threshold for with/without split accuracy
           const tmCtxForThreshold = threshold === thresholds[0] ? teammateCtx :
             computeTeammateContext(playerId, logs, stat, threshold, team, tmRosters, playerLogs);
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold);
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx);
           if (scored) allScored.push(scored);
         }
       }
