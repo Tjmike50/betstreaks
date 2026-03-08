@@ -693,6 +693,20 @@ function scoreProp(
     minutesFactor = 0.35;
   }
 
+  // Market movement factor
+  let marketFactor = 0.5;
+  if (marketMovement) {
+    if (marketMovement.odds_improved === true) {
+      marketFactor = 0.65; // odds moved in our favor
+    } else if (marketMovement.odds_improved === false) {
+      marketFactor = 0.35; // odds moved against us
+    }
+    // If line moved up and we're picking over, that's favorable
+    if (marketMovement.line_moved === "up" && threshold > 0) {
+      marketFactor = Math.max(marketFactor, 0.55);
+    }
+  }
+
   let rawConfidence = (
     recentHR * W_RECENT +
     seasonHR * W_SEASON +
@@ -703,7 +717,8 @@ function scoreProp(
     defFactor * W_DEF +
     consistencyFactor * W_CONSISTENCY +
     teammateFactor * W_TEAMMATE +
-    minutesFactor * W_MINUTES
+    minutesFactor * W_MINUTES +
+    marketFactor * W_MARKET
   ) * 100;
 
   rawConfidence *= sampleFactor;
@@ -731,7 +746,6 @@ function scoreProp(
   // Boost value if usage is trending up
   if (teammateCtx.minutes_trend === "up") valueRaw += 5;
   if (teammateCtx.key_teammates_out.length > 0) {
-    // Check if without-teammate avg is above threshold
     for (const split of teammateCtx.with_without_splits) {
       if (teammateCtx.key_teammates_out.includes(split.teammate) && split.without_games >= 3) {
         if (split.without_avg > threshold) valueRaw += 5;
@@ -739,6 +753,11 @@ function scoreProp(
         break;
       }
     }
+  }
+  // Market movement value adjustment
+  if (marketMovement) {
+    if (marketMovement.odds_improved === true) valueRaw += 5;
+    else if (marketMovement.odds_improved === false) valueRaw -= 4;
   }
   const valueScore = Math.round(Math.min(100, Math.max(0, valueRaw)));
 
