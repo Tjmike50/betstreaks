@@ -1,3 +1,15 @@
+export interface LegDataContext {
+  season_avg?: number | null;
+  last5_avg?: number | null;
+  last10_hit_rate?: string | null;
+  vs_opponent?: string | null;
+  home_away_split?: string | null;
+  confidence_score?: number | null;
+  volatility_label?: "low" | "medium" | "high" | null;
+  sample_size?: number | null;
+  tags?: string[];
+}
+
 export interface AISlipLeg {
   id?: string;
   slip_id?: string;
@@ -9,6 +21,7 @@ export interface AISlipLeg {
   odds: string | null;
   reasoning: string | null;
   leg_order: number;
+  data_context?: LegDataContext | null;
 }
 
 export interface AISlip {
