@@ -171,6 +171,8 @@ serve(async (req) => {
       season_hit_rate: p.season_hit_rate != null ? `${Math.round(p.season_hit_rate * 100)}%` : null,
       last10_hit_rate: p.last10_hit_rate != null ? `${Math.round(p.last10_hit_rate * 100)}%` : null,
       last5_hit_rate: p.last5_hit_rate != null ? `${Math.round(p.last5_hit_rate * 100)}%` : null,
+      line_hit_rate_l10: p.line_hit_rate_l10 != null ? `${Math.round(p.line_hit_rate_l10 * 100)}%` : null,
+      line_hit_rate_season: p.line_hit_rate_season != null ? `${Math.round(p.line_hit_rate_season * 100)}%` : null,
       vs_opponent: p.vs_opponent_games > 0 ? {
         avg: p.vs_opponent_avg,
         hit_rate: p.vs_opponent_hit_rate != null ? `${Math.round(p.vs_opponent_hit_rate * 100)}%` : null,
@@ -185,6 +187,13 @@ serve(async (req) => {
         hit_rate: p.away_hit_rate != null ? `${Math.round(p.away_hit_rate * 100)}%` : null,
         games: p.away_games,
       },
+      rest_days: p.rest_days,
+      back_to_back: p.back_to_back,
+      games_last_7: p.games_last_7,
+      rest_hit_rate: p.rest_hit_rate != null ? `${Math.round(p.rest_hit_rate * 100)}%` : null,
+      rest_sample: p.rest_sample,
+      opp_def_avg_allowed: p.opp_stat_avg_allowed,
+      opp_def_games: p.opp_stat_games,
       tags: p.reason_tags,
       total_games: p.total_games,
     }));
@@ -200,10 +209,13 @@ CRITICAL RULES:
 - For "balanced" slips: mix high-confidence and moderate-value candidates
 - For "aggressive" slips: pick higher-value candidates even with more volatility
 - Provide reasoning that references the actual data (hit rates, averages, trends, matchup data)
-- Include the data context for each leg (hit rates, sample sizes, etc.)
+- Include rich data_context for each leg with hit rates, sample sizes, rest notes, and defensive context
 - Generate realistic estimated combined American odds
 - Always note sample size when citing matchup-specific data
 - Do NOT over-weight tiny sample sizes (< 3 games)
+- Reference rest/fatigue when it's meaningful (back-to-back, 3+ days rest)
+- Reference opponent defensive context when sample size >= 5 games
+- Use line-specific hit rates (not just averages) in reasoning
 
 SCORED CANDIDATES (ranked by confidence):
 ${JSON.stringify(candidateSummary, null, 1)}
@@ -228,16 +240,22 @@ Respond with ONLY valid JSON matching this exact structure:
           "pick": "Over" | "Under",
           "odds": "-110",
           "reasoning": "1-2 sentences referencing actual hit rates, averages, and trends from the data",
-          "data_context": {
+           "data_context": {
             "season_avg": number,
             "last5_avg": number,
             "last10_hit_rate": "80%",
+            "line_hit_rate": "70% over 20 games",
             "vs_opponent": "75% in 4 games" | null,
+            "vs_opponent_sample": number | null,
             "home_away_split": "85% at home in 10 games" | null,
+            "home_away_sample": number | null,
+            "rest_note": "2 days rest" | "back-to-back" | null,
+            "opp_defense_note": "OPP allows 26.3 avg (15g)" | null,
             "confidence_score": number,
+            "value_score": number,
             "volatility_label": "low" | "medium" | "high",
             "sample_size": number,
-            "tags": ["hot_streak", "consistent"]
+            "tags": ["Hit 24.5+ in 7/10 last games", "consistent", "Strong home split (80% in 12g)"]
           }
         }
       ]

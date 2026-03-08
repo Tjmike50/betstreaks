@@ -65,16 +65,26 @@ function getConfidenceColor(score: number | null | undefined) {
 function DataContextChips({ ctx }: { ctx: LegDataContext }) {
   const chips: { label: string; color: string }[] = [];
 
-  if (ctx.last10_hit_rate) chips.push({ label: `L10: ${ctx.last10_hit_rate}`, color: "bg-primary/10 text-primary" });
-  if (ctx.vs_opponent) chips.push({ label: `vs OPP: ${ctx.vs_opponent}`, color: "bg-blue-500/10 text-blue-400" });
-  if (ctx.home_away_split) chips.push({ label: ctx.home_away_split, color: "bg-purple-500/10 text-purple-400" });
+  if (ctx.line_hit_rate) chips.push({ label: `Line: ${ctx.line_hit_rate}`, color: "bg-primary/10 text-primary" });
+  else if (ctx.last10_hit_rate) chips.push({ label: `L10: ${ctx.last10_hit_rate}`, color: "bg-primary/10 text-primary" });
+
+  if (ctx.vs_opponent) {
+    const sampleNote = ctx.vs_opponent_sample != null ? ` (${ctx.vs_opponent_sample}g)` : "";
+    chips.push({ label: `vs OPP: ${ctx.vs_opponent}${sampleNote}`, color: "bg-blue-500/10 text-blue-400" });
+  }
+  if (ctx.home_away_split) {
+    const sampleNote = ctx.home_away_sample != null ? ` (${ctx.home_away_sample}g)` : "";
+    chips.push({ label: `${ctx.home_away_split}${sampleNote}`, color: "bg-purple-500/10 text-purple-400" });
+  }
+  if (ctx.rest_note) chips.push({ label: ctx.rest_note, color: "bg-orange-500/10 text-orange-400" });
+  if (ctx.opp_defense_note) chips.push({ label: ctx.opp_defense_note, color: "bg-cyan-500/10 text-cyan-400" });
 
   if (ctx.tags?.length) {
-    for (const tag of ctx.tags.slice(0, 2)) {
+    for (const tag of ctx.tags.slice(0, 3)) {
       const label = tag.replace(/_/g, " ");
-      const color = tag.includes("hot") || tag.includes("consistent") || tag.includes("strong")
+      const color = tag.includes("Hot") || tag.includes("consistent") || tag.includes("Strong") || tag.includes("Hit")
         ? "bg-green-500/10 text-green-400"
-        : tag.includes("cold") || tag.includes("volatile") || tag.includes("weak")
+        : tag.includes("cold") || tag.includes("volatile") || tag.includes("Weak") || tag.includes("small")
         ? "bg-red-500/10 text-red-400"
         : "bg-muted text-muted-foreground";
       chips.push({ label, color });
@@ -96,12 +106,18 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
 
 function LegDataBar({ ctx }: { ctx: LegDataContext }) {
   return (
-    <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-border/20">
+    <div className="grid grid-cols-4 gap-2 mt-2 pt-2 border-t border-border/20">
       <div className="text-center">
         <div className={`text-xs font-bold ${getConfidenceColor(ctx.confidence_score)}`}>
           {ctx.confidence_score != null ? ctx.confidence_score : "—"}
         </div>
         <div className="text-[9px] text-muted-foreground">Confidence</div>
+      </div>
+      <div className="text-center">
+        <div className={`text-xs font-bold ${getConfidenceColor(ctx.value_score)}`}>
+          {ctx.value_score != null ? ctx.value_score : "—"}
+        </div>
+        <div className="text-[9px] text-muted-foreground">Value</div>
       </div>
       <div className="text-center">
         <div className="text-xs font-bold text-foreground">
@@ -116,7 +132,7 @@ function LegDataBar({ ctx }: { ctx: LegDataContext }) {
         <div className="text-[9px] text-muted-foreground">Volatility</div>
       </div>
       {ctx.sample_size != null && (
-        <div className="col-span-3 text-center">
+        <div className="col-span-4 text-center">
           <span className="text-[9px] text-muted-foreground">
             {ctx.sample_size} game sample
           </span>

@@ -7,18 +7,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Stat column mapping
 const STAT_MAP: Record<string, string> = {
-  pts: "pts",
-  reb: "reb",
-  ast: "ast",
-  fg3m: "fg3m",
-  "3pm": "fg3m",
-  stl: "stl",
-  blk: "blk",
+  pts: "pts", reb: "reb", ast: "ast", fg3m: "fg3m", "3pm": "fg3m", stl: "stl", blk: "blk",
 };
 
-// Common prop lines for each stat type
 const DEFAULT_THRESHOLDS: Record<string, number[]> = {
   pts: [15.5, 19.5, 24.5, 29.5],
   reb: [4.5, 6.5, 8.5, 10.5],
@@ -75,11 +67,23 @@ interface ScoredProp {
   volatility_score: number;
   consistency_score: number;
   reason_tags: string[];
+  // New fields
+  rest_days: number | null;
+  back_to_back: boolean;
+  games_last_7: number;
+  games_last_14: number;
+  rest_hit_rate: number | null;
+  rest_sample: number;
+  opp_def_rank_note: string | null;
+  opp_stat_avg_allowed: number | null;
+  opp_stat_games: number;
+  line_hit_rate_l5: number | null;
+  line_hit_rate_l10: number | null;
+  line_hit_rate_season: number | null;
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
   if (!matchup) return { opponent: null, homeAway: "unknown" };
-  // Format: "LAL vs. GSW" (home) or "LAL @ GSW" (away)
   if (matchup.includes("vs.")) {
     const parts = matchup.split("vs.").map((s) => s.trim());
     return { opponent: parts[1] || null, homeAway: "home" };
@@ -109,19 +113,105 @@ function calcStdDev(values: number[]): number {
   return Math.sqrt(variance);
 }
 
+function daysBetween(a: string, b: string): number {
+  const da = new Date(a), db = new Date(b);
+  return Math.round(Math.abs(da.getTime() - db.getTime()) / 86400000);
+}
+
+/**
+ * Compute rest/fatigue context from a player's sorted game logs (most recent first).
+ */
+function computeRestContext(logs: GameLog[], today: string) {
+  if (logs.length === 0) return { rest_days: null, back_to_back: false, games_last_7: 0, games_last_14: 0 };
+
+  const lastGameDate = logs[0].game_date;
+  const rest_days = daysBetween(today, lastGameDate);
+  const back_to_back = rest_days <= 1;
+
+  const todayDate = new Date(today);
+  let games_last_7 = 0, games_last_14 = 0;
+  for (const g of logs) {
+    const d = daysBetween(today, g.game_date);
+    if (d <= 7) games_last_7++;
+    if (d <= 14) games_last_14++;
+    if (d > 14) break;
+  }
+
+  return { rest_days, back_to_back, games_last_7, games_last_14 };
+}
+
+/**
+ * Compute rest-specific hit rate: how the player performs with similar rest days.
+ */
+function computeRestHitRate(logs: GameLog[], statKey: string, threshold: number, restDays: number | null): { rate: number | null; sample: number } {
+  if (restDays == null || logs.length < 5) return { rate: null, sample: 0 };
+
+  const col = STAT_MAP[statKey];
+  if (!col) return { rate: null, sample: 0 };
+
+  // Group: 0-1 = back-to-back, 2 = normal, 3+ = well-rested
+  const bucket = restDays <= 1 ? "b2b" : restDays >= 3 ? "rested" : "normal";
+  const vals: number[] = [];
+
+  for (let i = 0; i < logs.length - 1; i++) {
+    const val = (logs[i] as any)[col];
+    if (val == null) continue;
+    const nextGame = logs[i + 1];
+    const gap = daysBetween(logs[i].game_date, nextGame.game_date);
+    const gameBucket = gap <= 1 ? "b2b" : gap >= 3 ? "rested" : "normal";
+    if (gameBucket === bucket) vals.push(val);
+  }
+
+  return { rate: calcHitRate(vals, threshold), sample: vals.length };
+}
+
+/**
+ * Compute opponent defensive context: how much the opponent allows for this stat type.
+ * Uses all game logs from players who faced this opponent.
+ */
+function computeDefensiveContext(
+  allPlayerLogs: Record<number, GameLog[]>,
+  opponentAbbr: string | null,
+  statKey: string
+): { avg_allowed: number | null; games: number; note: string | null } {
+  if (!opponentAbbr) return { avg_allowed: null, games: 0, note: null };
+
+  const col = STAT_MAP[statKey];
+  if (!col) return { avg_allowed: null, games: 0, note: null };
+
+  const vals: number[] = [];
+  for (const logs of Object.values(allPlayerLogs)) {
+    for (const g of logs) {
+      const { opponent } = parseMatchup(g.matchup);
+      if (opponent && opponent.trim().toUpperCase() === opponentAbbr.trim().toUpperCase()) {
+        const v = (g as any)[col];
+        if (v != null) vals.push(v);
+      }
+    }
+  }
+
+  if (vals.length < 5) return { avg_allowed: null, games: vals.length, note: vals.length > 0 ? "small_sample" : null };
+
+  const avg = calcAvg(vals)!;
+  return { avg_allowed: avg, games: vals.length, note: null };
+}
+
 function scoreProp(
   games: GameLog[],
   statKey: string,
   threshold: number,
   todayOpponent: string | null,
-  todayHomeAway: string
+  todayHomeAway: string,
+  restCtx: { rest_days: number | null; back_to_back: boolean; games_last_7: number; games_last_14: number },
+  restHitCtx: { rate: number | null; sample: number },
+  defCtx: { avg_allowed: number | null; games: number; note: string | null },
+  allPlayerLogs: Record<number, GameLog[]>
 ): ScoredProp | null {
   if (games.length === 0) return null;
 
   const col = STAT_MAP[statKey];
   if (!col) return null;
 
-  // Extract stat values in chronological order (most recent first, games already sorted)
   const allValues: number[] = [];
   const homeValues: number[] = [];
   const awayValues: number[] = [];
@@ -131,7 +221,6 @@ function scoreProp(
     const val = (g as any)[col];
     if (val == null) continue;
     allValues.push(val);
-
     const { opponent, homeAway } = parseMatchup(g.matchup);
     if (homeAway === "home") homeValues.push(val);
     if (homeAway === "away") awayValues.push(val);
@@ -140,7 +229,7 @@ function scoreProp(
     }
   }
 
-  if (allValues.length < 3) return null; // Need minimum sample
+  if (allValues.length < 3) return null;
 
   const last3 = allValues.slice(0, 3);
   const last5 = allValues.slice(0, 5);
@@ -153,6 +242,7 @@ function scoreProp(
   const last15Avg = calcAvg(last15);
   const seasonAvg = calcAvg(allValues);
 
+  // Line-specific hit rates
   const last5HitRate = calcHitRate(last5, threshold);
   const last10HitRate = calcHitRate(last10, threshold);
   const last15HitRate = calcHitRate(last15, threshold);
@@ -166,65 +256,143 @@ function scoreProp(
   const homeHitRate = calcHitRate(homeValues, threshold);
   const awayHitRate = calcHitRate(awayValues, threshold);
 
-  // -- Scoring Engine --
+  // Volatility & consistency
   const stdDev = calcStdDev(allValues);
   const mean = seasonAvg || 0;
-
-  // Volatility (0-100, lower = more consistent)
   const cv = mean > 0 ? (stdDev / mean) * 100 : 50;
   const volatilityScore = Math.min(100, Math.round(cv * 2));
-
-  // Consistency (inverse of volatility)
   const consistencyScore = Math.max(0, 100 - volatilityScore);
 
-  // Confidence score: weighted combination of hit rates + sample size
-  const sampleFactor = Math.min(1, allValues.length / 20); // maxes at 20 games
-  const recentWeight = 0.4;
-  const seasonWeight = 0.3;
-  const trendWeight = 0.3;
+  // ===== REFINED SCORING ENGINE =====
+  const sampleFactor = Math.min(1, allValues.length / 20);
+
+  // Weight allocation (must sum to 1.0)
+  const W_RECENT = 0.25;      // L5 hit rate
+  const W_SEASON = 0.15;      // Season hit rate
+  const W_TREND = 0.15;       // L3 vs L10 trend
+  const W_OPP = 0.12;         // Opponent matchup
+  const W_VENUE = 0.10;       // Home/away
+  const W_REST = 0.08;        // Rest/fatigue
+  const W_DEF = 0.10;         // Defensive matchup
+  const W_CONSISTENCY = 0.05; // Consistency bonus
 
   const recentHR = last5HitRate ?? 0;
   const seasonHR = seasonHitRate ?? 0;
-  // Trend: is recent form improving?
-  const trendHR = last3Avg && last10Avg ? (last3Avg > last10Avg ? 0.7 : 0.4) : 0.5;
+  const trendHR = last3Avg && last10Avg ? (last3Avg > last10Avg ? 0.7 : last3Avg > last10Avg * 0.95 ? 0.5 : 0.3) : 0.5;
 
-  let rawConfidence = (recentHR * recentWeight + seasonHR * seasonWeight + trendHR * trendWeight) * 100;
+  // Opponent split (sample-weighted)
+  let oppFactor = 0.5;
+  if (vsOpponentValues.length >= 3 && vsOpponentHitRate !== null) {
+    oppFactor = vsOpponentHitRate;
+  } else if (vsOpponentValues.length >= 1 && vsOpponentHitRate !== null) {
+    // Blend with season when sample is tiny
+    oppFactor = vsOpponentHitRate * 0.3 + seasonHR * 0.7;
+  }
+
+  // Venue split (sample-weighted)
+  let venueFactor = 0.5;
+  const venueHR = todayHomeAway === "home" ? homeHitRate : awayHitRate;
+  const venueGames = todayHomeAway === "home" ? homeValues.length : awayValues.length;
+  if (venueGames >= 5 && venueHR !== null) {
+    venueFactor = venueHR;
+  } else if (venueGames >= 2 && venueHR !== null) {
+    venueFactor = venueHR * 0.4 + seasonHR * 0.6;
+  }
+
+  // Rest/fatigue factor
+  let restFactor = 0.5;
+  if (restHitCtx.sample >= 3 && restHitCtx.rate !== null) {
+    restFactor = restHitCtx.rate;
+  } else if (restCtx.back_to_back) {
+    restFactor = 0.4; // slight penalty for B2B
+  } else if (restCtx.rest_days != null && restCtx.rest_days >= 3) {
+    restFactor = 0.55; // slight boost for well-rested
+  }
+
+  // Defensive matchup factor
+  let defFactor = 0.5;
+  if (defCtx.avg_allowed !== null && defCtx.games >= 10 && mean > 0) {
+    // If opponent allows more than average for this stat, it's favorable
+    defFactor = Math.min(1, Math.max(0, 0.5 + (defCtx.avg_allowed - threshold) / (threshold * 2)));
+  } else if (defCtx.avg_allowed !== null && defCtx.games >= 5) {
+    const raw = 0.5 + (defCtx.avg_allowed - threshold) / (threshold * 2);
+    defFactor = raw * 0.6 + 0.5 * 0.4; // blend toward neutral for smaller sample
+  }
+
+  const consistencyFactor = consistencyScore / 100;
+
+  let rawConfidence = (
+    recentHR * W_RECENT +
+    seasonHR * W_SEASON +
+    trendHR * W_TREND +
+    oppFactor * W_OPP +
+    venueFactor * W_VENUE +
+    restFactor * W_REST +
+    defFactor * W_DEF +
+    consistencyFactor * W_CONSISTENCY
+  ) * 100;
+
   rawConfidence *= sampleFactor;
-
-  // Boost for opponent-specific data
-  if (vsOpponentValues.length >= 2 && vsOpponentHitRate !== null) {
-    rawConfidence = rawConfidence * 0.8 + vsOpponentHitRate * 100 * 0.2;
-  }
-
-  // Boost/penalize for home/away split
-  if (todayHomeAway === "home" && homeHitRate !== null && homeValues.length >= 3) {
-    rawConfidence = rawConfidence * 0.85 + homeHitRate * 100 * 0.15;
-  } else if (todayHomeAway === "away" && awayHitRate !== null && awayValues.length >= 3) {
-    rawConfidence = rawConfidence * 0.85 + awayHitRate * 100 * 0.15;
-  }
-
   const confidenceScore = Math.round(Math.min(100, Math.max(0, rawConfidence)));
 
-  // Value score: how far above threshold is the average?
+  // Value score
   const avgOverThreshold = mean > 0 ? ((mean - threshold) / threshold) * 100 : 0;
   const valueScore = Math.round(Math.min(100, Math.max(0, 50 + avgOverThreshold * 2)));
 
-  // Reason tags
+  // ===== RICH REASON TAGS =====
   const reasonTags: string[] = [];
+
+  // Line-specific hit rate tags
+  if (last10HitRate !== null && last10.length >= 8) {
+    const hits = Math.round(last10HitRate * last10.length);
+    reasonTags.push(`Hit ${threshold}+ in ${hits}/${last10.length} last games`);
+  }
+
   if (last5HitRate !== null && last5HitRate >= 0.8) reasonTags.push("hot_streak");
   if (last5HitRate !== null && last5HitRate <= 0.2) reasonTags.push("cold_streak");
   if (last3Avg && last10Avg && last3Avg > last10Avg * 1.1) reasonTags.push("trending_up");
   if (last3Avg && last10Avg && last3Avg < last10Avg * 0.9) reasonTags.push("trending_down");
   if (consistencyScore >= 70) reasonTags.push("consistent");
-  if (volatilityScore >= 70) reasonTags.push("volatile");
-  if (vsOpponentValues.length >= 2 && vsOpponentHitRate !== null && vsOpponentHitRate >= 0.7) {
-    reasonTags.push("strong_vs_opponent");
+  if (volatilityScore >= 70) reasonTags.push("volatile_recent_form");
+
+  // Opponent tags with sample size
+  if (vsOpponentValues.length >= 3 && vsOpponentHitRate !== null && vsOpponentHitRate >= 0.7) {
+    reasonTags.push(`Strong vs ${todayOpponent} (${vsOpponentValues.length}g)`);
   }
-  if (vsOpponentValues.length >= 2 && vsOpponentHitRate !== null && vsOpponentHitRate <= 0.3) {
-    reasonTags.push("weak_vs_opponent");
+  if (vsOpponentValues.length >= 3 && vsOpponentHitRate !== null && vsOpponentHitRate <= 0.3) {
+    reasonTags.push(`Weak vs ${todayOpponent} (${vsOpponentValues.length}g)`);
   }
-  if (todayHomeAway === "home" && homeHitRate !== null && homeHitRate >= 0.7) reasonTags.push("home_advantage");
-  if (todayHomeAway === "away" && awayHitRate !== null && awayHitRate >= 0.7) reasonTags.push("road_warrior");
+  if (vsOpponentValues.length > 0 && vsOpponentValues.length < 3) {
+    reasonTags.push(`Weak sample vs ${todayOpponent} (${vsOpponentValues.length}g)`);
+  }
+
+  // Home/away tags with sample
+  if (todayHomeAway === "home" && homeHitRate !== null && homeValues.length >= 5 && homeHitRate >= 0.7) {
+    reasonTags.push(`Strong home split (${Math.round(homeHitRate * 100)}% in ${homeValues.length}g)`);
+  }
+  if (todayHomeAway === "away" && awayHitRate !== null && awayValues.length >= 5 && awayHitRate >= 0.7) {
+    reasonTags.push(`Strong away split (${Math.round(awayHitRate * 100)}% in ${awayValues.length}g)`);
+  }
+
+  // Rest tags
+  if (restCtx.back_to_back) reasonTags.push("back_to_back");
+  if (restCtx.rest_days != null && restCtx.rest_days >= 3) {
+    reasonTags.push(`${restCtx.rest_days} days rest`);
+  }
+  if (restHitCtx.sample >= 3 && restHitCtx.rate !== null) {
+    const bucket = restCtx.rest_days != null && restCtx.rest_days <= 1 ? "B2B" : restCtx.rest_days != null && restCtx.rest_days >= 3 ? "rested" : "normal rest";
+    reasonTags.push(`${Math.round(restHitCtx.rate * 100)}% hit on ${bucket} (${restHitCtx.sample}g)`);
+  }
+
+  // Defensive context tags
+  if (defCtx.avg_allowed !== null && defCtx.games >= 5) {
+    if (defCtx.avg_allowed > threshold) {
+      reasonTags.push(`OPP allows ${defCtx.avg_allowed} avg (${defCtx.games}g)`);
+    } else {
+      reasonTags.push(`OPP holds to ${defCtx.avg_allowed} avg (${defCtx.games}g)`);
+    }
+  }
+
   if (allValues.length >= 15) reasonTags.push("large_sample");
   if (allValues.length < 8) reasonTags.push("small_sample");
 
@@ -260,6 +428,18 @@ function scoreProp(
     volatility_score: volatilityScore,
     consistency_score: consistencyScore,
     reason_tags: reasonTags,
+    rest_days: restCtx.rest_days,
+    back_to_back: restCtx.back_to_back,
+    games_last_7: restCtx.games_last_7,
+    games_last_14: restCtx.games_last_14,
+    rest_hit_rate: restHitCtx.rate,
+    rest_sample: restHitCtx.sample,
+    opp_def_rank_note: defCtx.note,
+    opp_stat_avg_allowed: defCtx.avg_allowed,
+    opp_stat_games: defCtx.games,
+    line_hit_rate_l5: last5HitRate,
+    line_hit_rate_l10: last10HitRate,
+    line_hit_rate_season: seasonHitRate,
   };
 }
 
@@ -273,11 +453,10 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const { game_date, top_n = 40, stat_types, thresholds_override, matchups } = body;
-    // matchups: optional array of { home_team: "LAL", away_team: "GSW" } from odds API
 
     const today = game_date || new Date().toISOString().split("T")[0];
 
-    // 1. Build team matchups - prefer caller-provided matchups, fallback to games_today
+    // 1. Build team matchups
     const teamMatchups: Record<string, { opponent: string; homeAway: string }> = {};
 
     if (matchups && Array.isArray(matchups) && matchups.length > 0) {
@@ -286,11 +465,7 @@ serve(async (req) => {
         if (m.away_team) teamMatchups[m.away_team] = { opponent: m.home_team || "", homeAway: "away" };
       }
     } else {
-      const { data: games } = await supabase
-        .from("games_today")
-        .select("*")
-        .eq("game_date", today);
-
+      const { data: games } = await supabase.from("games_today").select("*").eq("game_date", today);
       if (games) {
         for (const g of games) {
           if (g.home_team_abbr) teamMatchups[g.home_team_abbr] = { opponent: g.away_team_abbr || "", homeAway: "home" };
@@ -300,24 +475,17 @@ serve(async (req) => {
     }
 
     let teamsPlaying = Object.keys(teamMatchups);
-
-    // If no team matchups found, fallback to scoring ALL active players
-    let scoringAllPlayers = false;
-    if (teamsPlaying.length === 0) {
-      scoringAllPlayers = true;
-    }
+    let scoringAllPlayers = teamsPlaying.length === 0;
 
     // 2. Get player game logs
     const allLogs: GameLog[] = [];
 
     if (scoringAllPlayers) {
-      // Fetch all recent game logs (last 30 days worth)
       const { data: logs } = await supabase
         .from("player_recent_games")
         .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
         .order("game_date", { ascending: false })
         .limit(1000);
-
       if (logs) allLogs.push(...(logs as GameLog[]));
     } else {
       for (const team of teamsPlaying) {
@@ -327,7 +495,6 @@ serve(async (req) => {
           .eq("team_abbr", team)
           .order("game_date", { ascending: false })
           .limit(500);
-
         if (logs) allLogs.push(...(logs as GameLog[]));
       }
     }
@@ -351,7 +518,6 @@ serve(async (req) => {
     const allScored: ScoredProp[] = [];
 
     for (const [pidStr, logs] of Object.entries(playerLogs)) {
-      const pid = Number(pidStr);
       const team = logs[0]?.team_abbr;
       if (!team) continue;
 
@@ -359,23 +525,28 @@ serve(async (req) => {
       const opponent = matchup?.opponent || null;
       const homeAway = matchup?.homeAway || "unknown";
 
-      // Sort by game_date desc (should already be, but ensure)
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
+
+      // Compute rest/fatigue context once per player
+      const restCtx = computeRestContext(logs, today);
 
       for (const stat of statsToScore) {
         const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
+        const defCtx = computeDefensiveContext(playerLogs, opponent, stat);
+
         for (const threshold of thresholds) {
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway);
+          const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs);
           if (scored) allScored.push(scored);
         }
       }
     }
 
-    // 5. Sort by confidence score and return top N
+    // 5. Sort by confidence and return top N
     allScored.sort((a, b) => b.confidence_score - a.confidence_score);
     const topProps = allScored.slice(0, top_n);
 
-    // 6. Cache to player_prop_scores table (upsert, fire-and-forget)
+    // 6. Cache (fire-and-forget)
     if (topProps.length > 0) {
       const rows = topProps.map((p) => ({
         game_date: today,
@@ -416,9 +587,7 @@ serve(async (req) => {
       supabase
         .from("player_prop_scores")
         .upsert(rows, { onConflict: "game_date,player_id,stat_type,threshold" })
-        .then(({ error }) => {
-          if (error) console.error("Cache upsert error:", error);
-        });
+        .then(({ error }) => { if (error) console.error("Cache upsert error:", error); });
     }
 
     return new Response(
