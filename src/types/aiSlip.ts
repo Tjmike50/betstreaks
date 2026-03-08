@@ -19,6 +19,7 @@ export interface LegDataContext {
   role_label?: "starter" | "bench" | null;
   availability_note?: string | null;
   lineup_confidence?: "high" | "medium" | "low" | null;
+  market_note?: string | null;
 }
 
 export interface AISlipLeg {

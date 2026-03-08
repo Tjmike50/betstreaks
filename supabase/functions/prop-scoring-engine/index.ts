@@ -61,6 +61,16 @@ interface AvailabilityContext {
   key_teammate_statuses: { name: string; status: string }[];
 }
 
+interface MarketMovement {
+  opening_line: number | null;
+  current_line: number | null;
+  line_moved: "up" | "down" | "unchanged" | null;
+  opening_odds: string | null;
+  current_odds: string | null;
+  odds_improved: boolean | null;
+  movement_note: string | null;
+}
+
 interface ScoredProp {
   player_id: number;
   player_name: string;
@@ -115,6 +125,8 @@ interface ScoredProp {
   player_status: string | null;
   availability_notes: string[];
   lineup_confidence: string | null;
+  // Market movement
+  market_movement: MarketMovement | null;
 }
 
 function parseMatchup(matchup: string | null): { opponent: string | null; homeAway: string } {
@@ -544,7 +556,8 @@ function scoreProp(
   defCtx: { avg_allowed: number | null; games: number; note: string | null },
   allPlayerLogs: Record<number, GameLog[]>,
   teammateCtx: TeammateContext,
-  availCtx: AvailabilityContext
+  availCtx: AvailabilityContext,
+  marketMovement: MarketMovement | null
 ): ScoredProp | null {
   if (games.length === 0) return null;
 
@@ -604,16 +617,17 @@ function scoreProp(
   const sampleFactor = Math.min(1, allValues.length / 20);
 
   // Weight allocation (must sum to 1.0)
-  const W_RECENT = 0.22;
-  const W_SEASON = 0.13;
-  const W_TREND = 0.13;
-  const W_OPP = 0.10;
+  const W_RECENT = 0.21;
+  const W_SEASON = 0.12;
+  const W_TREND = 0.12;
+  const W_OPP = 0.09;
   const W_VENUE = 0.08;
-  const W_REST = 0.07;
+  const W_REST = 0.06;
   const W_DEF = 0.09;
   const W_CONSISTENCY = 0.05;
-  const W_TEAMMATE = 0.08;  // New: teammate context weight
-  const W_MINUTES = 0.05;   // New: minutes/usage trend weight
+  const W_TEAMMATE = 0.07;
+  const W_MINUTES = 0.05;
+  const W_MARKET = 0.06;  // Market movement weight
 
   const recentHR = last5HitRate ?? 0;
   const seasonHR = seasonHitRate ?? 0;
@@ -679,6 +693,20 @@ function scoreProp(
     minutesFactor = 0.35;
   }
 
+  // Market movement factor
+  let marketFactor = 0.5;
+  if (marketMovement) {
+    if (marketMovement.odds_improved === true) {
+      marketFactor = 0.65; // odds moved in our favor
+    } else if (marketMovement.odds_improved === false) {
+      marketFactor = 0.35; // odds moved against us
+    }
+    // If line moved up and we're picking over, that's favorable
+    if (marketMovement.line_moved === "up" && threshold > 0) {
+      marketFactor = Math.max(marketFactor, 0.55);
+    }
+  }
+
   let rawConfidence = (
     recentHR * W_RECENT +
     seasonHR * W_SEASON +
@@ -689,7 +717,8 @@ function scoreProp(
     defFactor * W_DEF +
     consistencyFactor * W_CONSISTENCY +
     teammateFactor * W_TEAMMATE +
-    minutesFactor * W_MINUTES
+    minutesFactor * W_MINUTES +
+    marketFactor * W_MARKET
   ) * 100;
 
   rawConfidence *= sampleFactor;
@@ -717,7 +746,6 @@ function scoreProp(
   // Boost value if usage is trending up
   if (teammateCtx.minutes_trend === "up") valueRaw += 5;
   if (teammateCtx.key_teammates_out.length > 0) {
-    // Check if without-teammate avg is above threshold
     for (const split of teammateCtx.with_without_splits) {
       if (teammateCtx.key_teammates_out.includes(split.teammate) && split.without_games >= 3) {
         if (split.without_avg > threshold) valueRaw += 5;
@@ -725,6 +753,11 @@ function scoreProp(
         break;
       }
     }
+  }
+  // Market movement value adjustment
+  if (marketMovement) {
+    if (marketMovement.odds_improved === true) valueRaw += 5;
+    else if (marketMovement.odds_improved === false) valueRaw -= 4;
   }
   const valueScore = Math.round(Math.min(100, Math.max(0, valueRaw)));
 
@@ -802,6 +835,11 @@ function scoreProp(
     reasonTags.push("uncertain_lineup");
   }
 
+  // Market movement reason tags
+  if (marketMovement?.movement_note) {
+    reasonTags.push(marketMovement.movement_note);
+  }
+
   return {
     player_id: games[0].player_id,
     player_name: games[0].player_name || "",
@@ -854,6 +892,84 @@ function scoreProp(
     player_status: availCtx.player_status,
     availability_notes: availCtx.availability_notes,
     lineup_confidence: availCtx.lineup_confidence,
+    market_movement: marketMovement,
+  };
+}
+
+// ===== MARKET MOVEMENT ANALYSIS =====
+
+interface LineSnapshot {
+  player_name: string;
+  stat_type: string;
+  threshold: number;
+  over_odds: string | null;
+  under_odds: string | null;
+  sportsbook: string;
+  snapshot_at: string;
+}
+
+function parseAmericanOdds(odds: string | null): number | null {
+  if (!odds) return null;
+  const n = parseInt(odds, 10);
+  if (isNaN(n)) return null;
+  return n;
+}
+
+function computeMarketMovement(
+  playerName: string,
+  statType: string,
+  threshold: number,
+  snapshots: LineSnapshot[]
+): MarketMovement | null {
+  // Filter relevant snapshots
+  const relevant = snapshots
+    .filter(s => s.player_name === playerName && s.stat_type === statType && Number(s.threshold) === threshold)
+    .sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
+
+  if (relevant.length < 2) return null;
+
+  const opening = relevant[0];
+  const current = relevant[relevant.length - 1];
+
+  const openOdds = parseAmericanOdds(opening.over_odds);
+  const currOdds = parseAmericanOdds(current.over_odds);
+
+  let odds_improved: boolean | null = null;
+  if (openOdds != null && currOdds != null) {
+    // For over bets: higher American odds = better value (e.g., -110 → +100 is better)
+    odds_improved = currOdds > openOdds;
+  }
+
+  const openThreshold = Number(opening.threshold);
+  const currThreshold = Number(current.threshold);
+  let line_moved: "up" | "down" | "unchanged" | null = null;
+  if (openThreshold !== currThreshold) {
+    line_moved = currThreshold > openThreshold ? "up" : "down";
+  } else {
+    line_moved = "unchanged";
+  }
+
+  // Generate movement note
+  let movement_note: string | null = null;
+  if (odds_improved === true && openOdds != null && currOdds != null) {
+    movement_note = `Value improved: ${opening.over_odds} → ${current.over_odds}`;
+  } else if (odds_improved === false && openOdds != null && currOdds != null) {
+    movement_note = `Value worsened: ${opening.over_odds} → ${current.over_odds}`;
+  }
+  if (line_moved === "up") {
+    movement_note = (movement_note ? movement_note + "; " : "") + `Line moved up from ${openThreshold}`;
+  } else if (line_moved === "down") {
+    movement_note = (movement_note ? movement_note + "; " : "") + `Line moved down from ${openThreshold}`;
+  }
+
+  return {
+    opening_line: openThreshold,
+    current_line: currThreshold,
+    line_moved,
+    opening_odds: opening.over_odds,
+    current_odds: current.over_odds,
+    odds_improved,
+    movement_note,
   };
 }
 
@@ -961,7 +1077,18 @@ serve(async (req) => {
       teamGameDates[team] = [...dates].sort((a, b) => b.localeCompare(a));
     }
 
-    // 5. Score each player for each stat/threshold combo
+    // 4d. Fetch line snapshots for market movement analysis
+    let lineSnapshots: LineSnapshot[] = [];
+    {
+      const { data: snaps } = await supabase
+        .from("line_snapshots")
+        .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook, snapshot_at")
+        .eq("game_date", today)
+        .order("snapshot_at", { ascending: true });
+      if (snaps) lineSnapshots = snaps as LineSnapshot[];
+      console.log(`Loaded ${lineSnapshots.length} line snapshots for market movement analysis`);
+    }
+
     const statsToScore = stat_types || ["pts", "reb", "ast", "fg3m", "stl", "blk"];
     const allScored: ScoredProp[] = [];
 
@@ -1005,7 +1132,13 @@ serve(async (req) => {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
           const tmCtxForThreshold = threshold === thresholds[0] ? teammateCtx :
             computeTeammateContext(playerId, logs, stat, threshold, team, tmRosters, playerLogs);
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx);
+
+          // Compute market movement for this specific prop
+          const STAT_LABELS_REV: Record<string, string> = { pts: "Points", reb: "Rebounds", ast: "Assists", fg3m: "3-Pointers", stl: "Steals", blk: "Blocks" };
+          const playerName = logs[0]?.player_name || "";
+          const mktMovement = computeMarketMovement(playerName, STAT_LABELS_REV[stat] || stat, threshold, lineSnapshots);
+
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx, mktMovement);
           if (scored) allScored.push(scored);
         }
       }
