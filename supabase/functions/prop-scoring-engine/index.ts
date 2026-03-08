@@ -471,7 +471,8 @@ function computeAvailabilityContext(
   keyTeammateIds: number[],
   allPlayerLogs: Record<number, GameLog[]>,
   today: string,
-  teamGameDates: string[]
+  teamGameDates: string[],
+  availabilityIsFresh = true
 ): AvailabilityContext {
   const result: AvailabilityContext = {
     player_status: null,
