@@ -222,6 +222,9 @@ CRITICAL RULES:
 - Reference rest/fatigue when it's meaningful (back-to-back, 3+ days rest)
 - Reference opponent defensive context when sample size >= 5 games
 - Use line-specific hit rates (not just averages) in reasoning
+- When teammate context is available (key_teammates_out, minutes_trend, role_label), reference it in reasoning
+- Do NOT draw teammate conclusions from fewer than 3 games without noting sample size
+- Include teammate_note in data_context when meaningful
 
 SCORED CANDIDATES (ranked by confidence):
 ${JSON.stringify(candidateSummary, null, 1)}
