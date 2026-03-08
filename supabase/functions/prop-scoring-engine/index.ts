@@ -556,7 +556,8 @@ function scoreProp(
   defCtx: { avg_allowed: number | null; games: number; note: string | null },
   allPlayerLogs: Record<number, GameLog[]>,
   teammateCtx: TeammateContext,
-  availCtx: AvailabilityContext
+  availCtx: AvailabilityContext,
+  marketMovement: MarketMovement | null
 ): ScoredProp | null {
   if (games.length === 0) return null;
 
