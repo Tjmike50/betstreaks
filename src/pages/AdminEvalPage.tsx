@@ -283,7 +283,50 @@ export default function AdminEvalPage() {
     enabled: isAdmin,
   });
 
+  // Factor analysis query
+  const { data: factorAnalysis, isLoading: factorLoading, refetch: refetchAnalysis } = useQuery({
+    queryKey: ["factor-analysis"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("factor_analysis_snapshots")
+        .select("*")
+        .order("analysis_date", { ascending: false })
+        .limit(1);
+      return data?.[0] || null;
+    },
+    enabled: isAdmin,
+  });
+
+  // Scoring weights query
+  const { data: activeWeights } = useQuery({
+    queryKey: ["scoring-weights"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("scoring_weights")
+        .select("*")
+        .eq("is_active", true)
+        .maybeSingle();
+      return data;
+    },
+    enabled: isAdmin,
+  });
+
   const [refreshingSnap, setRefreshingSnap] = useState(false);
+  const [analyzingFactors, setAnalyzingFactors] = useState(false);
+
+  const handleRunAnalysis = async () => {
+    setAnalyzingFactors(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("scoring-analysis", { body: { lookback_days: 30 } });
+      if (error) throw error;
+      toast({ title: "Analysis complete", description: `${data.sample_size} props analyzed, ${data.recommendations?.length || 0} recommendations` });
+      refetchAnalysis();
+    } catch (e) {
+      toast({ title: "Analysis failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setAnalyzingFactors(false);
+    }
+  };
   const handleRefreshSnap = async () => {
     setRefreshingSnap(true);
     try {
