@@ -14,6 +14,9 @@ export interface LegDataContext {
   opp_defense_note?: string | null;
   vs_opponent_sample?: number | null;
   home_away_sample?: number | null;
+  teammate_note?: string | null;
+  minutes_trend?: "up" | "down" | "stable" | null;
+  role_label?: "starter" | "bench" | null;
 }
 
 export interface AISlipLeg {

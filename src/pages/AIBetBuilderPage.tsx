@@ -78,6 +78,11 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
   }
   if (ctx.rest_note) chips.push({ label: ctx.rest_note, color: "bg-orange-500/10 text-orange-400" });
   if (ctx.opp_defense_note) chips.push({ label: ctx.opp_defense_note, color: "bg-cyan-500/10 text-cyan-400" });
+  if (ctx.teammate_note) chips.push({ label: ctx.teammate_note, color: "bg-pink-500/10 text-pink-400" });
+  if (ctx.minutes_trend === "up") chips.push({ label: "📈 Usage trending up", color: "bg-green-500/10 text-green-400" });
+  if (ctx.minutes_trend === "down") chips.push({ label: "📉 Usage trending down", color: "bg-red-500/10 text-red-400" });
+  if (ctx.role_label === "starter") chips.push({ label: "Starter", color: "bg-primary/10 text-primary" });
+  if (ctx.role_label === "bench") chips.push({ label: "Bench", color: "bg-muted text-muted-foreground" });
 
   if (ctx.tags?.length) {
     for (const tag of ctx.tags.slice(0, 3)) {
