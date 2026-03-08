@@ -309,6 +309,45 @@ export type Database = {
         }
         Relationships: []
       }
+      line_snapshots: {
+        Row: {
+          game_date: string
+          id: string
+          over_odds: string | null
+          player_id: number | null
+          player_name: string
+          snapshot_at: string
+          sportsbook: string
+          stat_type: string
+          threshold: number
+          under_odds: string | null
+        }
+        Insert: {
+          game_date?: string
+          id?: string
+          over_odds?: string | null
+          player_id?: number | null
+          player_name: string
+          snapshot_at?: string
+          sportsbook?: string
+          stat_type: string
+          threshold: number
+          under_odds?: string | null
+        }
+        Update: {
+          game_date?: string
+          id?: string
+          over_odds?: string | null
+          player_id?: number | null
+          player_name?: string
+          snapshot_at?: string
+          sportsbook?: string
+          stat_type?: string
+          threshold?: number
+          under_odds?: string | null
+        }
+        Relationships: []
+      }
       player_availability: {
         Row: {
           confidence: string | null
