@@ -194,6 +194,12 @@ serve(async (req) => {
       rest_sample: p.rest_sample,
       opp_def_avg_allowed: p.opp_stat_avg_allowed,
       opp_def_games: p.opp_stat_games,
+      // Teammate/lineup context
+      minutes_trend: p.minutes_trend,
+      minutes_trend_note: p.minutes_trend_note,
+      role_label: p.role_label,
+      key_teammates_out: p.key_teammates_out || [],
+      teammate_notes: p.teammate_notes || [],
       tags: p.reason_tags,
       total_games: p.total_games,
     }));
