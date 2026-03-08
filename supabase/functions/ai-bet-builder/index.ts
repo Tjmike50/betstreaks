@@ -116,16 +116,66 @@ serve(async (req) => {
       console.error("Scoring engine call failed:", e);
     }
 
-    // Fetch player props from odds API for market lines
+    // Fetch player props from odds API for market lines + snapshot storage
     let playerPropsData: any[] = [];
+    const lineSnapshotRows: any[] = [];
+    const todayStr = new Date().toISOString().split("T")[0];
+
     for (const game of gamesData.slice(0, 3)) {
       try {
         const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`;
         const propsRes = await fetch(propsUrl);
-        if (propsRes.ok) playerPropsData.push(await propsRes.json());
+        if (propsRes.ok) {
+          const propsData = await propsRes.json();
+          playerPropsData.push(propsData);
+
+          // Extract line snapshots for market movement tracking
+          for (const bm of propsData.bookmakers || []) {
+            for (const market of bm.markets || []) {
+              const statMap: Record<string, string> = {
+                player_points: "Points", player_rebounds: "Rebounds",
+                player_assists: "Assists", player_threes: "3-Pointers",
+              };
+              const statType = statMap[market.key];
+              if (!statType) continue;
+
+              // Group outcomes by player+point to get over/under pair
+              const outcomesByPlayer: Record<string, { over?: string; under?: string; point?: number; player?: string }> = {};
+              for (const o of market.outcomes || []) {
+                const key = `${o.description}_${o.point}`;
+                if (!outcomesByPlayer[key]) outcomesByPlayer[key] = { player: o.description, point: o.point };
+                if (o.name === "Over") outcomesByPlayer[key].over = String(o.price);
+                if (o.name === "Under") outcomesByPlayer[key].under = String(o.price);
+              }
+
+              for (const entry of Object.values(outcomesByPlayer)) {
+                if (entry.player && entry.point != null) {
+                  lineSnapshotRows.push({
+                    player_name: entry.player,
+                    stat_type: statType,
+                    threshold: entry.point,
+                    over_odds: entry.over || null,
+                    under_odds: entry.under || null,
+                    sportsbook: bm.key,
+                    game_date: todayStr,
+                  });
+                }
+              }
+            }
+          }
+        }
       } catch (e) {
         console.error("Props fetch error:", e);
       }
+    }
+
+    // Save line snapshots (fire-and-forget)
+    if (lineSnapshotRows.length > 0) {
+      serviceClient
+        .from("line_snapshots")
+        .insert(lineSnapshotRows)
+        .then(({ error }) => { if (error) console.error("Line snapshot insert error:", error); });
+      console.log(`Saved ${lineSnapshotRows.length} line snapshots`);
     }
 
     // Build odds summary
