@@ -22,11 +22,13 @@ serve(async (req) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const authHeader = req.headers.get("Authorization");
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
     });
+    const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     const { prompt, slipCount = 1 } = await req.json();
     if (!prompt) throw new Error("prompt is required");
@@ -61,35 +63,53 @@ serve(async (req) => {
       }
     }
 
-    // Step 1: Fetch featured markets (h2h, spreads, totals) from main odds endpoint
+    // ===== PHASE 1: Call Prop Scoring Engine =====
+    console.log("Calling prop scoring engine...");
+    let scoredProps: any[] = [];
+    try {
+      const scoringRes = await fetch(`${SUPABASE_URL}/functions/v1/prop-scoring-engine`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+        },
+        body: JSON.stringify({ top_n: 50 }),
+      });
+
+      if (scoringRes.ok) {
+        const scoringData = await scoringRes.json();
+        scoredProps = scoringData.scored_props || [];
+        console.log(`Got ${scoredProps.length} scored props from ${scoringData.players_analyzed || 0} players`);
+      } else {
+        console.error("Scoring engine error:", scoringRes.status, await scoringRes.text());
+      }
+    } catch (e) {
+      console.error("Scoring engine call failed:", e);
+    }
+
+    // ===== PHASE 2: Fetch live odds for market context =====
     const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
     const featuredRes = await fetch(featuredUrl);
-
     let gamesData: any[] = [];
     if (featuredRes.ok) {
       gamesData = await featuredRes.json();
     } else {
-      console.error("Featured odds API error:", featuredRes.status, await featuredRes.text());
+      console.error("Odds API error:", featuredRes.status);
     }
 
-    // Step 2: Fetch player props per event (up to 3 events to save API quota)
+    // Fetch player props from odds API for market lines
     let playerPropsData: any[] = [];
-    const eventsToFetch = gamesData.slice(0, 3);
-
-    for (const game of eventsToFetch) {
+    for (const game of gamesData.slice(0, 3)) {
       try {
         const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`;
         const propsRes = await fetch(propsUrl);
-        if (propsRes.ok) {
-          const propsData = await propsRes.json();
-          playerPropsData.push(propsData);
-        }
+        if (propsRes.ok) playerPropsData.push(await propsRes.json());
       } catch (e) {
-        console.error("Props fetch error for event", game.id, e);
+        console.error("Props fetch error:", e);
       }
     }
 
-    // Build concise odds summary for AI context
+    // Build odds summary
     const oddsSummary = gamesData.slice(0, 8).map((game: any) => ({
       home: game.home_team,
       away: game.away_team,
@@ -108,39 +128,69 @@ serve(async (req) => {
       })),
     }));
 
-    // Build player props summary
-    const propsSummary = playerPropsData.map((event: any) => ({
-      home: event.home_team,
-      away: event.away_team,
-      bookmakers: event.bookmakers?.slice(0, 1).map((bm: any) => ({
-        name: bm.key,
-        markets: bm.markets?.slice(0, 4).map((m: any) => ({
-          key: m.key,
-          outcomes: m.outcomes?.slice(0, 10).map((o: any) => ({
-            name: o.name,
-            description: o.description,
-            price: o.price,
-            point: o.point,
-          })),
-        })),
-      })),
+    // ===== PHASE 3: Build data-driven AI context =====
+    const STAT_LABELS: Record<string, string> = {
+      pts: "Points", reb: "Rebounds", ast: "Assists",
+      fg3m: "3-Pointers", stl: "Steals", blk: "Blocks",
+    };
+
+    // Format scored props as structured candidate data for the AI
+    const candidateSummary = scoredProps.slice(0, 30).map((p: any) => ({
+      player: p.player_name,
+      team: p.team_abbr,
+      opponent: p.opponent_abbr,
+      home_away: p.home_away,
+      stat: STAT_LABELS[p.stat_type] || p.stat_type,
+      line: p.threshold,
+      confidence: p.confidence_score,
+      value: p.value_score,
+      volatility: p.volatility_score,
+      consistency: p.consistency_score,
+      season_avg: p.season_avg,
+      last5_avg: p.last5_avg,
+      last10_avg: p.last10_avg,
+      season_hit_rate: p.season_hit_rate != null ? `${Math.round(p.season_hit_rate * 100)}%` : null,
+      last10_hit_rate: p.last10_hit_rate != null ? `${Math.round(p.last10_hit_rate * 100)}%` : null,
+      last5_hit_rate: p.last5_hit_rate != null ? `${Math.round(p.last5_hit_rate * 100)}%` : null,
+      vs_opponent: p.vs_opponent_games > 0 ? {
+        avg: p.vs_opponent_avg,
+        hit_rate: p.vs_opponent_hit_rate != null ? `${Math.round(p.vs_opponent_hit_rate * 100)}%` : null,
+        games: p.vs_opponent_games,
+      } : null,
+      home_away_split: p.home_away === "home" ? {
+        avg: p.home_avg,
+        hit_rate: p.home_hit_rate != null ? `${Math.round(p.home_hit_rate * 100)}%` : null,
+        games: p.home_games,
+      } : {
+        avg: p.away_avg,
+        hit_rate: p.away_hit_rate != null ? `${Math.round(p.away_hit_rate * 100)}%` : null,
+        games: p.away_games,
+      },
+      tags: p.reason_tags,
+      total_games: p.total_games,
     }));
 
-    const systemPrompt = `You are an NBA betting analyst for BetStreaks. Generate structured bet slips based on user prompts and current odds data.
+    const systemPrompt = `You are an NBA betting analyst for BetStreaks. You generate structured bet slips using ONLY the pre-scored candidate legs provided below.
 
-RULES:
+CRITICAL RULES:
+- You MUST select legs from the SCORED CANDIDATES list below. Do NOT invent players, stats, or numbers not in the data.
 - Never say "lock", "guaranteed", or "sure thing"
 - Use terms like "balanced option", "higher-risk version", "best fit based on current data"
 - Each slip has a risk_label: "safe", "balanced", or "aggressive"
-- Provide short reasoning for each leg (1-2 sentences)
+- For "safe" slips: prefer candidates with confidence >= 60, consistency >= 60, low volatility
+- For "balanced" slips: mix high-confidence and moderate-value candidates
+- For "aggressive" slips: pick higher-value candidates even with more volatility
+- Provide reasoning that references the actual data (hit rates, averages, trends, matchup data)
+- Include the data context for each leg (hit rates, sample sizes, etc.)
 - Generate realistic estimated combined American odds
-- Use REAL player names and lines from the odds data when available
+- Always note sample size when citing matchup-specific data
+- Do NOT over-weight tiny sample sizes (< 3 games)
 
-CURRENT GAME ODDS:
+SCORED CANDIDATES (ranked by confidence):
+${JSON.stringify(candidateSummary, null, 1)}
+
+CURRENT MARKET ODDS:
 ${JSON.stringify(oddsSummary)}
-
-CURRENT PLAYER PROPS:
-${JSON.stringify(propsSummary)}
 
 Respond with ONLY valid JSON matching this exact structure:
 {
@@ -149,23 +199,36 @@ Respond with ONLY valid JSON matching this exact structure:
       "slip_name": "string",
       "risk_label": "safe" | "balanced" | "aggressive",
       "estimated_odds": "+150",
-      "reasoning": "Brief overall reasoning",
+      "reasoning": "Brief overall reasoning referencing data",
       "legs": [
         {
-          "player_name": "string",
+          "player_name": "string (must match candidate exactly)",
           "team_abbr": "string (3-letter NBA abbreviation)",
-          "stat_type": "Points" | "Rebounds" | "Assists" | "3-Pointers" | "Spread" | "Total" | "Moneyline",
-          "line": "Over 24.5" | "Under 10.5" | "-3.5" | etc,
-          "pick": "Over" | "Under" | team name,
+          "stat_type": "Points" | "Rebounds" | "Assists" | "3-Pointers" | "Steals" | "Blocks",
+          "line": "Over 24.5",
+          "pick": "Over" | "Under",
           "odds": "-110",
-          "reasoning": "1-2 sentence explanation"
+          "reasoning": "1-2 sentences referencing actual hit rates, averages, and trends from the data",
+          "data_context": {
+            "season_avg": number,
+            "last5_avg": number,
+            "last10_hit_rate": "80%",
+            "vs_opponent": "75% in 4 games" | null,
+            "home_away_split": "85% at home in 10 games" | null,
+            "confidence_score": number,
+            "volatility_label": "low" | "medium" | "high",
+            "sample_size": number,
+            "tags": ["hot_streak", "consistent"]
+          }
         }
       ]
     }
   ]
 }`;
 
-    const userPrompt = `Generate ${Math.min(slipCount, 5)} NBA bet slip(s) for this request: "${prompt}"`;
+    const userPrompt = `Generate ${Math.min(slipCount, 5)} NBA bet slip(s) for this request: "${prompt}"
+
+Important: Use ONLY the scored candidates provided. Reference their actual statistics in your reasoning.`;
 
     const aiRes = await fetch(AI_GATEWAY, {
       method: "POST",
@@ -250,7 +313,13 @@ Respond with ONLY valid JSON matching this exact structure:
 
       if (legErr) console.error("Error saving legs:", legErr);
 
-      savedSlips.push({ ...slipRow, legs: legRows || legs });
+      // Attach data_context to returned legs (not stored in DB, sent to client)
+      const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
+        ...lr,
+        data_context: slip.legs?.[idx]?.data_context || null,
+      }));
+
+      savedSlips.push({ ...slipRow, legs: legsWithContext });
     }
 
     // Track usage for free users
@@ -262,7 +331,13 @@ Respond with ONLY valid JSON matching this exact structure:
         .then(() => {});
     }
 
-    return new Response(JSON.stringify({ slips: savedSlips }), {
+    return new Response(JSON.stringify({
+      slips: savedSlips,
+      scoring_metadata: {
+        candidates_analyzed: scoredProps.length,
+        games_today: gamesData.length,
+      },
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
