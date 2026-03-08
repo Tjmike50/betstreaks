@@ -933,7 +933,14 @@ function computeMarketMovement(
     .filter(s => s.player_name === playerName && s.stat_type === statType && Number(s.threshold) === threshold)
     .sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
 
+  // Require at least 2 snapshots from different time periods to draw conclusions
   if (relevant.length < 2) return null;
+
+  // Check time spread: if all snapshots are within 5 minutes, treat as single data point
+  const firstTime = new Date(relevant[0].snapshot_at).getTime();
+  const lastTime = new Date(relevant[relevant.length - 1].snapshot_at).getTime();
+  const spanMinutes = (lastTime - firstTime) / (1000 * 60);
+  if (spanMinutes < 30) return null; // Need at least 30min between first and last snapshot
 
   const opening = relevant[0];
   const current = relevant[relevant.length - 1];
