@@ -342,6 +342,61 @@ export default function AdminEvalPage() {
           </Button>
         </div>
 
+        {/* Availability Status */}
+        {!availLoading && availStatus && (
+          <Card className={availStatus.isFresh ? "border-border" : "border-yellow-500/30"}>
+            <CardContent className="pt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Users className="h-4 w-4 text-primary" />
+                  Player Availability
+                </h3>
+                <Button size="sm" variant="ghost" onClick={handleRefreshAvail} disabled={refreshingAvail} className="h-7 text-xs">
+                  {refreshingAvail ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  Refresh
+                </Button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-lg font-bold text-primary">{availStatus.total}</div>
+                  <div className="text-[10px] text-muted-foreground">Records</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-primary">{availStatus.teamsCovered}/{availStatus.teamsPlaying}</div>
+                  <div className="text-[10px] text-muted-foreground">Teams</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold flex items-center justify-center gap-1">
+                    {availStatus.isFresh ? (
+                      <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-green-500">Fresh</span></>
+                    ) : (
+                      <><AlertTriangle className="h-4 w-4 text-yellow-500" /><span className="text-yellow-500">Stale</span></>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {availStatus.hoursSince != null ? `${availStatus.hoursSince.toFixed(1)}h ago` : "Never"}
+                  </div>
+                </div>
+              </div>
+              {/* Status breakdown */}
+              {Object.keys(availStatus.statusBreakdown).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(availStatus.statusBreakdown).map(([status, count]) => (
+                    <Badge key={status} variant="outline" className="text-[10px]">
+                      {status}: {count}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              {availStatus.teamsMissing.length > 0 && (
+                <p className="text-[10px] text-yellow-500">
+                  Missing: {availStatus.teamsMissing.join(", ")}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {isLoading ? (
           <div className="text-center py-12"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>
         ) : (
