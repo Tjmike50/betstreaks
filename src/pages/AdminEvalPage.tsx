@@ -58,6 +58,42 @@ function bucketLabel(score: number | null): string {
   return "0-29";
 }
 
+function fineBucketLabel(score: number | null): string {
+  if (score == null) return "N/A";
+  if (score >= 80) return "80+";
+  if (score >= 70) return "70-79";
+  if (score >= 60) return "60-69";
+  if (score >= 50) return "50-59";
+  if (score >= 40) return "40-49";
+  if (score >= 30) return "30-39";
+  return "0-29";
+}
+
+function computeCalibrationData(props: PropOutcome[]) {
+  const bucketOrder = ["0-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"];
+  const targets: Record<string, number> = {
+    "0-29": 30, "30-39": 38, "40-49": 43, "50-59": 48, "60-69": 53, "70-79": 58, "80+": 65,
+  };
+  const buckets: Record<string, { hit: number; total: number }> = {};
+  for (const b of bucketOrder) buckets[b] = { hit: 0, total: 0 };
+
+  for (const p of props) {
+    if (p.hit == null || p.confidence_score == null) continue;
+    const b = fineBucketLabel(p.confidence_score);
+    if (b === "N/A") continue;
+    buckets[b].total++;
+    if (p.hit) buckets[b].hit++;
+  }
+
+  return bucketOrder.map(b => ({
+    bucket: b,
+    actual: buckets[b].total > 0 ? Math.round((buckets[b].hit / buckets[b].total) * 100) : null,
+    target: targets[b],
+    total: buckets[b].total,
+    midpoint: b === "80+" ? 85 : b === "0-29" ? 15 : parseInt(b.split("-")[0]) + 5,
+  }));
+}
+
 function computeBucketStats(props: PropOutcome[], field: "confidence_score" | "value_score" | "volatility_score") {
   const buckets: Record<string, { hit: number; total: number }> = {
     "70-100": { hit: 0, total: 0 },
