@@ -629,9 +629,10 @@ function scoreProp(
   const volatilityScore = Math.min(100, Math.round(cv * 2));
   const consistencyScore = Math.max(0, 100 - volatilityScore);
 
-  // ===== REFINED SCORING ENGINE =====
-  // Sample factor: less aggressive — floor at 0.5 for 3 games, scales to 1.0 at 15 games
-  const sampleFactor = Math.min(1, 0.5 + (Math.min(allValues.length, 15) / 15) * 0.5);
+  // ===== REFINED SCORING ENGINE WITH CALIBRATION =====
+  // Sample factor v2: stronger penalty for small samples
+  // Floor at 0.35 for 3 games, reaches 0.75 at 15 games, 1.0 at 25+ games
+  const sampleFactor = Math.min(1, 0.35 + (Math.min(allValues.length, 25) / 25) * 0.65);
 
   // Weight allocation (must sum to 1.0)
   const W_RECENT = 0.21;
