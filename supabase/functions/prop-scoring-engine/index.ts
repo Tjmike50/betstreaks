@@ -767,7 +767,36 @@ function scoreProp(
   if (availCtx.lineup_confidence === "low") rawConfidence *= 0.85;
   else if (availCtx.lineup_confidence === "medium") rawConfidence *= 0.92;
 
-  const confidenceScore = Math.round(Math.min(100, Math.max(0, rawConfidence)));
+  // ===== CONFIDENCE CALIBRATION CURVE =====
+  // Maps raw engine scores to calibrated confidence that better reflects actual hit probabilities.
+  // Targets: 80+ → 60-70% hit rate, 70-79 → 55-60%, 60-69 → 50-55%, 50-59 → 45-50%
+  // Uses a sigmoid-like compression: compress the upper range, expand the lower range
+  function calibrateConfidence(raw: number): number {
+    // Normalize to 0-1
+    const x = Math.min(100, Math.max(0, raw)) / 100;
+    
+    // Piecewise linear calibration based on observed data
+    // Current actual hit rates by bucket vs targets:
+    // 80+ actual: 52.9% → need to push fewer props into 80+ (compress top)
+    // 60-69 actual: 48.2% → was overstated, compress
+    // 30-39 actual: 36.1% → roughly correct
+    
+    // Apply sigmoid compression: pushes mid-high scores down, keeps extremes
+    // S-curve centered at 0.45 with reduced steepness
+    const centered = x - 0.45;
+    const sigmoid = 1 / (1 + Math.exp(-4.5 * centered));
+    
+    // Blend sigmoid with linear, weighted toward sigmoid for compression
+    const calibrated = sigmoid * 0.7 + x * 0.3;
+    
+    // Scale to target range: floor ~15, ceiling ~85
+    // This prevents unrealistic 90+ or sub-10 scores
+    const scaled = 15 + calibrated * 70;
+    
+    return scaled;
+  }
+
+  const confidenceScore = Math.round(Math.min(100, Math.max(0, calibrateConfidence(rawConfidence))));
 
   const avgOverThreshold = mean > 0 ? ((mean - threshold) / threshold) * 100 : 0;
   let valueRaw = 50 + avgOverThreshold * 2;
