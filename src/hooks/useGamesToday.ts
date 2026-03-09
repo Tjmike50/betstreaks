@@ -54,9 +54,13 @@ export function useGamesToday() {
         if (!game.home_team_abbr || !game.away_team_abbr) return false;
         // Keep all of today's and tomorrow's games
         if (game.game_date >= todayStr) return true;
-        // For yesterday's games, only keep ones that are still in progress (not Final)
+        // Yesterday's games: use time-based cutoff
+        const currentHour = new Date().getHours();
+        // After 6 AM, hide all yesterday's games regardless of status
+        if (currentHour >= 6) return false;
+        // Before 6 AM, only show genuinely in-progress games
         const status = (game.status || "").toLowerCase();
-        return !status.includes("final");
+        return status.includes("qtr") || status.includes("half") || status.includes("ot");
       });
       
       return validGames;
