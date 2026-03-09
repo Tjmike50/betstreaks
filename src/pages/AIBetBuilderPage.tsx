@@ -94,6 +94,15 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
     const isPositive = ctx.market_note.includes("improved") || ctx.market_note.includes("favorable");
     chips.push({ label: `📊 ${ctx.market_note}`, color: isPositive ? "bg-green-500/10 text-green-400" : "bg-orange-500/10 text-orange-400" });
   }
+  if (ctx.odds_source) {
+    chips.push({ label: `📖 ${ctx.odds_source}`, color: "bg-indigo-500/10 text-indigo-400" });
+  }
+  if (ctx.implied_probability != null) {
+    chips.push({ label: `Mkt: ${ctx.implied_probability}%`, color: "bg-sky-500/10 text-sky-400" });
+  }
+  if (ctx.odds_validated === false) {
+    chips.push({ label: "⚠ Odds unverified", color: "bg-red-500/10 text-red-400" });
+  }
 
   if (ctx.tags?.length) {
     for (const tag of ctx.tags.slice(0, 3)) {
