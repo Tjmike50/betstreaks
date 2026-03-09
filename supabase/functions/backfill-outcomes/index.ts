@@ -43,16 +43,32 @@ serve(async (req) => {
 
     console.log(`[Backfill] Generating synthetic prop outcomes from ${startStr} to ${endStr}`);
 
-    // 1. Get all game dates with game logs in the range
-    const { data: gameLogs, error: logsErr } = await supabase
-      .from("player_recent_games")
-      .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk")
-      .gte("game_date", startStr)
-      .lte("game_date", endStr)
-      .order("game_date", { ascending: true });
+    // 1. Get ALL game logs in the range (paginate past 1000-row limit)
+    const gameLogs: any[] = [];
+    const PAGE_SIZE = 1000;
+    let offset = 0;
+    let hasMore = true;
 
-    if (logsErr) throw new Error(`Failed to fetch game logs: ${logsErr.message}`);
-    if (!gameLogs || gameLogs.length === 0) {
+    while (hasMore) {
+      const { data: page, error: pageErr } = await supabase
+        .from("player_recent_games")
+        .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk")
+        .gte("game_date", startStr)
+        .lte("game_date", endStr)
+        .order("game_date", { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
+
+      if (pageErr) throw new Error(`Failed to fetch game logs: ${pageErr.message}`);
+      if (!page || page.length === 0) {
+        hasMore = false;
+      } else {
+        gameLogs.push(...page);
+        offset += PAGE_SIZE;
+        if (page.length < PAGE_SIZE) hasMore = false;
+      }
+    }
+
+    if (gameLogs.length === 0) {
       return new Response(
         JSON.stringify({ message: "No game logs in range", start: startStr, end: endStr }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
