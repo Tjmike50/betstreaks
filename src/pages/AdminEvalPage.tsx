@@ -807,7 +807,49 @@ export default function AdminEvalPage() {
               </CardContent>
             </Card>
 
-            {/* Value Score Buckets */}
+            {/* Calibration Chart: Predicted vs Actual */}
+            {(() => {
+              const calibData = computeCalibrationData(propOutcomes);
+              const hasData = calibData.some(d => d.actual != null);
+              if (!hasData) return null;
+              return (
+                <Card className="border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                      <Target className="h-4 w-4 text-primary" />
+                      Confidence Calibration
+                    </h3>
+                    <p className="text-[10px] text-muted-foreground">
+                      Predicted confidence vs actual hit rate — closer to diagonal = better calibrated
+                    </p>
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={calibData} barGap={0}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                          <YAxis domain={[0, 80]} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} label={{ value: "Hit Rate %", angle: -90, position: "insideLeft", fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                          <Tooltip
+                            contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                            formatter={(value: number | null, name: string) => [value != null ? `${value}%` : "—", name === "actual" ? "Actual Hit Rate" : "Target Hit Rate"]}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Bar dataKey="actual" name="Actual" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="target" name="Target" fill="hsl(var(--muted-foreground))" opacity={0.3} radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 text-center">
+                      {calibData.map(d => (
+                        <div key={d.bucket} className="text-[9px]">
+                          <div className="font-mono text-muted-foreground">{d.total}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
             <Card>
               <CardContent className="pt-4 space-y-3">
                 <h3 className="text-sm font-semibold flex items-center gap-2">
