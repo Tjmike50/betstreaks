@@ -441,6 +441,17 @@ export default function AIBetBuilderPage() {
               Your AI Slips
               <Badge variant="secondary" className="text-[10px]">{slips.length}</Badge>
             </h2>
+            {/* Show active filters above results */}
+            {activeFilterCount > 0 && (
+              <div className="bg-card/50 border border-border/30 rounded-lg p-3 space-y-1.5">
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Applied Filters</span>
+                <BuilderActiveFilters
+                  filters={filters}
+                  onChange={setFilters}
+                  onClearAll={() => setFilters({ ...DEFAULT_BUILDER_FILTERS, slipCount: filters.slipCount })}
+                />
+              </div>
+            )}
             {slips.map((slip, i) => (
               <SlipCard key={slip.id} slip={slip} index={i} />
             ))}
