@@ -11,6 +11,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import type { AISlip, LegDataContext } from "@/types/aiSlip";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { BuilderFilterPanel } from "@/components/builder/BuilderFilterPanel";
+import { BuilderActiveFilters } from "@/components/builder/BuilderActiveFilters";
+import type { BuilderFilters } from "@/types/builderFilters";
+import { DEFAULT_BUILDER_FILTERS, getActiveBuilderFilterCount } from "@/types/builderFilters";
 
 const QUICK_PROMPTS = [
   "Build me a +150 parlay",
