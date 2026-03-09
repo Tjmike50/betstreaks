@@ -306,14 +306,18 @@ function BuilderLoadingState() {
 
 export default function AIBetBuilderPage() {
   const [prompt, setPrompt] = useState("");
+  const [filters, setFilters] = useState<BuilderFilters>({
+    ...DEFAULT_BUILDER_FILTERS,
+  });
   const { slips, isLoading, error, buildSlips } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
   const navigate = useNavigate();
+  const activeFilterCount = getActiveBuilderFilterCount(filters);
 
   const handleSubmit = () => {
     if (!prompt.trim()) return;
-    const slipCount = isPremium ? 3 : 1;
-    buildSlips(prompt.trim(), slipCount);
+    const slipCount = isPremium ? filters.slipCount : 1;
+    buildSlips(prompt.trim(), slipCount, filters);
   };
 
   const isLimitError = error?.includes("free") || error?.includes("limit") || error?.includes("Upgrade");
