@@ -58,6 +58,42 @@ function bucketLabel(score: number | null): string {
   return "0-29";
 }
 
+function fineBucketLabel(score: number | null): string {
+  if (score == null) return "N/A";
+  if (score >= 80) return "80+";
+  if (score >= 70) return "70-79";
+  if (score >= 60) return "60-69";
+  if (score >= 50) return "50-59";
+  if (score >= 40) return "40-49";
+  if (score >= 30) return "30-39";
+  return "0-29";
+}
+
+function computeCalibrationData(props: PropOutcome[]) {
+  const bucketOrder = ["0-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"];
+  const targets: Record<string, number> = {
+    "0-29": 30, "30-39": 38, "40-49": 43, "50-59": 48, "60-69": 53, "70-79": 58, "80+": 65,
+  };
+  const buckets: Record<string, { hit: number; total: number }> = {};
+  for (const b of bucketOrder) buckets[b] = { hit: 0, total: 0 };
+
+  for (const p of props) {
+    if (p.hit == null || p.confidence_score == null) continue;
+    const b = fineBucketLabel(p.confidence_score);
+    if (b === "N/A") continue;
+    buckets[b].total++;
+    if (p.hit) buckets[b].hit++;
+  }
+
+  return bucketOrder.map(b => ({
+    bucket: b,
+    actual: buckets[b].total > 0 ? Math.round((buckets[b].hit / buckets[b].total) * 100) : null,
+    target: targets[b],
+    total: buckets[b].total,
+    midpoint: b === "80+" ? 85 : b === "0-29" ? 15 : parseInt(b.split("-")[0]) + 5,
+  }));
+}
+
 function computeBucketStats(props: PropOutcome[], field: "confidence_score" | "value_score" | "volatility_score") {
   const buckets: Record<string, { hit: number; total: number }> = {
     "70-100": { hit: 0, total: 0 },
@@ -771,7 +807,49 @@ export default function AdminEvalPage() {
               </CardContent>
             </Card>
 
-            {/* Value Score Buckets */}
+            {/* Calibration Chart: Predicted vs Actual */}
+            {(() => {
+              const calibData = computeCalibrationData(propOutcomes);
+              const hasData = calibData.some(d => d.actual != null);
+              if (!hasData) return null;
+              return (
+                <Card className="border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                      <Target className="h-4 w-4 text-primary" />
+                      Confidence Calibration
+                    </h3>
+                    <p className="text-[10px] text-muted-foreground">
+                      Predicted confidence vs actual hit rate — closer to diagonal = better calibrated
+                    </p>
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={calibData} barGap={0}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                          <YAxis domain={[0, 80]} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} label={{ value: "Hit Rate %", angle: -90, position: "insideLeft", fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                          <Tooltip
+                            contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                            formatter={(value: number | null, name: string) => [value != null ? `${value}%` : "—", name === "actual" ? "Actual Hit Rate" : "Target Hit Rate"]}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Bar dataKey="actual" name="Actual" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="target" name="Target" fill="hsl(var(--muted-foreground))" opacity={0.3} radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 text-center">
+                      {calibData.map(d => (
+                        <div key={d.bucket} className="text-[9px]">
+                          <div className="font-mono text-muted-foreground">{d.total}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
             <Card>
               <CardContent className="pt-4 space-y-3">
                 <h3 className="text-sm font-semibold flex items-center gap-2">
