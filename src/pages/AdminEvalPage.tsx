@@ -313,6 +313,58 @@ export default function AdminEvalPage() {
 
   const [refreshingSnap, setRefreshingSnap] = useState(false);
   const [analyzingFactors, setAnalyzingFactors] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+
+  // Learning loop status query
+  const { data: loopStatus } = useQuery({
+    queryKey: ["learning-loop-status"],
+    queryFn: async () => {
+      // Total graded props
+      const { count: gradedProps } = await supabase
+        .from("prop_outcomes")
+        .select("id", { count: "exact", head: true })
+        .not("hit", "is", null);
+
+      // Total graded slips
+      const { count: gradedSlips } = await supabase
+        .from("slip_outcomes")
+        .select("id", { count: "exact", head: true })
+        .not("slip_hit", "is", null);
+
+      // Last grading run (most recent graded_at)
+      const { data: lastGrade } = await supabase
+        .from("prop_outcomes")
+        .select("graded_at")
+        .not("graded_at", "is", null)
+        .order("graded_at", { ascending: false })
+        .limit(1);
+
+      // Last scoring analysis
+      const { data: lastAnalysis } = await supabase
+        .from("factor_analysis_snapshots")
+        .select("created_at, sample_size, analysis_date")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      // Cron schedule info
+      const lastGradeTime = lastGrade?.[0]?.graded_at ? new Date(lastGrade[0].graded_at) : null;
+      const lastAnalysisTime = lastAnalysis?.[0]?.created_at ? new Date(lastAnalysis[0].created_at) : null;
+      const gradeHoursAgo = lastGradeTime ? (Date.now() - lastGradeTime.getTime()) / (1000 * 60 * 60) : null;
+      const analysisHoursAgo = lastAnalysisTime ? (Date.now() - lastAnalysisTime.getTime()) / (1000 * 60 * 60) : null;
+
+      return {
+        gradedProps: gradedProps || 0,
+        gradedSlips: gradedSlips || 0,
+        lastGradeTime,
+        lastAnalysisTime,
+        gradeHoursAgo,
+        analysisHoursAgo,
+        lastAnalysisSample: lastAnalysis?.[0]?.sample_size || 0,
+        lastAnalysisDate: lastAnalysis?.[0]?.analysis_date || null,
+      };
+    },
+    enabled: isAdmin,
+  });
 
   const handleRunAnalysis = async () => {
     setAnalyzingFactors(true);
