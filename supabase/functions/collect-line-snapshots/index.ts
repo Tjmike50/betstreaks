@@ -97,7 +97,7 @@ serve(async (req) => {
 
     for (const game of gamesData.slice(0, 5)) {
       try {
-        const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`;
+        const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel,betmgm,pointsbetus`;
         const propsRes = await fetch(propsUrl);
         if (!propsRes.ok) {
           console.warn(`Props fetch failed for game ${game.id}: ${propsRes.status}`);
