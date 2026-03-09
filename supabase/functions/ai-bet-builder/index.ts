@@ -450,7 +450,8 @@ serve(async (req) => {
     if (featuredRes.ok) {
       gamesData = await featuredRes.json();
     } else {
-      console.error("[AI-Builder] Odds API error:", featuredRes.status);
+      const errBody = await featuredRes.text().catch(() => "");
+      console.error(`[AI-Builder] Odds API error: ${featuredRes.status} — ${errBody}`);
     }
 
     // Fetch player props from multiple sportsbooks
@@ -509,12 +510,44 @@ serve(async (req) => {
     console.log(`[AI-Builder] Live props found: ${livePropsCount} across ${BOOKMAKERS}`);
 
     // Aggregate best lines across books
-    const bestLines = aggregateBestLines(allLiveProps);
+    let bestLines = aggregateBestLines(allLiveProps);
     let sanityRejected = 0;
     for (const bl of bestLines.values()) {
       if (!bl.odds_validated) sanityRejected++;
     }
     console.log(`[AI-Builder] Best lines: ${bestLines.size} unique props, ${sanityRejected} failed sanity check`);
+
+    // ===== SNAPSHOT FALLBACK: If live odds fetch failed, use line_snapshots =====
+    if (bestLines.size === 0) {
+      console.log("[AI-Builder] No live odds — falling back to line_snapshots...");
+      const { data: snapshotFallback } = await serviceClient
+        .from("line_snapshots")
+        .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook")
+        .eq("game_date", todayStr)
+        .order("snapshot_at", { ascending: false })
+        .limit(800);
+
+      if (snapshotFallback && snapshotFallback.length > 0) {
+        const fallbackProps = snapshotFallback.map((s: any) => ({
+          player_name: s.player_name,
+          stat_type: s.stat_type,
+          threshold: Number(s.threshold),
+          over_odds: s.over_odds,
+          under_odds: s.under_odds,
+          sportsbook: s.sportsbook || "snapshot",
+        }));
+        bestLines = aggregateBestLines(fallbackProps);
+        console.log(`[AI-Builder] Snapshot fallback: ${bestLines.size} unique props from ${snapshotFallback.length} snapshots`);
+      }
+    }
+
+    // Build secondary index: player|stat (no threshold) -> BestLineEntry[] for fuzzy matching
+    const bestLinesByPlayerStat = new Map<string, BestLineEntry[]>();
+    for (const bl of bestLines.values()) {
+      const psKey = `${bl.player_name.toLowerCase()}|${bl.stat_type}`;
+      if (!bestLinesByPlayerStat.has(psKey)) bestLinesByPlayerStat.set(psKey, []);
+      bestLinesByPlayerStat.get(psKey)!.push(bl);
+    }
 
     // Fetch recent snapshots for movement detection
     const { data: recentSnapshots } = await serviceClient
@@ -843,14 +876,39 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
           realContext.home_away_sample = dbCandidate.away_games;
         }
 
-        // ===== BEST LINE & ODDS VALIDATION =====
+        // ===== BEST LINE & ODDS VALIDATION (with fuzzy threshold matching) =====
         const legStatLabel = STAT_LABELS[normStat(leg.stat_type)] || leg.stat_type;
         const lineThreshold = dbCandidate.threshold;
-        const bestLineKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
-        const bestLine = bestLines.get(bestLineKey);
+        const exactKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
+        let bestLine = bestLines.get(exactKey);
+        let marketThreshold: number | null = null;
+
+        // Fuzzy match: find closest threshold for same player|stat
+        if (!bestLine) {
+          const psKey = `${normName(leg.player_name)}|${legStatLabel}`;
+          const candidates = bestLinesByPlayerStat.get(psKey);
+          if (candidates && candidates.length > 0) {
+            let closestDist = Infinity;
+            let closestEntry: BestLineEntry | null = null;
+            for (const c of candidates) {
+              const dist = Math.abs(c.threshold - lineThreshold);
+              if (dist < closestDist) {
+                closestDist = dist;
+                closestEntry = c;
+              }
+            }
+            if (closestEntry) {
+              bestLine = closestEntry;
+              marketThreshold = closestEntry.threshold;
+              // Update the leg's line to reflect the actual market threshold
+              const pick = (leg.pick || "").toLowerCase();
+              leg.line = `${pick === "under" ? "Under" : "Over"} ${closestEntry.threshold}`;
+              console.log(`[AI-Builder] Fuzzy matched ${leg.player_name} ${legStatLabel}: scoring ${lineThreshold} → market ${closestEntry.threshold}`);
+            }
+          }
+        }
 
         if (bestLine) {
-          // Use best odds from multi-book aggregation
           const pick = (leg.pick || "").toLowerCase();
           if (pick === "over" && bestLine.best_over_odds) {
             leg.odds = bestLine.best_over_odds;
@@ -867,9 +925,13 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
           }
 
           realContext.odds_validated = bestLine.odds_validated;
+          if (marketThreshold != null && marketThreshold !== lineThreshold) {
+            realContext.market_threshold = marketThreshold;
+          }
 
           // Check for extreme movement vs snapshots
-          const propSnapshots = snapshotsByProp.get(bestLineKey) || [];
+          const snapKey = `${normName(leg.player_name)}|${legStatLabel}|${bestLine.threshold}`;
+          const propSnapshots = snapshotsByProp.get(snapKey) || [];
           const movementWarning = detectExtremeMovement(
             pick === "over" ? bestLine.best_over_odds : bestLine.best_under_odds,
             propSnapshots,

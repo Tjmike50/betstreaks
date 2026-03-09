@@ -103,6 +103,10 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
   if (ctx.odds_validated === false) {
     chips.push({ label: "⚠ Odds unverified", color: "bg-red-500/10 text-red-400" });
   }
+  if (ctx.market_threshold != null) {
+    const dir = ctx.market_threshold > 0 ? "O" : "U";
+    chips.push({ label: `Market line: ${dir}${Math.abs(ctx.market_threshold)}`, color: "bg-sky-500/10 text-sky-400" });
+  }
 
   if (ctx.tags?.length) {
     for (const tag of ctx.tags.slice(0, 3)) {

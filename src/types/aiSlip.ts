@@ -25,6 +25,7 @@ export interface LegDataContext {
   odds_validated?: boolean | null;
   best_over_odds?: string | null;
   best_under_odds?: string | null;
+  market_threshold?: number | null;
 }
 
 export interface AISlipLeg {
