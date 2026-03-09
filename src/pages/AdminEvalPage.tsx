@@ -427,6 +427,22 @@ export default function AdminEvalPage() {
     }
   };
 
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-outcomes", {
+        body: { lookback_days: 30 },
+      });
+      if (error) throw error;
+      toast({ title: "Backfill complete", description: `${data.outcomes_generated} outcomes generated across ${data.dates_processed} dates` });
+      refetch();
+    } catch (e) {
+      toast({ title: "Backfill failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   if (adminLoading) return <div className="flex items-center justify-center min-h-screen"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   if (!isAdmin) {
     return (
