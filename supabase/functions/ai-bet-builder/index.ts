@@ -450,7 +450,8 @@ serve(async (req) => {
     if (featuredRes.ok) {
       gamesData = await featuredRes.json();
     } else {
-      console.error("[AI-Builder] Odds API error:", featuredRes.status);
+      const errBody = await featuredRes.text().catch(() => "");
+      console.error(`[AI-Builder] Odds API error: ${featuredRes.status} — ${errBody}`);
     }
 
     // Fetch player props from multiple sportsbooks
