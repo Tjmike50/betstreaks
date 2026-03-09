@@ -48,9 +48,16 @@ export function useGamesToday() {
       if (error) throw error;
       
       // Filter out placeholder games with null team abbreviations (All-Star break, etc.)
-      const validGames = (data as GameToday[]).filter(
-        (game) => game.home_team_abbr && game.away_team_abbr
-      );
+      // Also filter out completed games from yesterday
+      const todayStr = getLocalDateString(new Date());
+      const validGames = (data as GameToday[]).filter((game) => {
+        if (!game.home_team_abbr || !game.away_team_abbr) return false;
+        // Keep all of today's and tomorrow's games
+        if (game.game_date >= todayStr) return true;
+        // For yesterday's games, only keep ones that are still in progress (not Final)
+        const status = (game.status || "").toLowerCase();
+        return !status.includes("final");
+      });
       
       return validGames;
     },
