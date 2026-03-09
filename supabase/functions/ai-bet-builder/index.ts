@@ -507,9 +507,29 @@ Respond with ONLY valid JSON:
   ]
 }`;
 
+    // Build filter constraints for LLM
+    let filterConstraints = "";
+    if (filters) {
+      const parts: string[] = [];
+      if (filters.targetOdds) parts.push(`Target combined odds: ${filters.targetOdds}`);
+      if (filters.legCount) parts.push(`Exactly ${filters.legCount} legs per slip`);
+      if (filters.riskLevel) parts.push(`All slips must be risk_label: "${filters.riskLevel}"`);
+      if (filters.overUnder === "over") parts.push("Use ONLY Over picks");
+      if (filters.overUnder === "under") parts.push("Use ONLY Under picks");
+      if (filters.sameGameOnly) parts.push("All legs in each slip must be from the SAME game");
+      if (filters.crossGameOnly) parts.push("Each leg must be from a DIFFERENT game");
+      if (filters.noRepeatPlayers) parts.push("Do NOT use the same player in multiple slips");
+      if (filters.maxOnePerPlayer) parts.push("Max one leg per player in each slip");
+      if (filters.maxOnePerTeam) parts.push("Max one leg per team in each slip");
+      if (filters.diversifySlips) parts.push("Maximize diversity: different players, teams, and stat types across slips");
+      if (parts.length > 0) {
+        filterConstraints = `\n\nUSER FILTER CONSTRAINTS (MUST follow):\n${parts.map(p => `- ${p}`).join("\n")}`;
+      }
+    }
+
     const userPrompt = `Generate ${Math.min(slipCount, 5)} NBA bet slip(s) for: "${prompt}"
 
-Use ONLY players and stats from the scored candidates. Copy their statistics directly into data_context. Each slip should have 2-4 legs.`;
+Use ONLY players and stats from the scored candidates. Copy their statistics directly into data_context. Each slip should have ${filters?.legCount ? filters.legCount : "2-4"} legs.${filterConstraints}`;
 
     const aiRes = await fetch(AI_GATEWAY, {
       method: "POST",
