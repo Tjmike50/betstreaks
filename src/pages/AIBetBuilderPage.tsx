@@ -11,6 +11,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import type { AISlip, LegDataContext } from "@/types/aiSlip";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { BuilderFilterPanel } from "@/components/builder/BuilderFilterPanel";
+import { BuilderActiveFilters } from "@/components/builder/BuilderActiveFilters";
+import type { BuilderFilters } from "@/types/builderFilters";
+import { DEFAULT_BUILDER_FILTERS, getActiveBuilderFilterCount } from "@/types/builderFilters";
 
 const QUICK_PROMPTS = [
   "Build me a +150 parlay",
@@ -302,14 +306,18 @@ function BuilderLoadingState() {
 
 export default function AIBetBuilderPage() {
   const [prompt, setPrompt] = useState("");
+  const [filters, setFilters] = useState<BuilderFilters>({
+    ...DEFAULT_BUILDER_FILTERS,
+  });
   const { slips, isLoading, error, buildSlips } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
   const navigate = useNavigate();
+  const activeFilterCount = getActiveBuilderFilterCount(filters);
 
   const handleSubmit = () => {
     if (!prompt.trim()) return;
-    const slipCount = isPremium ? 3 : 1;
-    buildSlips(prompt.trim(), slipCount);
+    const slipCount = isPremium ? filters.slipCount : 1;
+    buildSlips(prompt.trim(), slipCount, filters);
   };
 
   const isLimitError = error?.includes("free") || error?.includes("limit") || error?.includes("Upgrade");
@@ -349,6 +357,9 @@ export default function AIBetBuilderPage() {
             </button>
           ))}
         </div>
+
+        {/* Filters */}
+        <BuilderFilterPanel filters={filters} onChange={setFilters} isPremium={isPremium} />
 
         {/* Prompt Input */}
         <div className="space-y-3">
@@ -430,6 +441,17 @@ export default function AIBetBuilderPage() {
               Your AI Slips
               <Badge variant="secondary" className="text-[10px]">{slips.length}</Badge>
             </h2>
+            {/* Show active filters above results */}
+            {activeFilterCount > 0 && (
+              <div className="bg-card/50 border border-border/30 rounded-lg p-3 space-y-1.5">
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Applied Filters</span>
+                <BuilderActiveFilters
+                  filters={filters}
+                  onChange={setFilters}
+                  onClearAll={() => setFilters({ ...DEFAULT_BUILDER_FILTERS, slipCount: filters.slipCount })}
+                />
+              </div>
+            )}
             {slips.map((slip, i) => (
               <SlipCard key={slip.id} slip={slip} index={i} />
             ))}

@@ -91,7 +91,7 @@ serve(async (req) => {
     });
     const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    const { prompt, slipCount = 1 } = await req.json();
+    const { prompt, slipCount = 1, filters = null } = await req.json();
     if (!prompt) throw new Error("prompt is required");
 
     // --- Auth & usage limits ---
@@ -205,11 +205,77 @@ serve(async (req) => {
       );
     }
 
-    // ===== PHASE 1b: DIVERSITY CAP — max N props per player =====
+    // ===== PHASE 1b: APPLY USER FILTERS before diversity cap =====
+    let filteredProps = [...scoredProps];
+
+    if (filters) {
+      const f = filters;
+
+      // Stat type filter
+      if (f.statTypes && f.statTypes.length > 0) {
+        const allowedStats = new Set(f.statTypes.map((s: string) => normStat(s)));
+        filteredProps = filteredProps.filter((p: any) => allowedStats.has(normStat(p.stat_type)));
+        console.log(`[AI-Builder] After stat filter: ${filteredProps.length}`);
+      }
+
+      // Team filters
+      if (f.includeTeams && f.includeTeams.length > 0) {
+        const teams = new Set(f.includeTeams.map((t: string) => t.toUpperCase()));
+        filteredProps = filteredProps.filter((p: any) => teams.has((p.team_abbr || "").toUpperCase()));
+      }
+      if (f.excludeTeams && f.excludeTeams.length > 0) {
+        const teams = new Set(f.excludeTeams.map((t: string) => t.toUpperCase()));
+        filteredProps = filteredProps.filter((p: any) => !teams.has((p.team_abbr || "").toUpperCase()));
+      }
+
+      // Player filters
+      if (f.includePlayers && f.includePlayers.length > 0) {
+        const players = new Set(f.includePlayers.map((n: string) => normName(n)));
+        filteredProps = filteredProps.filter((p: any) => players.has(normName(p.player_name)));
+      }
+      if (f.excludePlayers && f.excludePlayers.length > 0) {
+        const players = new Set(f.excludePlayers.map((n: string) => normName(n)));
+        filteredProps = filteredProps.filter((p: any) => !players.has(normName(p.player_name)));
+      }
+
+      // Data quality filters
+      if (f.minConfidence != null) {
+        filteredProps = filteredProps.filter((p: any) => (p.confidence_score ?? 0) >= f.minConfidence);
+      }
+      if (f.minHitRate != null) {
+        filteredProps = filteredProps.filter((p: any) => {
+          const hitRate = p.season_hit_rate != null ? p.season_hit_rate * 100 : 0;
+          return hitRate >= f.minHitRate;
+        });
+      }
+      if (f.maxVolatility != null) {
+        filteredProps = filteredProps.filter((p: any) => (p.volatility_score ?? 100) <= f.maxVolatility);
+      }
+      if (f.minSampleSize != null) {
+        filteredProps = filteredProps.filter((p: any) => (p.total_games ?? 0) >= f.minSampleSize);
+      }
+      if (f.startersOnly) {
+        // Filter by reason_tags containing "starter" or high minutes
+        filteredProps = filteredProps.filter((p: any) => {
+          const tags = p.reason_tags || [];
+          return tags.some((t: string) => t.toLowerCase().includes("starter") || t.toLowerCase().includes("high_usage"));
+        });
+      }
+      if (f.avoidUncertainLineups) {
+        filteredProps = filteredProps.filter((p: any) => {
+          const tags = p.reason_tags || [];
+          return !tags.some((t: string) => t.toLowerCase().includes("uncertain") || t.toLowerCase().includes("questionable"));
+        });
+      }
+
+      console.log(`[AI-Builder] After user filters: ${filteredProps.length} candidates`);
+    }
+
+    // ===== PHASE 1c: DIVERSITY CAP — max N props per player =====
     const playerPropCount = new Map<string, number>();
     const diversifiedProps: any[] = [];
 
-    for (const p of scoredProps) {
+    for (const p of filteredProps) {
       const pKey = normName(p.player_name);
       const count = playerPropCount.get(pKey) || 0;
       if (count >= MAX_CANDIDATES_PER_PLAYER) {
@@ -228,7 +294,7 @@ serve(async (req) => {
     const uniquePlayers = new Set(diversifiedProps.map(p => normName(p.player_name)));
     debug.unique_players_in_pool = uniquePlayers.size;
 
-    console.log(`[AI-Builder] After diversity cap: ${diversifiedProps.length} candidates from ${uniquePlayers.size} unique players (was ${scoredProps.length})`);
+    console.log(`[AI-Builder] After diversity cap: ${diversifiedProps.length} candidates from ${uniquePlayers.size} unique players (was ${filteredProps.length})`);
 
     // ===== PHASE 2: Fetch live odds for market context =====
     const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
@@ -441,9 +507,29 @@ Respond with ONLY valid JSON:
   ]
 }`;
 
+    // Build filter constraints for LLM
+    let filterConstraints = "";
+    if (filters) {
+      const parts: string[] = [];
+      if (filters.targetOdds) parts.push(`Target combined odds: ${filters.targetOdds}`);
+      if (filters.legCount) parts.push(`Exactly ${filters.legCount} legs per slip`);
+      if (filters.riskLevel) parts.push(`All slips must be risk_label: "${filters.riskLevel}"`);
+      if (filters.overUnder === "over") parts.push("Use ONLY Over picks");
+      if (filters.overUnder === "under") parts.push("Use ONLY Under picks");
+      if (filters.sameGameOnly) parts.push("All legs in each slip must be from the SAME game");
+      if (filters.crossGameOnly) parts.push("Each leg must be from a DIFFERENT game");
+      if (filters.noRepeatPlayers) parts.push("Do NOT use the same player in multiple slips");
+      if (filters.maxOnePerPlayer) parts.push("Max one leg per player in each slip");
+      if (filters.maxOnePerTeam) parts.push("Max one leg per team in each slip");
+      if (filters.diversifySlips) parts.push("Maximize diversity: different players, teams, and stat types across slips");
+      if (parts.length > 0) {
+        filterConstraints = `\n\nUSER FILTER CONSTRAINTS (MUST follow):\n${parts.map(p => `- ${p}`).join("\n")}`;
+      }
+    }
+
     const userPrompt = `Generate ${Math.min(slipCount, 5)} NBA bet slip(s) for: "${prompt}"
 
-Use ONLY players and stats from the scored candidates. Copy their statistics directly into data_context. Each slip should have 2-4 legs.`;
+Use ONLY players and stats from the scored candidates. Copy their statistics directly into data_context. Each slip should have ${filters?.legCount ? filters.legCount : "2-4"} legs.${filterConstraints}`;
 
     const aiRes = await fetch(AI_GATEWAY, {
       method: "POST",
