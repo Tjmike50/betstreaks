@@ -241,7 +241,14 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
                 <span className="text-sm font-semibold truncate">{leg.player_name}</span>
               </div>
               {leg.odds && (
-                <span className="text-xs font-mono font-bold text-muted-foreground shrink-0">{leg.odds}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-xs font-mono font-bold text-muted-foreground">{leg.odds}</span>
+                  {leg.data_context?.odds_source && (
+                    <span className="text-[8px] font-medium px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase">
+                      {leg.data_context.odds_source}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
             <div className="text-sm text-primary font-semibold">
