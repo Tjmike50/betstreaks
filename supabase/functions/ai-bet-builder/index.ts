@@ -843,6 +843,60 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
           realContext.home_away_sample = dbCandidate.away_games;
         }
 
+        // ===== BEST LINE & ODDS VALIDATION =====
+        const legStatLabel = STAT_LABELS[normStat(leg.stat_type)] || leg.stat_type;
+        const lineThreshold = dbCandidate.threshold;
+        const bestLineKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
+        const bestLine = bestLines.get(bestLineKey);
+
+        if (bestLine) {
+          // Use best odds from multi-book aggregation
+          const pick = (leg.pick || "").toLowerCase();
+          if (pick === "over" && bestLine.best_over_odds) {
+            leg.odds = bestLine.best_over_odds;
+            realContext.odds_source = bestLine.best_over_book;
+            realContext.implied_probability = bestLine.implied_over != null ? Math.round(bestLine.implied_over * 100) : null;
+            realContext.best_over_odds = bestLine.best_over_odds;
+            realContext.best_under_odds = bestLine.best_under_odds;
+          } else if (pick === "under" && bestLine.best_under_odds) {
+            leg.odds = bestLine.best_under_odds;
+            realContext.odds_source = bestLine.best_under_book;
+            realContext.implied_probability = bestLine.implied_under != null ? Math.round(bestLine.implied_under * 100) : null;
+            realContext.best_over_odds = bestLine.best_over_odds;
+            realContext.best_under_odds = bestLine.best_under_odds;
+          }
+
+          realContext.odds_validated = bestLine.odds_validated;
+
+          // Check for extreme movement vs snapshots
+          const propSnapshots = snapshotsByProp.get(bestLineKey) || [];
+          const movementWarning = detectExtremeMovement(
+            pick === "over" ? bestLine.best_over_odds : bestLine.best_under_odds,
+            propSnapshots,
+            pick === "over" ? "over" : "under"
+          );
+          if (movementWarning) {
+            realContext.market_note = movementWarning;
+          }
+
+          // Reject legs that failed sanity check
+          if (!bestLine.odds_validated) {
+            debug.legs_rejected++;
+            debug.rejected_legs.push({
+              player: leg.player_name,
+              stat: leg.stat_type,
+              reason: `Odds sanity failed: ${bestLine.rejection_reason}`,
+            });
+            debug.legs_validated--;
+            playersInThisSlip.delete(playerNorm);
+            console.warn(`[AI-Builder] REJECTED (sanity): ${leg.player_name} ${leg.stat_type} — ${bestLine.rejection_reason}`);
+            continue;
+          }
+        } else {
+          // No live odds found — mark as unverified
+          realContext.odds_validated = false;
+        }
+
         // Replace LLM context entirely with real data
         leg.data_context = realContext;
         leg.team_abbr = leg.team_abbr || dbCandidate.team_abbr;
