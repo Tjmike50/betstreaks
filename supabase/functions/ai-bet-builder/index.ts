@@ -18,6 +18,152 @@ const STAT_LABELS: Record<string, string> = {
 const MAX_CANDIDATES_PER_PLAYER = 2;
 const MAX_CANDIDATES_TO_LLM = 40;
 
+// ===== ODDS UTILITY FUNCTIONS =====
+
+/** Convert American odds to implied probability (0-1) */
+function americanToImplied(odds: string | number | null): number | null {
+  if (odds == null) return null;
+  const n = typeof odds === "string" ? parseInt(odds, 10) : odds;
+  if (isNaN(n)) return null;
+  if (n > 0) return 100 / (n + 100);
+  if (n < 0) return Math.abs(n) / (Math.abs(n) + 100);
+  return null;
+}
+
+/** Check if odds are within a sane range for a main line */
+function isOddsSane(overOdds: string | null, underOdds: string | null, threshold: number, statType: string): { valid: boolean; reason: string | null } {
+  const overNum = overOdds ? parseInt(overOdds, 10) : null;
+  const underNum = underOdds ? parseInt(underOdds, 10) : null;
+
+  // Reject extreme juice: odds < -800 are likely alt lines mislabeled as main lines
+  const REALISTIC_THRESHOLDS: Record<string, [number, number]> = {
+    Points: [5, 45], Rebounds: [2, 18], Assists: [1, 15], "3-Pointers": [0.5, 8],
+    Steals: [0.5, 4], Blocks: [0.5, 5],
+  };
+  const range = REALISTIC_THRESHOLDS[statType];
+  if (range && (threshold < range[0] || threshold > range[1])) {
+    return { valid: false, reason: `Threshold ${threshold} outside realistic range for ${statType}` };
+  }
+
+  if (overNum != null && overNum < -800) {
+    return { valid: false, reason: `Over odds ${overOdds} too extreme — likely alt line` };
+  }
+  if (underNum != null && underNum < -800) {
+    return { valid: false, reason: `Under odds ${underOdds} too extreme — likely alt line` };
+  }
+
+  // Cross-book divergence check: if both sides have same-direction heavy juice, something is off
+  if (overNum != null && underNum != null) {
+    const diff = Math.abs(overNum - underNum);
+    if (diff > 500) {
+      return { valid: false, reason: `Odds spread too wide: ${overOdds}/${underOdds} (diff ${diff})` };
+    }
+  }
+
+  return { valid: true, reason: null };
+}
+
+interface BestLineEntry {
+  player_name: string;
+  stat_type: string;
+  threshold: number;
+  best_over_odds: string | null;
+  best_over_book: string | null;
+  best_under_odds: string | null;
+  best_under_book: string | null;
+  books_seen: string[];
+  implied_over: number | null;
+  implied_under: number | null;
+  odds_validated: boolean;
+  rejection_reason: string | null;
+}
+
+/** Aggregate live props across books, select best line, run sanity checks */
+function aggregateBestLines(liveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[]): Map<string, BestLineEntry> {
+  const grouped = new Map<string, typeof liveProps>();
+
+  for (const prop of liveProps) {
+    const key = `${prop.player_name.toLowerCase()}|${prop.stat_type}|${prop.threshold}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(prop);
+  }
+
+  const bestLines = new Map<string, BestLineEntry>();
+
+  for (const [key, entries] of grouped) {
+    let bestOverOdds: number | null = null;
+    let bestOverBook: string | null = null;
+    let bestUnderOdds: number | null = null;
+    let bestUnderBook: string | null = null;
+    const booksSeen = new Set<string>();
+
+    for (const e of entries) {
+      booksSeen.add(e.sportsbook);
+      const overNum = e.over_odds ? parseInt(e.over_odds, 10) : null;
+      const underNum = e.under_odds ? parseInt(e.under_odds, 10) : null;
+
+      // Best over = highest (least negative / most positive)
+      if (overNum != null && (bestOverOdds == null || overNum > bestOverOdds)) {
+        bestOverOdds = overNum;
+        bestOverBook = e.sportsbook;
+      }
+      // Best under = highest
+      if (underNum != null && (bestUnderOdds == null || underNum > bestUnderOdds)) {
+        bestUnderOdds = underNum;
+        bestUnderBook = e.sportsbook;
+      }
+    }
+
+    const sanity = isOddsSane(
+      bestOverOdds != null ? String(bestOverOdds) : null,
+      bestUnderOdds != null ? String(bestUnderOdds) : null,
+      entries[0].threshold,
+      entries[0].stat_type
+    );
+
+    bestLines.set(key, {
+      player_name: entries[0].player_name,
+      stat_type: entries[0].stat_type,
+      threshold: entries[0].threshold,
+      best_over_odds: bestOverOdds != null ? String(bestOverOdds) : null,
+      best_over_book: bestOverBook,
+      best_under_odds: bestUnderOdds != null ? String(bestUnderOdds) : null,
+      best_under_book: bestUnderBook,
+      books_seen: [...booksSeen],
+      implied_over: americanToImplied(bestOverOdds),
+      implied_under: americanToImplied(bestUnderOdds),
+      odds_validated: sanity.valid,
+      rejection_reason: sanity.reason,
+    });
+  }
+
+  return bestLines;
+}
+
+/** Compare current odds to recent snapshots and detect extreme movement */
+function detectExtremeMovement(
+  currentOdds: string | null,
+  snapshots: { over_odds: string | null; under_odds: string | null; snapshot_at: string }[],
+  side: "over" | "under"
+): string | null {
+  if (!currentOdds || snapshots.length === 0) return null;
+  const currentNum = parseInt(currentOdds, 10);
+  if (isNaN(currentNum)) return null;
+
+  // Get oldest snapshot for comparison
+  const oldest = snapshots[snapshots.length - 1];
+  const oldOdds = side === "over" ? oldest.over_odds : oldest.under_odds;
+  if (!oldOdds) return null;
+  const oldNum = parseInt(oldOdds, 10);
+  if (isNaN(oldNum)) return null;
+
+  const diff = Math.abs(currentNum - oldNum);
+  if (diff > 300) {
+    return `Extreme odds movement: ${oldOdds} → ${currentOdds} (${diff}pt shift)`;
+  }
+  return null;
+}
+
 // Normalize name for fuzzy matching
 function normName(n: string): string {
   return n.toLowerCase().replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
@@ -296,8 +442,9 @@ serve(async (req) => {
 
     console.log(`[AI-Builder] After diversity cap: ${diversifiedProps.length} candidates from ${uniquePlayers.size} unique players (was ${filteredProps.length})`);
 
-    // ===== PHASE 2: Fetch live odds for market context =====
-    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
+    // ===== PHASE 2: Fetch live odds for market context (MULTI-BOOK) =====
+    const BOOKMAKERS = "draftkings,fanduel,betmgm,pointsbetus";
+    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
     const featuredRes = await fetch(featuredUrl);
     let gamesData: any[] = [];
     if (featuredRes.ok) {
@@ -306,12 +453,14 @@ serve(async (req) => {
       console.error("[AI-Builder] Odds API error:", featuredRes.status);
     }
 
-    // Fetch player props for line snapshots
+    // Fetch player props from multiple sportsbooks
     let livePropsCount = 0;
     const lineSnapshotRows: any[] = [];
-    for (const game of gamesData.slice(0, 3)) {
+    const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[] = [];
+
+    for (const game of gamesData.slice(0, 5)) {
       try {
-        const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`;
+        const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
         const propsRes = await fetch(propsUrl);
         if (propsRes.ok) {
           const propsData = await propsRes.json();
@@ -335,7 +484,7 @@ serve(async (req) => {
               for (const entry of Object.values(outcomesByPlayer)) {
                 if (entry.player && entry.point != null) {
                   livePropsCount++;
-                  lineSnapshotRows.push({
+                  const row = {
                     player_name: entry.player,
                     stat_type: statType,
                     threshold: entry.point,
@@ -343,7 +492,9 @@ serve(async (req) => {
                     under_odds: entry.under || null,
                     sportsbook: bm.key,
                     game_date: todayStr,
-                  });
+                  };
+                  lineSnapshotRows.push(row);
+                  allLiveProps.push(row);
                 }
               }
             }
@@ -355,7 +506,30 @@ serve(async (req) => {
     }
 
     debug.live_props_found = livePropsCount;
-    console.log(`[AI-Builder] Live props found: ${livePropsCount}`);
+    console.log(`[AI-Builder] Live props found: ${livePropsCount} across ${BOOKMAKERS}`);
+
+    // Aggregate best lines across books
+    const bestLines = aggregateBestLines(allLiveProps);
+    let sanityRejected = 0;
+    for (const bl of bestLines.values()) {
+      if (!bl.odds_validated) sanityRejected++;
+    }
+    console.log(`[AI-Builder] Best lines: ${bestLines.size} unique props, ${sanityRejected} failed sanity check`);
+
+    // Fetch recent snapshots for movement detection
+    const { data: recentSnapshots } = await serviceClient
+      .from("line_snapshots")
+      .select("player_name, stat_type, threshold, over_odds, under_odds, snapshot_at")
+      .eq("game_date", todayStr)
+      .order("snapshot_at", { ascending: false })
+      .limit(500);
+
+    const snapshotsByProp = new Map<string, { over_odds: string | null; under_odds: string | null; snapshot_at: string }[]>();
+    for (const s of recentSnapshots || []) {
+      const key = `${s.player_name.toLowerCase()}|${s.stat_type}|${s.threshold}`;
+      if (!snapshotsByProp.has(key)) snapshotsByProp.set(key, []);
+      snapshotsByProp.get(key)!.push(s);
+    }
 
     // Save line snapshots (fire-and-forget)
     if (lineSnapshotRows.length > 0) {
@@ -667,6 +841,60 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
         } else if (dbCandidate.away_hit_rate != null) {
           realContext.home_away_split = `${Math.round(dbCandidate.away_hit_rate * 100)}% away in ${dbCandidate.away_games || "?"} games`;
           realContext.home_away_sample = dbCandidate.away_games;
+        }
+
+        // ===== BEST LINE & ODDS VALIDATION =====
+        const legStatLabel = STAT_LABELS[normStat(leg.stat_type)] || leg.stat_type;
+        const lineThreshold = dbCandidate.threshold;
+        const bestLineKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
+        const bestLine = bestLines.get(bestLineKey);
+
+        if (bestLine) {
+          // Use best odds from multi-book aggregation
+          const pick = (leg.pick || "").toLowerCase();
+          if (pick === "over" && bestLine.best_over_odds) {
+            leg.odds = bestLine.best_over_odds;
+            realContext.odds_source = bestLine.best_over_book;
+            realContext.implied_probability = bestLine.implied_over != null ? Math.round(bestLine.implied_over * 100) : null;
+            realContext.best_over_odds = bestLine.best_over_odds;
+            realContext.best_under_odds = bestLine.best_under_odds;
+          } else if (pick === "under" && bestLine.best_under_odds) {
+            leg.odds = bestLine.best_under_odds;
+            realContext.odds_source = bestLine.best_under_book;
+            realContext.implied_probability = bestLine.implied_under != null ? Math.round(bestLine.implied_under * 100) : null;
+            realContext.best_over_odds = bestLine.best_over_odds;
+            realContext.best_under_odds = bestLine.best_under_odds;
+          }
+
+          realContext.odds_validated = bestLine.odds_validated;
+
+          // Check for extreme movement vs snapshots
+          const propSnapshots = snapshotsByProp.get(bestLineKey) || [];
+          const movementWarning = detectExtremeMovement(
+            pick === "over" ? bestLine.best_over_odds : bestLine.best_under_odds,
+            propSnapshots,
+            pick === "over" ? "over" : "under"
+          );
+          if (movementWarning) {
+            realContext.market_note = movementWarning;
+          }
+
+          // Reject legs that failed sanity check
+          if (!bestLine.odds_validated) {
+            debug.legs_rejected++;
+            debug.rejected_legs.push({
+              player: leg.player_name,
+              stat: leg.stat_type,
+              reason: `Odds sanity failed: ${bestLine.rejection_reason}`,
+            });
+            debug.legs_validated--;
+            playersInThisSlip.delete(playerNorm);
+            console.warn(`[AI-Builder] REJECTED (sanity): ${leg.player_name} ${leg.stat_type} — ${bestLine.rejection_reason}`);
+            continue;
+          }
+        } else {
+          // No live odds found — mark as unverified
+          realContext.odds_validated = false;
         }
 
         // Replace LLM context entirely with real data

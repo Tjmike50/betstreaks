@@ -20,6 +20,11 @@ export interface LegDataContext {
   availability_note?: string | null;
   lineup_confidence?: "high" | "medium" | "low" | null;
   market_note?: string | null;
+  odds_source?: string | null;
+  implied_probability?: number | null;
+  odds_validated?: boolean | null;
+  best_over_odds?: string | null;
+  best_under_odds?: string | null;
 }
 
 export interface AISlipLeg {

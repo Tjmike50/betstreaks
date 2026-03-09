@@ -94,6 +94,15 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
     const isPositive = ctx.market_note.includes("improved") || ctx.market_note.includes("favorable");
     chips.push({ label: `📊 ${ctx.market_note}`, color: isPositive ? "bg-green-500/10 text-green-400" : "bg-orange-500/10 text-orange-400" });
   }
+  if (ctx.odds_source) {
+    chips.push({ label: `📖 ${ctx.odds_source}`, color: "bg-indigo-500/10 text-indigo-400" });
+  }
+  if (ctx.implied_probability != null) {
+    chips.push({ label: `Mkt: ${ctx.implied_probability}%`, color: "bg-sky-500/10 text-sky-400" });
+  }
+  if (ctx.odds_validated === false) {
+    chips.push({ label: "⚠ Odds unverified", color: "bg-red-500/10 text-red-400" });
+  }
 
   if (ctx.tags?.length) {
     for (const tag of ctx.tags.slice(0, 3)) {
@@ -232,7 +241,14 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
                 <span className="text-sm font-semibold truncate">{leg.player_name}</span>
               </div>
               {leg.odds && (
-                <span className="text-xs font-mono font-bold text-muted-foreground shrink-0">{leg.odds}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-xs font-mono font-bold text-muted-foreground">{leg.odds}</span>
+                  {leg.data_context?.odds_source && (
+                    <span className="text-[8px] font-medium px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase">
+                      {leg.data_context.odds_source}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
             <div className="text-sm text-primary font-semibold">
