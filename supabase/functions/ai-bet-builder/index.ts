@@ -15,37 +15,21 @@ const STAT_LABELS: Record<string, string> = {
   fg3m: "3-Pointers", stl: "Steals", blk: "Blocks",
 };
 
-const STAT_LABELS_REVERSE: Record<string, string> = {
-  "points": "pts", "rebounds": "reb", "assists": "ast",
-  "3-pointers": "fg3m", "steals": "stl", "blocks": "blk",
-};
-
-const NBA_TEAM_ABBRS: Record<string, string> = {
-  "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
-  "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
-  "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
-  "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
-  "Los Angeles Clippers": "LAC", "Los Angeles Lakers": "LAL", "Memphis Grizzlies": "MEM",
-  "Miami Heat": "MIA", "Milwaukee Bucks": "MIL", "Minnesota Timberwolves": "MIN",
-  "New Orleans Pelicans": "NOP", "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC",
-  "Orlando Magic": "ORL", "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX",
-  "Portland Trail Blazers": "POR", "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS",
-  "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
-};
+const MAX_CANDIDATES_PER_PLAYER = 2;
+const MAX_CANDIDATES_TO_LLM = 40;
 
 // Normalize name for fuzzy matching
 function normName(n: string): string {
-  return n.toLowerCase().replace(/[^a-z ]/g, "").trim();
+  return n.toLowerCase().replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
 }
 
 // Normalize stat type for matching
 function normStat(s: string): string {
-  const lower = s.toLowerCase().replace(/[^a-z0-9]/g, "");
-  // Handle common variations
+  const lower = s.toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (lower === "points" || lower === "pts") return "pts";
-  if (lower === "rebounds" || lower === "reb") return "reb";
+  if (lower === "rebounds" || lower === "reb" || lower === "totalrebounds") return "reb";
   if (lower === "assists" || lower === "ast") return "ast";
-  if (lower === "3pointers" || lower === "3pm" || lower === "fg3m" || lower === "threes") return "fg3m";
+  if (lower === "3-pointers" || lower === "3pointers" || lower === "3pm" || lower === "fg3m" || lower === "threes") return "fg3m";
   if (lower === "steals" || lower === "stl") return "stl";
   if (lower === "blocks" || lower === "blk") return "blk";
   return lower;
@@ -56,14 +40,17 @@ interface DebugInfo {
   db_query_date: string;
   fallback_used: boolean;
   fallback_reason: string | null;
+  candidates_after_diversity: number;
   candidates_passed_to_llm: number;
-  candidates_excluded: number;
-  exclusion_reasons: string[];
+  unique_players_in_pool: number;
+  top_candidates: { player: string; stat: string; confidence: number; value: number }[];
+  excluded_candidates: { player: string; stat: string; reason: string }[];
   legs_validated: number;
   legs_rejected: number;
   rejected_legs: { player: string; stat: string; reason: string }[];
   scoring_engine_called: boolean;
   mode: "scored_candidates" | "fallback_mode";
+  live_props_found: number;
 }
 
 serve(async (req) => {
@@ -74,14 +61,17 @@ serve(async (req) => {
     db_query_date: "",
     fallback_used: false,
     fallback_reason: null,
+    candidates_after_diversity: 0,
     candidates_passed_to_llm: 0,
-    candidates_excluded: 0,
-    exclusion_reasons: [],
+    unique_players_in_pool: 0,
+    top_candidates: [],
+    excluded_candidates: [],
     legs_validated: 0,
     legs_rejected: 0,
     rejected_legs: [],
     scoring_engine_called: false,
     mode: "scored_candidates",
+    live_props_found: 0,
   };
 
   try {
@@ -138,63 +128,47 @@ serve(async (req) => {
     debug.db_query_date = todayStr;
 
     // ===== PHASE 1: Get pre-scored candidates from player_prop_scores =====
-    // NO confidence filter — let all candidates through so LLM can see them
-    console.log(`[AI-Builder] Fetching pre-scored candidates from player_prop_scores for ${todayStr}...`);
+    console.log(`[AI-Builder] Fetching scored candidates for ${todayStr}...`);
     
     const { data: dbCandidates, error: dbErr } = await serviceClient
       .from("player_prop_scores")
       .select("*")
       .eq("game_date", todayStr)
       .order("confidence_score", { ascending: false })
-      .limit(100);
+      .limit(200);
 
     if (dbErr) {
       console.error("[AI-Builder] DB candidates error:", dbErr);
-      debug.exclusion_reasons.push(`DB error: ${dbErr.message}`);
     }
 
     let scoredProps: any[] = dbCandidates || [];
     debug.db_candidates_found = scoredProps.length;
-    console.log(`[AI-Builder] Found ${scoredProps.length} pre-scored candidates from DB for ${todayStr}`);
-
-    // Log score distribution for debugging
-    if (scoredProps.length > 0) {
-      const scoreRange = {
-        min: Math.min(...scoredProps.map(p => p.confidence_score || 0)),
-        max: Math.max(...scoredProps.map(p => p.confidence_score || 0)),
-        avg: Math.round(scoredProps.reduce((s, p) => s + (p.confidence_score || 0), 0) / scoredProps.length),
-      };
-      console.log(`[AI-Builder] Score distribution: min=${scoreRange.min}, max=${scoreRange.max}, avg=${scoreRange.avg}`);
-    }
+    console.log(`[AI-Builder] Found ${scoredProps.length} raw candidates for ${todayStr}`);
 
     // If no DB candidates for today, try yesterday
     if (scoredProps.length === 0) {
       const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-      console.log(`[AI-Builder] No candidates for today, trying yesterday (${yesterday})...`);
+      console.log(`[AI-Builder] No candidates for today, trying ${yesterday}...`);
       
-      const { data: yestCandidates, error: yestErr } = await serviceClient
+      const { data: yestCandidates } = await serviceClient
         .from("player_prop_scores")
         .select("*")
         .eq("game_date", yesterday)
         .order("confidence_score", { ascending: false })
-        .limit(100);
-      
-      if (yestErr) {
-        console.error("[AI-Builder] Yesterday query error:", yestErr);
-      }
+        .limit(200);
       
       if (yestCandidates && yestCandidates.length > 0) {
         scoredProps = yestCandidates;
         debug.fallback_used = true;
         debug.fallback_reason = `No candidates for ${todayStr}, using ${yestCandidates.length} from ${yesterday}`;
         debug.mode = "fallback_mode";
-        console.log(`[AI-Builder] Fallback: got ${scoredProps.length} candidates from yesterday`);
+        console.log(`[AI-Builder] Fallback: ${scoredProps.length} candidates from yesterday`);
       }
     }
 
-    // If still no candidates, call scoring engine as last resort
+    // If still none, call scoring engine
     if (scoredProps.length === 0) {
-      console.log("[AI-Builder] No DB candidates — calling scoring engine as fallback...");
+      console.log("[AI-Builder] No DB candidates — calling scoring engine...");
       debug.scoring_engine_called = true;
       
       try {
@@ -211,23 +185,17 @@ serve(async (req) => {
           const scoringData = await scoringRes.json();
           scoredProps = scoringData.scored_props || [];
           debug.fallback_used = true;
-          debug.fallback_reason = `No DB candidates, called scoring engine and got ${scoredProps.length} props`;
+          debug.fallback_reason = `Called scoring engine, got ${scoredProps.length} props`;
           debug.mode = "fallback_mode";
-          console.log(`[AI-Builder] Scoring engine fallback: ${scoredProps.length} props`);
         } else {
-          const errText = await scoringRes.text();
-          console.error("[AI-Builder] Scoring engine error:", scoringRes.status, errText);
-          debug.exclusion_reasons.push(`Scoring engine returned ${scoringRes.status}`);
+          console.error("[AI-Builder] Scoring engine error:", scoringRes.status);
         }
       } catch (e) {
-        console.error("[AI-Builder] Scoring engine fallback failed:", e);
-        debug.exclusion_reasons.push(`Scoring engine call failed: ${e}`);
+        console.error("[AI-Builder] Scoring engine failed:", e);
       }
     }
 
-    // If we STILL have no candidates, return a clear error
     if (scoredProps.length === 0) {
-      console.error("[AI-Builder] FATAL: No scored candidates available at all");
       return new Response(
         JSON.stringify({ 
           error: "No scored candidates available for today's games. Data may not have been refreshed yet.",
@@ -236,6 +204,31 @@ serve(async (req) => {
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // ===== PHASE 1b: DIVERSITY CAP — max N props per player =====
+    const playerPropCount = new Map<string, number>();
+    const diversifiedProps: any[] = [];
+
+    for (const p of scoredProps) {
+      const pKey = normName(p.player_name);
+      const count = playerPropCount.get(pKey) || 0;
+      if (count >= MAX_CANDIDATES_PER_PLAYER) {
+        debug.excluded_candidates.push({
+          player: p.player_name,
+          stat: `${p.stat_type} ${p.threshold}`,
+          reason: `Diversity cap: already have ${MAX_CANDIDATES_PER_PLAYER} props for this player`,
+        });
+        continue;
+      }
+      playerPropCount.set(pKey, count + 1);
+      diversifiedProps.push(p);
+    }
+
+    debug.candidates_after_diversity = diversifiedProps.length;
+    const uniquePlayers = new Set(diversifiedProps.map(p => normName(p.player_name)));
+    debug.unique_players_in_pool = uniquePlayers.size;
+
+    console.log(`[AI-Builder] After diversity cap: ${diversifiedProps.length} candidates from ${uniquePlayers.size} unique players (was ${scoredProps.length})`);
 
     // ===== PHASE 2: Fetch live odds for market context =====
     const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
@@ -247,7 +240,8 @@ serve(async (req) => {
       console.error("[AI-Builder] Odds API error:", featuredRes.status);
     }
 
-    // Fetch player props for market lines + snapshots
+    // Fetch player props for line snapshots
+    let livePropsCount = 0;
     const lineSnapshotRows: any[] = [];
     for (const game of gamesData.slice(0, 3)) {
       try {
@@ -274,6 +268,7 @@ serve(async (req) => {
 
               for (const entry of Object.values(outcomesByPlayer)) {
                 if (entry.player && entry.point != null) {
+                  livePropsCount++;
                   lineSnapshotRows.push({
                     player_name: entry.player,
                     stat_type: statType,
@@ -293,6 +288,9 @@ serve(async (req) => {
       }
     }
 
+    debug.live_props_found = livePropsCount;
+    console.log(`[AI-Builder] Live props found: ${livePropsCount}`);
+
     // Save line snapshots (fire-and-forget)
     if (lineSnapshotRows.length > 0) {
       serviceClient
@@ -301,35 +299,32 @@ serve(async (req) => {
         .then(({ error }) => { if (error) console.error("[AI-Builder] Line snapshot insert error:", error); });
     }
 
-    // Build odds summary
     const oddsSummary = gamesData.slice(0, 8).map((game: any) => ({
       home: game.home_team,
       away: game.away_team,
       commence: game.commence_time,
     }));
 
-    // ===== PHASE 3: Build candidate summary and validation maps =====
-    // Create lookup maps for validation
-    const candidateSet = new Set<string>();
+    // ===== PHASE 3: Build candidate summary for LLM =====
+    // Use diversified pool, take top N
+    const candidatesToSend = diversifiedProps.slice(0, MAX_CANDIDATES_TO_LLM);
+
+    // Build validation lookup keyed on normalized player+stat
     const candidateByKey = new Map<string, any>();
 
-    const candidateSummary = scoredProps.slice(0, 50).map((p: any) => {
+    const candidateSummary = candidatesToSend.map((p: any) => {
       const statLabel = STAT_LABELS[p.stat_type] || p.stat_type;
       const normPlayer = normName(p.player_name);
       const normStatKey = normStat(p.stat_type);
       
-      // Multiple key formats for flexible matching
+      // Store under multiple key formats for matching
       const key1 = `${normPlayer}::${normStatKey}`;
       const key2 = `${normPlayer}::${statLabel.toLowerCase()}`;
-      candidateSet.add(key1);
-      candidateSet.add(key2);
+      // Store specific threshold key for exact matching
+      const key3 = `${normPlayer}::${normStatKey}::${p.threshold}`;
       candidateByKey.set(key1, p);
       candidateByKey.set(key2, p);
-
-      // Also store by player name alone for partial matching
-      if (!candidateByKey.has(normPlayer)) {
-        candidateByKey.set(normPlayer, p);
-      }
+      candidateByKey.set(key3, p);
 
       return {
         player: p.player_name,
@@ -337,6 +332,7 @@ serve(async (req) => {
         opponent: p.opponent_abbr,
         home_away: p.home_away,
         stat: statLabel,
+        stat_key: p.stat_type,
         line: p.threshold,
         confidence: p.confidence_score,
         value: p.value_score,
@@ -365,36 +361,41 @@ serve(async (req) => {
         },
         tags: p.reason_tags || [],
         total_games: p.total_games,
-        lineup_confidence: p.lineup_confidence,
       };
     });
 
     debug.candidates_passed_to_llm = candidateSummary.length;
-    debug.candidates_excluded = scoredProps.length - candidateSummary.length;
-    if (debug.candidates_excluded > 0) {
-      debug.exclusion_reasons.push(`Passed top ${candidateSummary.length} of ${scoredProps.length} to LLM (limit 50)`);
-    }
+    debug.top_candidates = candidateSummary.slice(0, 20).map(c => ({
+      player: c.player,
+      stat: `${c.stat} ${c.line}`,
+      confidence: c.confidence ?? 0,
+      value: c.value ?? 0,
+    }));
 
-    console.log(`[AI-Builder] Passing ${candidateSummary.length} candidates to LLM`);
+    console.log(`[AI-Builder] Passing ${candidateSummary.length} candidates to LLM from ${debug.unique_players_in_pool} players`);
 
     // ===== PHASE 4: LLM generation =====
+    const diversityInstruction = slipCount > 1
+      ? `\n\nIMPORTANT DIVERSITY RULE: Each slip MUST use a DIFFERENT set of players. Do NOT repeat the same player across multiple slips unless the candidate pool has fewer than ${slipCount * 3} unique players. Maximize player variety across slips.`
+      : "";
+
     const systemPrompt = `You are an NBA betting analyst for BetStreaks. You generate structured bet slips using ONLY the pre-scored candidate legs provided below.
 
 CRITICAL RULES:
 - You MUST select legs ONLY from the SCORED CANDIDATES list below
 - Do NOT invent players, stats, or numbers that are not in the candidate data
 - Every player_name you use MUST appear exactly as written in the candidates list
-- Every stat_type you use MUST match the candidate's "stat" field exactly
-- Use the candidate's "line" value as the threshold (e.g., "Over 24.5")
-- Pull ALL data_context values directly from the candidate data — do NOT invent statistics
+- Every stat_type you use MUST match the candidate's "stat" field exactly (e.g. "Points", "Rebounds", "Assists", "3-Pointers", "Steals", "Blocks")
+- Use the candidate's "line" value as the threshold (e.g. "Over 24.5")
+- Copy data_context values DIRECTLY from the candidate data — do NOT invent or modify statistics
+- For season_avg, last5_avg, confidence, value: use the EXACT numbers from the candidate
 - Never say "lock", "guaranteed", or "sure thing"
-- Use terms like "balanced option", "higher-risk version", "best fit based on current data"
 - Each slip has a risk_label: "safe", "balanced", or "aggressive"
-- For "safe" slips: prefer candidates with confidence >= 50
-- For "balanced" slips: mix confidence levels
+- For "safe" slips: prefer candidates with higher confidence
 - For "aggressive" slips: can use lower confidence candidates with high value
+- Do NOT use the same player more than once within a single slip
 - Provide reasoning that references the actual data from the candidates
-- Generate realistic estimated combined American odds
+- Generate realistic estimated combined American odds${diversityInstruction}
 
 SCORED CANDIDATES (${candidateSummary.length} candidates — USE ONLY THESE):
 ${JSON.stringify(candidateSummary, null, 1)}
@@ -432,7 +433,6 @@ Respond with ONLY valid JSON:
             "value_score": number from candidate,
             "volatility_label": "low" | "medium" | "high",
             "sample_size": total_games from candidate,
-            "lineup_confidence": "high" | "medium" | "low" or null,
             "tags": array from candidate
           }
         }
@@ -443,7 +443,7 @@ Respond with ONLY valid JSON:
 
     const userPrompt = `Generate ${Math.min(slipCount, 5)} NBA bet slip(s) for: "${prompt}"
 
-Use ONLY players and stats from the scored candidates. Copy their statistics directly into data_context.`;
+Use ONLY players and stats from the scored candidates. Copy their statistics directly into data_context. Each slip should have 2-4 legs.`;
 
     const aiRes = await fetch(AI_GATEWAY, {
       method: "POST",
@@ -488,72 +488,106 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
       throw new Error("AI returned invalid format");
     }
 
-    // ===== PHASE 5: VALIDATE & ENRICH — reject hallucinated legs, override with real data =====
+    // ===== PHASE 5: VALIDATE & ENRICH =====
+    // Track players used across slips for multi-slip dedup
+    const playersUsedAcrossSlips = new Map<string, number>();
+
     for (const slip of parsed.slips) {
       const validLegs: any[] = [];
+      const playersInThisSlip = new Set<string>();
       
       for (const leg of slip.legs || []) {
         const playerNorm = normName(leg.player_name || "");
         const statNorm = normStat(leg.stat_type || "");
-        const key = `${playerNorm}::${statNorm}`;
 
-        // Try multiple key formats
-        let dbCandidate = candidateByKey.get(key);
-        if (!dbCandidate) {
-          // Try with label
-          const statLabel = STAT_LABELS[statNorm] || leg.stat_type || "";
-          dbCandidate = candidateByKey.get(`${playerNorm}::${statLabel.toLowerCase()}`);
-        }
-
-        if (dbCandidate || candidateSet.has(key)) {
-          debug.legs_validated++;
-          
-          // CRITICAL: Override LLM data_context with REAL database values
-          if (dbCandidate) {
-            const realContext = {
-              season_avg: dbCandidate.season_avg,
-              last5_avg: dbCandidate.last5_avg,
-              last10_hit_rate: dbCandidate.last10_hit_rate != null 
-                ? `${Math.round(dbCandidate.last10_hit_rate * 100)}%` 
-                : null,
-              line_hit_rate: dbCandidate.season_hit_rate != null 
-                ? `${Math.round(dbCandidate.season_hit_rate * 100)}% over ${dbCandidate.total_games || "?"} games` 
-                : null,
-              vs_opponent: dbCandidate.vs_opponent_games > 0 && dbCandidate.vs_opponent_hit_rate != null
-                ? `${Math.round(dbCandidate.vs_opponent_hit_rate * 100)}% in ${dbCandidate.vs_opponent_games} games`
-                : null,
-              vs_opponent_sample: dbCandidate.vs_opponent_games || null,
-              home_away_split: dbCandidate.home_away === "home" && dbCandidate.home_hit_rate != null
-                ? `${Math.round(dbCandidate.home_hit_rate * 100)}% at home in ${dbCandidate.home_games || "?"} games`
-                : dbCandidate.away_hit_rate != null
-                ? `${Math.round(dbCandidate.away_hit_rate * 100)}% away in ${dbCandidate.away_games || "?"} games`
-                : null,
-              home_away_sample: dbCandidate.home_away === "home" ? dbCandidate.home_games : dbCandidate.away_games,
-              confidence_score: dbCandidate.confidence_score,
-              value_score: dbCandidate.value_score,
-              volatility_label: dbCandidate.volatility_score != null
-                ? (dbCandidate.volatility_score <= 30 ? "low" : dbCandidate.volatility_score <= 60 ? "medium" : "high")
-                : "medium",
-              sample_size: dbCandidate.total_games,
-              lineup_confidence: dbCandidate.lineup_confidence || null,
-              tags: dbCandidate.reason_tags || [],
-            };
-
-            // Merge: real data takes precedence
-            leg.data_context = { ...leg.data_context, ...realContext };
-            leg.team_abbr = leg.team_abbr || dbCandidate.team_abbr;
-          }
-          
-          validLegs.push(leg);
-        } else {
+        // Skip duplicate player within same slip
+        if (playersInThisSlip.has(playerNorm)) {
           debug.legs_rejected++;
           debug.rejected_legs.push({
             player: leg.player_name || "unknown",
             stat: leg.stat_type || "unknown",
-            reason: "Not found in candidate set",
+            reason: "Duplicate player within same slip",
+          });
+          continue;
+        }
+
+        // Try multiple key formats to find the DB candidate
+        const key1 = `${playerNorm}::${statNorm}`;
+        const statLabel = STAT_LABELS[statNorm] || leg.stat_type || "";
+        const key2 = `${playerNorm}::${statLabel.toLowerCase()}`;
+
+        let dbCandidate = candidateByKey.get(key1) || candidateByKey.get(key2);
+
+        // If no exact match, try fuzzy: find any candidate for this player
+        if (!dbCandidate) {
+          for (const [k, v] of candidateByKey.entries()) {
+            if (k.startsWith(playerNorm + "::")) {
+              dbCandidate = v;
+              console.log(`[AI-Builder] Fuzzy matched ${leg.player_name}/${leg.stat_type} to DB key ${k}`);
+              break;
+            }
+          }
+        }
+
+        if (!dbCandidate) {
+          debug.legs_rejected++;
+          debug.rejected_legs.push({
+            player: leg.player_name || "unknown",
+            stat: leg.stat_type || "unknown",
+            reason: `Not in candidate set. Tried keys: [${key1}], [${key2}]`,
           });
           console.warn(`[AI-Builder] REJECTED: ${leg.player_name} / ${leg.stat_type} — not in candidates`);
+          continue;
         }
+
+        debug.legs_validated++;
+        playersInThisSlip.add(playerNorm);
+        playersUsedAcrossSlips.set(playerNorm, (playersUsedAcrossSlips.get(playerNorm) || 0) + 1);
+
+        // CRITICAL: Override LLM data_context with REAL database values
+        // Only set values from DB — never pass 0 when the real data is null
+        const realContext: Record<string, any> = {
+          season_avg: dbCandidate.season_avg ?? null,
+          last5_avg: dbCandidate.last5_avg ?? null,
+          confidence_score: dbCandidate.confidence_score ?? null,
+          value_score: dbCandidate.value_score ?? null,
+          sample_size: dbCandidate.total_games ?? null,
+          tags: dbCandidate.reason_tags || [],
+        };
+
+        // Hit rates — only include if non-null
+        if (dbCandidate.last10_hit_rate != null) {
+          realContext.last10_hit_rate = `${Math.round(dbCandidate.last10_hit_rate * 100)}%`;
+        }
+        if (dbCandidate.season_hit_rate != null) {
+          realContext.line_hit_rate = `${Math.round(dbCandidate.season_hit_rate * 100)}% over ${dbCandidate.total_games || "?"} games`;
+        }
+
+        // Volatility
+        if (dbCandidate.volatility_score != null) {
+          realContext.volatility_label = dbCandidate.volatility_score <= 30 ? "low" : dbCandidate.volatility_score <= 60 ? "medium" : "high";
+        }
+
+        // vs opponent
+        if (dbCandidate.vs_opponent_games > 0 && dbCandidate.vs_opponent_hit_rate != null) {
+          realContext.vs_opponent = `${Math.round(dbCandidate.vs_opponent_hit_rate * 100)}% in ${dbCandidate.vs_opponent_games} games`;
+          realContext.vs_opponent_sample = dbCandidate.vs_opponent_games;
+        }
+
+        // Home/away split
+        if (dbCandidate.home_away === "home" && dbCandidate.home_hit_rate != null) {
+          realContext.home_away_split = `${Math.round(dbCandidate.home_hit_rate * 100)}% at home in ${dbCandidate.home_games || "?"} games`;
+          realContext.home_away_sample = dbCandidate.home_games;
+        } else if (dbCandidate.away_hit_rate != null) {
+          realContext.home_away_split = `${Math.round(dbCandidate.away_hit_rate * 100)}% away in ${dbCandidate.away_games || "?"} games`;
+          realContext.home_away_sample = dbCandidate.away_games;
+        }
+
+        // Replace LLM context entirely with real data
+        leg.data_context = realContext;
+        leg.team_abbr = leg.team_abbr || dbCandidate.team_abbr;
+
+        validLegs.push(leg);
       }
       
       slip.legs = validLegs;
@@ -563,6 +597,9 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
     parsed.slips = parsed.slips.filter((s: any) => s.legs && s.legs.length > 0);
 
     console.log(`[AI-Builder] Validation: ${debug.legs_validated} passed, ${debug.legs_rejected} rejected`);
+    if (debug.rejected_legs.length > 0) {
+      console.log(`[AI-Builder] Rejected details:`, JSON.stringify(debug.rejected_legs));
+    }
 
     if (parsed.slips.length === 0) {
       return new Response(
@@ -636,10 +673,13 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
       debug,
       scoring_metadata: {
         candidates_available: scoredProps.length,
+        candidates_after_diversity: debug.candidates_after_diversity,
         candidates_sent_to_llm: candidateSummary.length,
+        unique_players: debug.unique_players_in_pool,
         legs_validated: debug.legs_validated,
         legs_rejected: debug.legs_rejected,
         games_today: gamesData.length,
+        live_props_found: livePropsCount,
         mode: debug.mode,
         fallback_used: debug.fallback_used,
       },
