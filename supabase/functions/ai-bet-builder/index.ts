@@ -510,12 +510,44 @@ serve(async (req) => {
     console.log(`[AI-Builder] Live props found: ${livePropsCount} across ${BOOKMAKERS}`);
 
     // Aggregate best lines across books
-    const bestLines = aggregateBestLines(allLiveProps);
+    let bestLines = aggregateBestLines(allLiveProps);
     let sanityRejected = 0;
     for (const bl of bestLines.values()) {
       if (!bl.odds_validated) sanityRejected++;
     }
     console.log(`[AI-Builder] Best lines: ${bestLines.size} unique props, ${sanityRejected} failed sanity check`);
+
+    // ===== SNAPSHOT FALLBACK: If live odds fetch failed, use line_snapshots =====
+    if (bestLines.size === 0) {
+      console.log("[AI-Builder] No live odds — falling back to line_snapshots...");
+      const { data: snapshotFallback } = await serviceClient
+        .from("line_snapshots")
+        .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook")
+        .eq("game_date", todayStr)
+        .order("snapshot_at", { ascending: false })
+        .limit(800);
+
+      if (snapshotFallback && snapshotFallback.length > 0) {
+        const fallbackProps = snapshotFallback.map((s: any) => ({
+          player_name: s.player_name,
+          stat_type: s.stat_type,
+          threshold: Number(s.threshold),
+          over_odds: s.over_odds,
+          under_odds: s.under_odds,
+          sportsbook: s.sportsbook || "snapshot",
+        }));
+        bestLines = aggregateBestLines(fallbackProps);
+        console.log(`[AI-Builder] Snapshot fallback: ${bestLines.size} unique props from ${snapshotFallback.length} snapshots`);
+      }
+    }
+
+    // Build secondary index: player|stat (no threshold) -> BestLineEntry[] for fuzzy matching
+    const bestLinesByPlayerStat = new Map<string, BestLineEntry[]>();
+    for (const bl of bestLines.values()) {
+      const psKey = `${bl.player_name.toLowerCase()}|${bl.stat_type}`;
+      if (!bestLinesByPlayerStat.has(psKey)) bestLinesByPlayerStat.set(psKey, []);
+      bestLinesByPlayerStat.get(psKey)!.push(bl);
+    }
 
     // Fetch recent snapshots for movement detection
     const { data: recentSnapshots } = await serviceClient
