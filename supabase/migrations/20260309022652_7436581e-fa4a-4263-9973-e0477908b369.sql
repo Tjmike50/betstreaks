@@ -1,0 +1,1 @@
+UPDATE public.user_flags SET is_premium = true, updated_at = now() WHERE user_id = '7e412b38-5362-42a0-8831-9705ef7cd8f9';
