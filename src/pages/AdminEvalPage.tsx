@@ -503,6 +503,72 @@ export default function AdminEvalPage() {
           </Button>
         </div>
 
+        {/* Learning Loop Status */}
+        {loopStatus && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Brain className="h-4 w-4 text-primary" />
+                  Learning Loop Status
+                </h3>
+                <Button size="sm" variant="outline" onClick={handleBackfill} disabled={backfilling} className="h-7 text-xs">
+                  {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Database className="h-3 w-3 mr-1" />}
+                  Backfill 30d
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-card/50 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-bold text-primary">{loopStatus.gradedProps.toLocaleString()}</div>
+                  <div className="text-[10px] text-muted-foreground">Graded Props</div>
+                </div>
+                <div className="bg-card/50 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-bold text-primary">{loopStatus.gradedSlips.toLocaleString()}</div>
+                  <div className="text-[10px] text-muted-foreground">Graded Slips</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div>
+                    <div className="font-medium">Last Grading</div>
+                    <div className="text-muted-foreground">
+                      {loopStatus.lastGradeTime
+                        ? `${loopStatus.gradeHoursAgo!.toFixed(1)}h ago`
+                        : "Never"}
+                    </div>
+                  </div>
+                  {loopStatus.gradeHoursAgo != null && (
+                    loopStatus.gradeHoursAgo <= 26
+                      ? <CheckCircle className="h-3.5 w-3.5 text-green-500 ml-auto" />
+                      : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 ml-auto" />
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Scale className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div>
+                    <div className="font-medium">Last Analysis</div>
+                    <div className="text-muted-foreground">
+                      {loopStatus.lastAnalysisTime
+                        ? `${loopStatus.analysisHoursAgo!.toFixed(1)}h ago`
+                        : "Never"}
+                    </div>
+                  </div>
+                  {loopStatus.analysisHoursAgo != null && (
+                    loopStatus.analysisHoursAgo <= 26
+                      ? <CheckCircle className="h-3.5 w-3.5 text-green-500 ml-auto" />
+                      : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 ml-auto" />
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground border-t border-border/30 pt-2">
+                <PlayCircle className="h-3 w-3" />
+                <span>Auto: Grade @ 2:30 AM ET → Analysis @ 3:00 AM ET (daily)</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Availability Status */}
         {!availLoading && availStatus && (
           <Card className={availStatus.isFresh ? "border-border" : "border-yellow-500/30"}>
