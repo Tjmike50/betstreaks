@@ -876,14 +876,39 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
           realContext.home_away_sample = dbCandidate.away_games;
         }
 
-        // ===== BEST LINE & ODDS VALIDATION =====
+        // ===== BEST LINE & ODDS VALIDATION (with fuzzy threshold matching) =====
         const legStatLabel = STAT_LABELS[normStat(leg.stat_type)] || leg.stat_type;
         const lineThreshold = dbCandidate.threshold;
-        const bestLineKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
-        const bestLine = bestLines.get(bestLineKey);
+        const exactKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
+        let bestLine = bestLines.get(exactKey);
+        let marketThreshold: number | null = null;
+
+        // Fuzzy match: find closest threshold for same player|stat
+        if (!bestLine) {
+          const psKey = `${normName(leg.player_name)}|${legStatLabel}`;
+          const candidates = bestLinesByPlayerStat.get(psKey);
+          if (candidates && candidates.length > 0) {
+            let closestDist = Infinity;
+            let closestEntry: BestLineEntry | null = null;
+            for (const c of candidates) {
+              const dist = Math.abs(c.threshold - lineThreshold);
+              if (dist < closestDist) {
+                closestDist = dist;
+                closestEntry = c;
+              }
+            }
+            if (closestEntry) {
+              bestLine = closestEntry;
+              marketThreshold = closestEntry.threshold;
+              // Update the leg's line to reflect the actual market threshold
+              const pick = (leg.pick || "").toLowerCase();
+              leg.line = `${pick === "under" ? "Under" : "Over"} ${closestEntry.threshold}`;
+              console.log(`[AI-Builder] Fuzzy matched ${leg.player_name} ${legStatLabel}: scoring ${lineThreshold} → market ${closestEntry.threshold}`);
+            }
+          }
+        }
 
         if (bestLine) {
-          // Use best odds from multi-book aggregation
           const pick = (leg.pick || "").toLowerCase();
           if (pick === "over" && bestLine.best_over_odds) {
             leg.odds = bestLine.best_over_odds;
@@ -900,9 +925,13 @@ Use ONLY players and stats from the scored candidates. Copy their statistics dir
           }
 
           realContext.odds_validated = bestLine.odds_validated;
+          if (marketThreshold != null && marketThreshold !== lineThreshold) {
+            realContext.market_threshold = marketThreshold;
+          }
 
           // Check for extreme movement vs snapshots
-          const propSnapshots = snapshotsByProp.get(bestLineKey) || [];
+          const snapKey = `${normName(leg.player_name)}|${legStatLabel}|${bestLine.threshold}`;
+          const propSnapshots = snapshotsByProp.get(snapKey) || [];
           const movementWarning = detectExtremeMovement(
             pick === "over" ? bestLine.best_over_odds : bestLine.best_under_odds,
             propSnapshots,
