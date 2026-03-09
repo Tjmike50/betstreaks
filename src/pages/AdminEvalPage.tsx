@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar, Users, CheckCircle, AlertTriangle, Brain, Scale, Eye } from "lucide-react";
+import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar, Users, CheckCircle, AlertTriangle, Brain, Scale, Eye, Database, Clock, PlayCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, Cell } from "recharts";
 
@@ -313,6 +313,58 @@ export default function AdminEvalPage() {
 
   const [refreshingSnap, setRefreshingSnap] = useState(false);
   const [analyzingFactors, setAnalyzingFactors] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+
+  // Learning loop status query
+  const { data: loopStatus } = useQuery({
+    queryKey: ["learning-loop-status"],
+    queryFn: async () => {
+      // Total graded props
+      const { count: gradedProps } = await supabase
+        .from("prop_outcomes")
+        .select("id", { count: "exact", head: true })
+        .not("hit", "is", null);
+
+      // Total graded slips
+      const { count: gradedSlips } = await supabase
+        .from("slip_outcomes")
+        .select("id", { count: "exact", head: true })
+        .not("slip_hit", "is", null);
+
+      // Last grading run (most recent graded_at)
+      const { data: lastGrade } = await supabase
+        .from("prop_outcomes")
+        .select("graded_at")
+        .not("graded_at", "is", null)
+        .order("graded_at", { ascending: false })
+        .limit(1);
+
+      // Last scoring analysis
+      const { data: lastAnalysis } = await supabase
+        .from("factor_analysis_snapshots")
+        .select("created_at, sample_size, analysis_date")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      // Cron schedule info
+      const lastGradeTime = lastGrade?.[0]?.graded_at ? new Date(lastGrade[0].graded_at) : null;
+      const lastAnalysisTime = lastAnalysis?.[0]?.created_at ? new Date(lastAnalysis[0].created_at) : null;
+      const gradeHoursAgo = lastGradeTime ? (Date.now() - lastGradeTime.getTime()) / (1000 * 60 * 60) : null;
+      const analysisHoursAgo = lastAnalysisTime ? (Date.now() - lastAnalysisTime.getTime()) / (1000 * 60 * 60) : null;
+
+      return {
+        gradedProps: gradedProps || 0,
+        gradedSlips: gradedSlips || 0,
+        lastGradeTime,
+        lastAnalysisTime,
+        gradeHoursAgo,
+        analysisHoursAgo,
+        lastAnalysisSample: lastAnalysis?.[0]?.sample_size || 0,
+        lastAnalysisDate: lastAnalysis?.[0]?.analysis_date || null,
+      };
+    },
+    enabled: isAdmin,
+  });
 
   const handleRunAnalysis = async () => {
     setAnalyzingFactors(true);
@@ -375,6 +427,22 @@ export default function AdminEvalPage() {
     }
   };
 
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-outcomes", {
+        body: { lookback_days: 30 },
+      });
+      if (error) throw error;
+      toast({ title: "Backfill complete", description: `${data.outcomes_generated} outcomes generated across ${data.dates_processed} dates` });
+      refetch();
+    } catch (e) {
+      toast({ title: "Backfill failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   if (adminLoading) return <div className="flex items-center justify-center min-h-screen"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   if (!isAdmin) {
     return (
@@ -434,6 +502,72 @@ export default function AdminEvalPage() {
             Grade Yesterday
           </Button>
         </div>
+
+        {/* Learning Loop Status */}
+        {loopStatus && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Brain className="h-4 w-4 text-primary" />
+                  Learning Loop Status
+                </h3>
+                <Button size="sm" variant="outline" onClick={handleBackfill} disabled={backfilling} className="h-7 text-xs">
+                  {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Database className="h-3 w-3 mr-1" />}
+                  Backfill 30d
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-card/50 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-bold text-primary">{loopStatus.gradedProps.toLocaleString()}</div>
+                  <div className="text-[10px] text-muted-foreground">Graded Props</div>
+                </div>
+                <div className="bg-card/50 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-bold text-primary">{loopStatus.gradedSlips.toLocaleString()}</div>
+                  <div className="text-[10px] text-muted-foreground">Graded Slips</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div>
+                    <div className="font-medium">Last Grading</div>
+                    <div className="text-muted-foreground">
+                      {loopStatus.lastGradeTime
+                        ? `${loopStatus.gradeHoursAgo!.toFixed(1)}h ago`
+                        : "Never"}
+                    </div>
+                  </div>
+                  {loopStatus.gradeHoursAgo != null && (
+                    loopStatus.gradeHoursAgo <= 26
+                      ? <CheckCircle className="h-3.5 w-3.5 text-green-500 ml-auto" />
+                      : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 ml-auto" />
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Scale className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div>
+                    <div className="font-medium">Last Analysis</div>
+                    <div className="text-muted-foreground">
+                      {loopStatus.lastAnalysisTime
+                        ? `${loopStatus.analysisHoursAgo!.toFixed(1)}h ago`
+                        : "Never"}
+                    </div>
+                  </div>
+                  {loopStatus.analysisHoursAgo != null && (
+                    loopStatus.analysisHoursAgo <= 26
+                      ? <CheckCircle className="h-3.5 w-3.5 text-green-500 ml-auto" />
+                      : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 ml-auto" />
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground border-t border-border/30 pt-2">
+                <PlayCircle className="h-3 w-3" />
+                <span>Auto: Grade @ 2:30 AM ET → Analysis @ 3:00 AM ET (daily)</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Availability Status */}
         {!availLoading && availStatus && (
