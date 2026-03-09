@@ -358,6 +358,9 @@ export default function AIBetBuilderPage() {
           ))}
         </div>
 
+        {/* Filters */}
+        <BuilderFilterPanel filters={filters} onChange={setFilters} isPremium={isPremium} />
+
         {/* Prompt Input */}
         <div className="space-y-3">
           <Textarea
