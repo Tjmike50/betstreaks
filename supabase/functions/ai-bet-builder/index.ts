@@ -442,8 +442,9 @@ serve(async (req) => {
 
     console.log(`[AI-Builder] After diversity cap: ${diversifiedProps.length} candidates from ${uniquePlayers.size} unique players (was ${filteredProps.length})`);
 
-    // ===== PHASE 2: Fetch live odds for market context =====
-    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=draftkings,fanduel`;
+    // ===== PHASE 2: Fetch live odds for market context (MULTI-BOOK) =====
+    const BOOKMAKERS = "draftkings,fanduel,betmgm,pointsbetus";
+    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
     const featuredRes = await fetch(featuredUrl);
     let gamesData: any[] = [];
     if (featuredRes.ok) {
@@ -452,12 +453,14 @@ serve(async (req) => {
       console.error("[AI-Builder] Odds API error:", featuredRes.status);
     }
 
-    // Fetch player props for line snapshots
+    // Fetch player props from multiple sportsbooks
     let livePropsCount = 0;
     const lineSnapshotRows: any[] = [];
-    for (const game of gamesData.slice(0, 3)) {
+    const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[] = [];
+
+    for (const game of gamesData.slice(0, 5)) {
       try {
-        const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`;
+        const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
         const propsRes = await fetch(propsUrl);
         if (propsRes.ok) {
           const propsData = await propsRes.json();
@@ -481,7 +484,7 @@ serve(async (req) => {
               for (const entry of Object.values(outcomesByPlayer)) {
                 if (entry.player && entry.point != null) {
                   livePropsCount++;
-                  lineSnapshotRows.push({
+                  const row = {
                     player_name: entry.player,
                     stat_type: statType,
                     threshold: entry.point,
@@ -489,7 +492,9 @@ serve(async (req) => {
                     under_odds: entry.under || null,
                     sportsbook: bm.key,
                     game_date: todayStr,
-                  });
+                  };
+                  lineSnapshotRows.push(row);
+                  allLiveProps.push(row);
                 }
               }
             }
@@ -501,7 +506,30 @@ serve(async (req) => {
     }
 
     debug.live_props_found = livePropsCount;
-    console.log(`[AI-Builder] Live props found: ${livePropsCount}`);
+    console.log(`[AI-Builder] Live props found: ${livePropsCount} across ${BOOKMAKERS}`);
+
+    // Aggregate best lines across books
+    const bestLines = aggregateBestLines(allLiveProps);
+    let sanityRejected = 0;
+    for (const bl of bestLines.values()) {
+      if (!bl.odds_validated) sanityRejected++;
+    }
+    console.log(`[AI-Builder] Best lines: ${bestLines.size} unique props, ${sanityRejected} failed sanity check`);
+
+    // Fetch recent snapshots for movement detection
+    const { data: recentSnapshots } = await serviceClient
+      .from("line_snapshots")
+      .select("player_name, stat_type, threshold, over_odds, under_odds, snapshot_at")
+      .eq("game_date", todayStr)
+      .order("snapshot_at", { ascending: false })
+      .limit(500);
+
+    const snapshotsByProp = new Map<string, { over_odds: string | null; under_odds: string | null; snapshot_at: string }[]>();
+    for (const s of recentSnapshots || []) {
+      const key = `${s.player_name.toLowerCase()}|${s.stat_type}|${s.threshold}`;
+      if (!snapshotsByProp.has(key)) snapshotsByProp.set(key, []);
+      snapshotsByProp.get(key)!.push(s);
+    }
 
     // Save line snapshots (fire-and-forget)
     if (lineSnapshotRows.length > 0) {
