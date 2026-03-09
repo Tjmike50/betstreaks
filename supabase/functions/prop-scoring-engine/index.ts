@@ -630,7 +630,8 @@ function scoreProp(
   const consistencyScore = Math.max(0, 100 - volatilityScore);
 
   // ===== REFINED SCORING ENGINE =====
-  const sampleFactor = Math.min(1, allValues.length / 20);
+  // Sample factor: less aggressive — floor at 0.5 for 3 games, scales to 1.0 at 15 games
+  const sampleFactor = Math.min(1, 0.5 + (Math.min(allValues.length, 15) / 15) * 0.5);
 
   // Weight allocation (must sum to 1.0)
   const W_RECENT = 0.21;
