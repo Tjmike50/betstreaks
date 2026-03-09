@@ -53,7 +53,7 @@ serve(async (req) => {
     console.log(`Collecting line snapshots for ${todayStr}...`);
 
     // 1. Fetch today's NBA games from Odds API
-    const gamesUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h&oddsFormat=american&bookmakers=draftkings`;
+    const gamesUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h&oddsFormat=american&bookmakers=draftkings,fanduel,betmgm,pointsbetus`;
     const gamesRes = await fetch(gamesUrl);
     if (!gamesRes.ok) {
       const errText = await gamesRes.text();
