@@ -1,20 +1,110 @@
 
 
-## Set Admin Flag for Your Account
+# Add Visible Tier Badge to Account Page
 
-Since you already have an account, I just need to identify it and flip the admin flag.
+## Overview
+Add a prominent "Free Plan" or "Premium" tier badge directly below the user's email address on the Account page, making subscription status immediately visible without scrolling.
 
-### Steps
+---
 
-1. **Look up your user ID** in the `user_flags` table using your Supabase user ID
-2. **Upsert a row** in `user_flags` with `is_admin = true` for your user ID
-3. **Verify** you can access `/admin/eval` and see the Admin Refresh button
+## Current State
 
-### What I need from you
+The Account page shows:
+1. User avatar icon
+2. "Logged in" heading
+3. Email address
+4. Feature list
+5. Premium card (further down - easy to miss)
 
-- Your **email address** or **Supabase user ID** so I can target the correct row
+Users must scroll to the premium card section to understand their tier status.
 
-### No code changes required
+---
 
-This is a data-only operation — just an `UPDATE` or `INSERT` on the `user_flags` table. The app already checks `user_flags.is_admin` via `useAdmin()` hook and the `is_admin()` DB function.
+## Solution
+
+Add a colored badge directly below the email that shows:
+
+| Status | Badge Display |
+|--------|---------------|
+| Loading | Gray spinner badge |
+| Free | "Free Plan" - neutral gray badge |
+| Premium | "Premium" - green badge with check icon |
+
+---
+
+## Visual Design
+
+**Free Plan Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌──────────────┐           │
+│      │  Free Plan   │  ← Gray   │
+│      └──────────────┘           │
+└─────────────────────────────────┘
+```
+
+**Premium Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌────────────────┐         │
+│      │ ✓ Premium      │ ← Green │
+│      └────────────────┘         │
+└─────────────────────────────────┘
+```
+
+---
+
+## Implementation
+
+### File: `src/pages/AccountPage.tsx`
+
+**Add tier badge component inline** (lines 207-214):
+
+```tsx
+<div className="text-center space-y-2">
+  <h2 className="text-lg font-semibold text-foreground">
+    Logged in
+  </h2>
+  <p className="text-sm text-muted-foreground break-all">
+    {user.email}
+  </p>
+  
+  {/* NEW: Tier Badge */}
+  {isPremiumLoading ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Checking...
+    </span>
+  ) : isPremium ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
+      <Check className="h-3 w-3" />
+      Premium
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      Free Plan
+    </span>
+  )}
+</div>
+```
+
+---
+
+## Summary
+
+| Change | Description |
+|--------|-------------|
+| Add tier badge | Colored pill badge showing "Free Plan" or "Premium" with icon |
+| Position | Directly below email address for immediate visibility |
+| States | Loading (spinner), Free (gray), Premium (green + check) |
+
+**Files Modified:** `src/pages/AccountPage.tsx`
+
+This makes subscription tier instantly visible at the top of the Account page, so users always know whether they're on Free or Premium without scrolling.
 
