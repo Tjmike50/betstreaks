@@ -1223,7 +1223,7 @@ serve(async (req) => {
     allScored.sort((a, b) => b.confidence_score - a.confidence_score);
     const topProps = allScored.slice(0, top_n);
 
-    // 7. Cache (fire-and-forget)
+    // 7. Cache scores — batch upsert in chunks to avoid CPU timeout
     if (topProps.length > 0) {
       const rows = topProps.map((p) => ({
         game_date: today,
@@ -1261,10 +1261,16 @@ serve(async (req) => {
         scored_at: new Date().toISOString(),
       }));
 
-      supabase
-        .from("player_prop_scores")
-        .upsert(rows, { onConflict: "game_date,player_id,stat_type,threshold" })
-        .then(({ error }) => { if (error) console.error("Cache upsert error:", error); });
+      // Batch upsert in chunks of 25 to avoid CPU limits
+      const CHUNK_SIZE = 25;
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        const chunk = rows.slice(i, i + CHUNK_SIZE);
+        const { error } = await supabase
+          .from("player_prop_scores")
+          .upsert(chunk, { onConflict: "game_date,player_id,stat_type,threshold" });
+        if (error) console.error(`Cache upsert error (chunk ${i / CHUNK_SIZE}):`, error);
+      }
+      console.log(`Cached ${rows.length} scored props in ${Math.ceil(rows.length / CHUNK_SIZE)} batches`);
     }
 
     return new Response(
