@@ -91,7 +91,7 @@ serve(async (req) => {
     });
     const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    const { prompt, slipCount = 1 } = await req.json();
+    const { prompt, slipCount = 1, filters = null } = await req.json();
     if (!prompt) throw new Error("prompt is required");
 
     // --- Auth & usage limits ---
