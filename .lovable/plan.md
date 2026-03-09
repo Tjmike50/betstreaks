@@ -1,110 +1,27 @@
 
 
-# Add Visible Tier Badge to Account Page
+## Problem
 
-## Overview
-Add a prominent "Free Plan" or "Premium" tier badge directly below the user's email address on the Account page, making subscription status immediately visible without scrolling.
+Yesterday's (March 8) games have stale statuses in the database -- they show "1st Qtr", "2nd Qtr", "3rd Qtr", "10:00 pm ET" instead of "Final" because the refresh script didn't update them. The current client-side filter in `useGamesToday.ts` only hides yesterday's games if their status contains "final", so these 5 stale games appear on the Today page alongside today's upcoming games.
 
----
+## Fix
 
-## Current State
+**File: `src/hooks/useGamesToday.ts`** -- Change the yesterday filter logic to use a time-based cutoff instead of relying on the status field.
 
-The Account page shows:
-1. User avatar icon
-2. "Logged in" heading
-3. Email address
-4. Feature list
-5. Premium card (further down - easy to miss)
-
-Users must scroll to the premium card section to understand their tier status.
-
----
-
-## Solution
-
-Add a colored badge directly below the email that shows:
-
-| Status | Badge Display |
-|--------|---------------|
-| Loading | Gray spinner badge |
-| Free | "Free Plan" - neutral gray badge |
-| Premium | "Premium" - green badge with check icon |
-
----
-
-## Visual Design
-
-**Free Plan Badge:**
-```
-┌─────────────────────────────────┐
-│        [User Avatar]            │
-│         Logged in               │
-│      user@example.com           │
-│      ┌──────────────┐           │
-│      │  Free Plan   │  ← Gray   │
-│      └──────────────┘           │
-└─────────────────────────────────┘
+Current logic (line 56-59):
+```ts
+if (game.game_date >= todayStr) return true;
+const status = (game.status || "").toLowerCase();
+return !status.includes("final");
 ```
 
-**Premium Badge:**
-```
-┌─────────────────────────────────┐
-│        [User Avatar]            │
-│         Logged in               │
-│      user@example.com           │
-│      ┌────────────────┐         │
-│      │ ✓ Premium      │ ← Green │
-│      └────────────────┘         │
-└─────────────────────────────────┘
-```
+New logic:
+- If the game is from yesterday and the current local time is past **6 AM**, hide it regardless of status. By 6 AM, all NBA games from the prior day are guaranteed to be over.
+- If it's before 6 AM (late-night window), keep yesterday's games only if they appear to be in-progress (status contains "qtr", "half", "ot") -- not if they're scheduled or final.
 
----
+This handles two scenarios:
+1. **Normal case (after 6 AM):** Only show today's and tomorrow's games.
+2. **Late-night case (before 6 AM):** Show yesterday's genuinely live games for users checking scores after midnight.
 
-## Implementation
-
-### File: `src/pages/AccountPage.tsx`
-
-**Add tier badge component inline** (lines 207-214):
-
-```tsx
-<div className="text-center space-y-2">
-  <h2 className="text-lg font-semibold text-foreground">
-    Logged in
-  </h2>
-  <p className="text-sm text-muted-foreground break-all">
-    {user.email}
-  </p>
-  
-  {/* NEW: Tier Badge */}
-  {isPremiumLoading ? (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      Checking...
-    </span>
-  ) : isPremium ? (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
-      <Check className="h-3 w-3" />
-      Premium
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
-      Free Plan
-    </span>
-  )}
-</div>
-```
-
----
-
-## Summary
-
-| Change | Description |
-|--------|-------------|
-| Add tier badge | Colored pill badge showing "Free Plan" or "Premium" with icon |
-| Position | Directly below email address for immediate visibility |
-| States | Loading (spinner), Free (gray), Premium (green + check) |
-
-**Files Modified:** `src/pages/AccountPage.tsx`
-
-This makes subscription tier instantly visible at the top of the Account page, so users always know whether they're on Free or Premium without scrolling.
+No database or edge function changes needed -- this is a pure client-side filter fix.
 
