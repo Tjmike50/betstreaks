@@ -26,6 +26,12 @@ export interface LegDataContext {
   best_over_odds?: string | null;
   best_under_odds?: string | null;
   market_threshold?: number | null;
+  // Market normalization fields
+  market_confidence?: number | null;
+  consensus_line?: number | null;
+  books_count?: number | null;
+  is_main_line?: boolean | null;
+  edge?: number | null;
   // Game-level matchup info
   home_team?: string | null;
   away_team?: string | null;
