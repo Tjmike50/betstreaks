@@ -239,6 +239,8 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
           const isGameLevel = leg.bet_type === "moneyline" || leg.bet_type === "spread" || leg.bet_type === "total";
           return (
           <div key={i} className="bg-card/80 border border-border/30 rounded-lg p-3 space-y-1">
+            {/* Game matchup header for game-level legs */}
+            {isGameLevel && <GameMatchupHeader leg={leg} />}
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 {isGameLevel && leg.bet_type === "moneyline" && (
