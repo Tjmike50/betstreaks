@@ -766,12 +766,11 @@ serve(async (req) => {
     }
 
     // ===== PHASE 2a: Build set of teams playing TODAY =====
-    // Extract from Odds API (only returns upcoming/live games)
+    // Extract from Odds API (only returns upcoming/live games) — resolve to standard abbreviations
     const teamsPlayingToday = new Set<string>();
     for (const game of gamesData) {
-      // Odds API team names like "Los Angeles Lakers" — extract last word as abbr-like
-      const homeAbbr = (game.home_team || "").split(" ").pop()?.toUpperCase() || "";
-      const awayAbbr = (game.away_team || "").split(" ").pop()?.toUpperCase() || "";
+      const homeAbbr = resolveToAbbr(game.home_team || "");
+      const awayAbbr = resolveToAbbr(game.away_team || "");
       if (homeAbbr) teamsPlayingToday.add(homeAbbr);
       if (awayAbbr) teamsPlayingToday.add(awayAbbr);
     }
