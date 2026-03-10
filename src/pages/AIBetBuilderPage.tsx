@@ -102,6 +102,21 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
   if (ctx.implied_probability != null) {
     chips.push({ label: `Mkt: ${ctx.implied_probability}%`, color: "bg-sky-500/10 text-sky-400" });
   }
+  if (ctx.edge != null && ctx.edge !== 0) {
+    const edgeColor = ctx.edge > 0 ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400";
+    chips.push({ label: `Edge: ${ctx.edge > 0 ? "+" : ""}${ctx.edge}%`, color: edgeColor });
+  }
+  if (ctx.books_count != null && ctx.books_count > 0) {
+    const booksColor = ctx.books_count >= 3 ? "bg-green-500/10 text-green-400" : ctx.books_count >= 2 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400";
+    chips.push({ label: `${ctx.books_count} book${ctx.books_count > 1 ? "s" : ""}`, color: booksColor });
+  }
+  if (ctx.market_confidence != null) {
+    const mcColor = ctx.market_confidence >= 70 ? "bg-green-500/10 text-green-400" : ctx.market_confidence >= 40 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400";
+    chips.push({ label: `Mkt conf: ${ctx.market_confidence}`, color: mcColor });
+  }
+  if (ctx.consensus_line != null && ctx.market_threshold != null && ctx.consensus_line !== ctx.market_threshold) {
+    chips.push({ label: `Consensus: ${ctx.consensus_line}`, color: "bg-sky-500/10 text-sky-400" });
+  }
   if (ctx.odds_validated === false) {
     chips.push({ label: "⚠ Odds unverified", color: "bg-red-500/10 text-red-400" });
   }
