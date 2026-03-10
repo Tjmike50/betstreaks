@@ -1374,7 +1374,7 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
           realContext.home_away_sample = dbCandidate.away_games;
         }
 
-        // ===== BEST LINE & ODDS VALIDATION =====
+        // ===== BEST LINE & ODDS VALIDATION (with main-line detection) =====
         const legStatLabel = STAT_LABELS[normStat(leg.stat_type)] || leg.stat_type;
         const lineThreshold = dbCandidate.threshold;
         const exactKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
@@ -1385,9 +1385,13 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
           const psKey = `${normName(leg.player_name)}|${legStatLabel}`;
           const candidates = bestLinesByPlayerStat.get(psKey);
           if (candidates && candidates.length > 0) {
+            // Prefer main lines over alt lines when fuzzy matching
+            const mainLines = candidates.filter(c => c.is_main_line);
+            const searchPool = mainLines.length > 0 ? mainLines : candidates;
+            
             let closestDist = Infinity;
             let closestEntry: BestLineEntry | null = null;
-            for (const c of candidates) {
+            for (const c of searchPool) {
               const dist = Math.abs(c.threshold - lineThreshold);
               if (dist < closestDist) {
                 closestDist = dist;
@@ -1399,7 +1403,7 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
               marketThreshold = closestEntry.threshold;
               const pick = (leg.pick || "").toLowerCase();
               leg.line = `${pick === "under" ? "Under" : "Over"} ${closestEntry.threshold}`;
-              console.log(`[AI-Builder] Fuzzy matched ${leg.player_name} ${legStatLabel}: scoring ${lineThreshold} → market ${closestEntry.threshold}`);
+              console.log(`[AI-Builder] Fuzzy matched ${leg.player_name} ${legStatLabel}: scoring ${lineThreshold} → market ${closestEntry.threshold} (main: ${closestEntry.is_main_line}, confidence: ${closestEntry.market_confidence})`);
             }
           }
         }
@@ -1425,6 +1429,20 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
             realContext.market_threshold = marketThreshold;
           }
 
+          // === NEW: Market normalization metadata ===
+          realContext.market_confidence = bestLine.market_confidence;
+          realContext.consensus_line = bestLine.consensus_line;
+          realContext.books_count = bestLine.books_with_line;
+          realContext.is_main_line = bestLine.is_main_line;
+
+          // Compute edge: difference between scoring hit rate and implied probability
+          const implProb = pick === "over" ? bestLine.implied_over : bestLine.implied_under;
+          const hitRate = dbCandidate.season_hit_rate;
+          if (implProb != null && hitRate != null) {
+            const edgePct = Math.round((hitRate - implProb) * 100);
+            realContext.edge = edgePct;
+          }
+
           const snapKey = `${normName(leg.player_name)}|${legStatLabel}|${bestLine.threshold}`;
           const propSnapshots = snapshotsByProp.get(snapKey) || [];
           const movementWarning = detectExtremeMovement(
@@ -1436,20 +1454,42 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
             realContext.market_note = movementWarning;
           }
 
+          // Alt line warning (not hard reject, but flag)
+          if (bestLine.alt_line_flag) {
+            realContext.market_note = (realContext.market_note ? realContext.market_note + " | " : "") +
+              `⚠ Possible alt line — consensus main at ${bestLine.consensus_line}`;
+          }
+
           if (!bestLine.odds_validated) {
             debug.legs_rejected++;
             debug.rejected_legs.push({
               player: leg.player_name,
               stat: leg.stat_type,
-              reason: `Odds sanity failed: ${bestLine.rejection_reason}`,
+              reason: `Market normalization failed: ${bestLine.rejection_reason}`,
             });
             debug.legs_validated--;
             playersInThisSlip.delete(playerNorm);
-            console.warn(`[AI-Builder] REJECTED (sanity): ${leg.player_name} ${leg.stat_type} — ${bestLine.rejection_reason}`);
+            console.warn(`[AI-Builder] REJECTED (market): ${leg.player_name} ${leg.stat_type} — ${bestLine.rejection_reason}`);
+            continue;
+          }
+
+          // Soft penalty: if market confidence is very low, reduce the leg's attractiveness
+          if (bestLine.market_confidence < 25) {
+            debug.legs_rejected++;
+            debug.rejected_legs.push({
+              player: leg.player_name,
+              stat: leg.stat_type,
+              reason: `Market confidence too low: ${bestLine.market_confidence}/100 (${bestLine.books_with_line} book(s), alt: ${bestLine.alt_line_flag})`,
+            });
+            debug.legs_validated--;
+            playersInThisSlip.delete(playerNorm);
+            console.warn(`[AI-Builder] REJECTED (low market confidence): ${leg.player_name} ${leg.stat_type} — confidence ${bestLine.market_confidence}`);
             continue;
           }
         } else {
           realContext.odds_validated = false;
+          realContext.market_confidence = 0;
+          realContext.books_count = 0;
         }
 
         // Replace LLM context entirely with real data
