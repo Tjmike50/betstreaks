@@ -1102,6 +1102,14 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
             implied_probability: gameCand.implied_probability != null ? Math.round(gameCand.implied_probability * 100) : null,
             odds_validated: true,
             tags: [],
+            // Matchup info for UI rendering
+            home_team: gameCand.home_team,
+            away_team: gameCand.away_team,
+            opponent: gameCand.opponent || (gameCand.team === gameCand.home_team ? gameCand.away_team : gameCand.home_team),
+            is_home: gameCand.team === gameCand.home_team,
+            spread: gameCand.spread,
+            total_line: gameCand.total_line,
+            pick_side: gameCand.pick, // "Over" / "Under" for totals
           };
 
           leg.data_context = realContext;
