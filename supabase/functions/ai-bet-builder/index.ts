@@ -858,13 +858,17 @@ serve(async (req) => {
     debug.live_props_found = livePropsCount;
     console.log(`[AI-Builder] Live props found: ${livePropsCount} across ${BOOKMAKERS}`);
 
-    // Aggregate best lines across books
+    // Aggregate best lines across books with main-line detection
     let bestLines = aggregateBestLines(allLiveProps);
     let sanityRejected = 0;
+    let altLinesDetected = 0;
+    let mainLinesFound = 0;
     for (const bl of bestLines.values()) {
       if (!bl.odds_validated) sanityRejected++;
+      if (bl.alt_line_flag) altLinesDetected++;
+      if (bl.is_main_line) mainLinesFound++;
     }
-    console.log(`[AI-Builder] Best lines: ${bestLines.size} unique props, ${sanityRejected} failed sanity check`);
+    console.log(`[AI-Builder] Market normalization: ${bestLines.size} unique props, ${mainLinesFound} main lines, ${altLinesDetected} alt lines detected, ${sanityRejected} rejected`);
 
     // ===== SNAPSHOT FALLBACK: If live odds fetch failed, use line_snapshots =====
     if (bestLines.size === 0 && includePlayerProps) {
