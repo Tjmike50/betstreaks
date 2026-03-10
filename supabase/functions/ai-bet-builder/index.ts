@@ -75,63 +75,234 @@ interface BestLineEntry {
   implied_under: number | null;
   odds_validated: boolean;
   rejection_reason: string | null;
+  // Market normalization fields
+  is_main_line: boolean;
+  consensus_line: number | null;
+  market_confidence: number;         // 0-100
+  books_with_line: number;
+  odds_balance_score: number | null;  // how close over/under are to balanced
+  alt_line_flag: boolean;
+  edge: number | null;               // % edge vs implied probability
 }
 
-/** Aggregate live props across books, select best line, run sanity checks */
-function aggregateBestLines(liveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[]): Map<string, BestLineEntry> {
-  const grouped = new Map<string, typeof liveProps>();
+/** Compute how balanced over/under odds are (lower = more balanced = more likely main line) */
+function oddsImbalance(overOdds: string | null, underOdds: string | null): number | null {
+  const overImpl = americanToImplied(overOdds);
+  const underImpl = americanToImplied(underOdds);
+  if (overImpl == null || underImpl == null) return null;
+  // Perfect balanced line: both ~0.5 implied. Imbalance = distance from equal split.
+  return Math.abs(overImpl - underImpl);
+}
 
+/** Identify if a threshold is likely an alt line when a more balanced threshold exists */
+function isLikelyAltLine(
+  imbalance: number | null,
+  allThresholdsForPlayerStat: { threshold: number; imbalance: number | null; booksCount: number }[],
+  currentThreshold: number
+): boolean {
+  if (imbalance == null) return false;
+  // If this line is very imbalanced (one side heavy favorite)
+  if (imbalance > 0.35) {
+    // Check if a more balanced line exists for same player/stat
+    const moreBalanced = allThresholdsForPlayerStat.find(t => 
+      t.threshold !== currentThreshold && 
+      t.imbalance != null && 
+      t.imbalance < imbalance - 0.15 &&
+      t.booksCount >= 1
+    );
+    if (moreBalanced) return true;
+  }
+  return false;
+}
+
+/** Aggregate live props across books with main-line detection and market confidence */
+function aggregateBestLines(liveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[]): Map<string, BestLineEntry> {
+  // Step 1: Group by player|stat|threshold
+  const grouped = new Map<string, typeof liveProps>();
   for (const prop of liveProps) {
     const key = `${prop.player_name.toLowerCase()}|${prop.stat_type}|${prop.threshold}`;
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(prop);
   }
 
-  const bestLines = new Map<string, BestLineEntry>();
+  // Step 2: Build per-threshold aggregates
+  interface ThresholdAgg {
+    threshold: number;
+    entries: typeof liveProps;
+    booksCount: number;
+    books: Set<string>;
+    bestOverOdds: number | null;
+    bestOverBook: string | null;
+    bestUnderOdds: number | null;
+    bestUnderBook: string | null;
+    medianOver: number | null;
+    medianUnder: number | null;
+    imbalance: number | null;
+  }
+
+  // Group by player|stat to compare thresholds
+  const byPlayerStat = new Map<string, ThresholdAgg[]>();
 
   for (const [key, entries] of grouped) {
+    const parts = key.split("|");
+    const psKey = `${parts[0]}|${parts[1]}`;
+    const threshold = Number(parts[2]);
+
     let bestOverOdds: number | null = null;
     let bestOverBook: string | null = null;
     let bestUnderOdds: number | null = null;
     let bestUnderBook: string | null = null;
     const booksSeen = new Set<string>();
+    const overOddsList: number[] = [];
+    const underOddsList: number[] = [];
 
     for (const e of entries) {
       booksSeen.add(e.sportsbook);
       const overNum = e.over_odds ? parseInt(e.over_odds, 10) : null;
       const underNum = e.under_odds ? parseInt(e.under_odds, 10) : null;
 
-      if (overNum != null && (bestOverOdds == null || overNum > bestOverOdds)) {
-        bestOverOdds = overNum;
-        bestOverBook = e.sportsbook;
+      if (overNum != null) {
+        overOddsList.push(overNum);
+        if (bestOverOdds == null || overNum > bestOverOdds) {
+          bestOverOdds = overNum;
+          bestOverBook = e.sportsbook;
+        }
       }
-      if (underNum != null && (bestUnderOdds == null || underNum > bestUnderOdds)) {
-        bestUnderOdds = underNum;
-        bestUnderBook = e.sportsbook;
+      if (underNum != null) {
+        underOddsList.push(underNum);
+        if (bestUnderOdds == null || underNum > bestUnderOdds) {
+          bestUnderOdds = underNum;
+          bestUnderBook = e.sportsbook;
+        }
       }
     }
 
-    const sanity = isOddsSane(
+    // Compute median odds
+    const median = (arr: number[]) => {
+      if (arr.length === 0) return null;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+    };
+
+    const imbalance = oddsImbalance(
       bestOverOdds != null ? String(bestOverOdds) : null,
-      bestUnderOdds != null ? String(bestUnderOdds) : null,
-      entries[0].threshold,
-      entries[0].stat_type
+      bestUnderOdds != null ? String(bestUnderOdds) : null
     );
 
-    bestLines.set(key, {
-      player_name: entries[0].player_name,
-      stat_type: entries[0].stat_type,
-      threshold: entries[0].threshold,
-      best_over_odds: bestOverOdds != null ? String(bestOverOdds) : null,
-      best_over_book: bestOverBook,
-      best_under_odds: bestUnderOdds != null ? String(bestUnderOdds) : null,
-      best_under_book: bestUnderBook,
-      books_seen: [...booksSeen],
-      implied_over: americanToImplied(bestOverOdds),
-      implied_under: americanToImplied(bestUnderOdds),
-      odds_validated: sanity.valid,
-      rejection_reason: sanity.reason,
+    const agg: ThresholdAgg = {
+      threshold,
+      entries,
+      booksCount: booksSeen.size,
+      books: booksSeen,
+      bestOverOdds,
+      bestOverBook,
+      bestUnderOdds,
+      bestUnderBook,
+      medianOver: median(overOddsList),
+      medianUnder: median(underOddsList),
+      imbalance,
+    };
+
+    if (!byPlayerStat.has(psKey)) byPlayerStat.set(psKey, []);
+    byPlayerStat.get(psKey)!.push(agg);
+  }
+
+  // Step 3: For each player/stat, detect main line and compute market confidence
+  const bestLines = new Map<string, BestLineEntry>();
+
+  for (const [psKey, thresholds] of byPlayerStat) {
+    // Sort by: books count desc, then imbalance asc (most balanced first)
+    const thresholdSummaries = thresholds.map(t => ({
+      threshold: t.threshold,
+      imbalance: t.imbalance,
+      booksCount: t.booksCount,
+    }));
+
+    // Find the consensus main line: most books offering it, with most balanced odds
+    const mainLineCandidates = [...thresholds].sort((a, b) => {
+      // Primary: more books = more likely main
+      if (b.booksCount !== a.booksCount) return b.booksCount - a.booksCount;
+      // Secondary: more balanced odds = more likely main
+      const aImb = a.imbalance ?? 1;
+      const bImb = b.imbalance ?? 1;
+      return aImb - bImb;
     });
+
+    const mainLine = mainLineCandidates[0];
+    const consensusThreshold = mainLine.threshold;
+
+    for (const t of thresholds) {
+      const key = `${psKey}|${t.threshold}`;
+      const firstEntry = t.entries[0];
+
+      // Determine if this threshold is an alt line
+      const isAlt = isLikelyAltLine(t.imbalance, thresholdSummaries, t.threshold);
+      const isMain = t.threshold === consensusThreshold && !isAlt;
+
+      // Compute market confidence (0-100)
+      let marketConfidence = 0;
+      // Books factor: 1 book = 20, 2 = 45, 3 = 70, 4+ = 85
+      const booksFactor = Math.min(t.booksCount * 22, 85);
+      marketConfidence += booksFactor;
+      // Balance factor: well-balanced odds = +15
+      if (t.imbalance != null && t.imbalance < 0.15) marketConfidence += 15;
+      else if (t.imbalance != null && t.imbalance < 0.25) marketConfidence += 8;
+      // Main line bonus
+      if (isMain) marketConfidence += 5;
+      // Penalty for likely alt
+      if (isAlt) marketConfidence -= 30;
+      // Cap at 100
+      marketConfidence = Math.max(0, Math.min(100, marketConfidence));
+
+      // Sanity check
+      const sanity = isOddsSane(
+        t.bestOverOdds != null ? String(t.bestOverOdds) : null,
+        t.bestUnderOdds != null ? String(t.bestUnderOdds) : null,
+        t.threshold,
+        firstEntry.stat_type
+      );
+
+      // Additional sanity: reject if only 1 book AND very imbalanced (strong alt signal)
+      let finalValid = sanity.valid;
+      let finalReason = sanity.reason;
+      if (t.booksCount === 1 && t.imbalance != null && t.imbalance > 0.4) {
+        finalValid = false;
+        finalReason = `Single-book prop with heavy imbalance (${Math.round(t.imbalance * 100)}%) — likely alt line`;
+      }
+      // Reject if flagged as alt line with extreme juice
+      if (isAlt && t.imbalance != null && t.imbalance > 0.5) {
+        finalValid = false;
+        finalReason = `Alt line detected: imbalance ${Math.round(t.imbalance * 100)}%, consensus main at ${consensusThreshold}`;
+      }
+      // Reject if missing one side of over/under
+      if (t.bestOverOdds == null && t.bestUnderOdds == null) {
+        finalValid = false;
+        finalReason = "No odds available for either side";
+      }
+
+      bestLines.set(key, {
+        player_name: firstEntry.player_name,
+        stat_type: firstEntry.stat_type,
+        threshold: t.threshold,
+        best_over_odds: t.bestOverOdds != null ? String(t.bestOverOdds) : null,
+        best_over_book: t.bestOverBook,
+        best_under_odds: t.bestUnderOdds != null ? String(t.bestUnderOdds) : null,
+        best_under_book: t.bestUnderBook,
+        books_seen: [...t.books],
+        implied_over: americanToImplied(t.bestOverOdds),
+        implied_under: americanToImplied(t.bestUnderOdds),
+        odds_validated: finalValid,
+        rejection_reason: finalReason,
+        is_main_line: isMain,
+        consensus_line: consensusThreshold,
+        market_confidence: marketConfidence,
+        books_with_line: t.booksCount,
+        odds_balance_score: t.imbalance != null ? Math.round((1 - t.imbalance) * 100) : null,
+        alt_line_flag: isAlt,
+        edge: null, // computed during validation
+      });
+    }
   }
 
   return bestLines;
