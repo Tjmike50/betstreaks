@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAIBetBuilder } from "@/hooks/useAIBetBuilder";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { useAuth } from "@/contexts/AuthContext";
-import type { AISlip, LegDataContext } from "@/types/aiSlip";
+import type { AISlip, LegDataContext, LegBetType } from "@/types/aiSlip";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { BuilderFilterPanel } from "@/components/builder/BuilderFilterPanel";
