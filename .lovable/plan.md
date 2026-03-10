@@ -1,63 +1,110 @@
 
 
-## Add Moneyline, Spread, Totals, and Combo Bets to AI Bet Builder
+# Add Visible Tier Badge to Account Page
 
-### Problem
-The edge function fetches game-level odds (h2h, spreads, totals) from the Odds API but discards them. Only player props are used as slip legs. The `betType` filter in the UI is cosmetic.
+## Overview
+Add a prominent "Free Plan" or "Premium" tier badge directly below the user's email address on the Account page, making subscription status immediately visible without scrolling.
 
-### What Changes
+---
 
-**1. Parse game-level markets into candidate legs** (edge function)
-- After fetching `h2h,spreads,totals` from the Odds API (already happening on line 447), parse them into a structured format similar to player prop candidates:
-  - **Moneyline**: `{ type: "moneyline", team: "BOS", odds: "-180", opponent: "LAL", label: "Celtics ML" }`
-  - **Spread**: `{ type: "spread", team: "BOS", spread: -4.5, odds: "-110", opponent: "LAL" }`
-  - **Totals**: `{ type: "total", game: "BOS vs LAL", line: 220.5, pick: "Over", odds: "-110" }`
-- Aggregate best lines across sportsbooks (same multi-book logic already used for props)
+## Current State
 
-**2. Include game-level candidates in the LLM prompt** (edge function)
-- Add a `GAME-LEVEL CANDIDATES` section to the system prompt alongside the existing `SCORED CANDIDATES`
-- Update the LLM instructions to allow selecting from both pools
-- Update the JSON schema to accept `stat_type` values like `"Moneyline"`, `"Spread"`, `"Total"`
+The Account page shows:
+1. User avatar icon
+2. "Logged in" heading
+3. Email address
+4. Feature list
+5. Premium card (further down - easy to miss)
 
-**3. Respect the `betType` filter** (edge function)
-- `"player_props"` → only send player prop candidates (current behavior)
-- `"moneyline"` → only send moneyline candidates
-- `"spread"` → only send spread candidates
-- `"totals"` → only send totals candidates
-- `"mixed"` / `null` → send all candidate types (combo bets)
+Users must scroll to the premium card section to understand their tier status.
 
-**4. Update validation layer** (edge function)
-- Currently validation only matches against `player_prop_scores`. Game-level legs need a separate validation path that checks against the parsed Odds API data
-- Add validation keys for game-level bets: `team|moneyline`, `team|spread|line`, `game|total|line`
+---
 
-**5. Update slip leg types** (frontend)
-- Extend `AISlipLeg` type to handle game-level bets (player_name becomes team name for ML/spread, or "Game Total" for totals)
-- Update slip card rendering to display game-level legs differently (show team logos, spread values, etc.)
+## Solution
 
-**6. Snapshot fallback for game-level bets**
-- Currently `line_snapshots` only stores player props. Either:
-  - Add game-level odds to `line_snapshots` (new rows with `stat_type` = "Moneyline"/"Spread"/"Total"), or
-  - Create a separate `game_odds_snapshots` table
+Add a colored badge directly below the email that shows:
 
-### Technical Details
+| Status | Badge Display |
+|--------|---------------|
+| Loading | Gray spinner badge |
+| Free | "Free Plan" - neutral gray badge |
+| Premium | "Premium" - green badge with check icon |
 
-**Edge function changes** (`supabase/functions/ai-bet-builder/index.ts`):
-- Lines ~447-455: Already fetches `h2h,spreads,totals` — add parsing logic after this block
-- Lines ~575-578: `oddsSummary` already extracts game info — expand to include parsed odds
-- Lines ~581-638: Add game-level candidates to the prompt alongside player props
-- Lines ~655-710: Update system prompt to instruct LLM about game-level bet types
-- Validation section: Add game-level leg validation (separate from player prop matching)
+---
 
-**New DB table** (migration):
-- `game_odds_snapshots`: `id, game_date, home_team, away_team, market_type (h2h/spread/total), line, home_odds, away_odds, over_odds, under_odds, sportsbook, snapshot_at`
+## Visual Design
 
-**Frontend changes**:
-- `src/types/aiSlip.ts`: Add optional `bet_type` field to `AISlipLeg`
-- Slip card component: Render game-level legs with appropriate labels (team name + spread, "Game Total O/U", etc.)
+**Free Plan Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌──────────────┐           │
+│      │  Free Plan   │  ← Gray   │
+│      └──────────────┘           │
+└─────────────────────────────────┘
+```
 
-### Files Modified
-- `supabase/functions/ai-bet-builder/index.ts` — main logic changes
-- `src/types/aiSlip.ts` — leg type extension
-- New migration for `game_odds_snapshots` table
-- Slip display components (wherever legs are rendered)
+**Premium Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌────────────────┐         │
+│      │ ✓ Premium      │ ← Green │
+│      └────────────────┘         │
+└─────────────────────────────────┘
+```
+
+---
+
+## Implementation
+
+### File: `src/pages/AccountPage.tsx`
+
+**Add tier badge component inline** (lines 207-214):
+
+```tsx
+<div className="text-center space-y-2">
+  <h2 className="text-lg font-semibold text-foreground">
+    Logged in
+  </h2>
+  <p className="text-sm text-muted-foreground break-all">
+    {user.email}
+  </p>
+  
+  {/* NEW: Tier Badge */}
+  {isPremiumLoading ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Checking...
+    </span>
+  ) : isPremium ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
+      <Check className="h-3 w-3" />
+      Premium
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      Free Plan
+    </span>
+  )}
+</div>
+```
+
+---
+
+## Summary
+
+| Change | Description |
+|--------|-------------|
+| Add tier badge | Colored pill badge showing "Free Plan" or "Premium" with icon |
+| Position | Directly below email address for immediate visibility |
+| States | Loading (spinner), Free (gray), Premium (green + check) |
+
+**Files Modified:** `src/pages/AccountPage.tsx`
+
+This makes subscription tier instantly visible at the top of the Account page, so users always know whether they're on Free or Premium without scrolling.
 
