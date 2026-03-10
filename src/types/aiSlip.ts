@@ -26,6 +26,14 @@ export interface LegDataContext {
   best_over_odds?: string | null;
   best_under_odds?: string | null;
   market_threshold?: number | null;
+  // Game-level matchup info
+  home_team?: string | null;
+  away_team?: string | null;
+  opponent?: string | null;
+  is_home?: boolean | null;
+  spread?: number | null;
+  total_line?: number | null;
+  pick_side?: string | null;
 }
 
 export type LegBetType = "player_prop" | "moneyline" | "spread" | "total";
