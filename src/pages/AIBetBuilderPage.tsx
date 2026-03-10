@@ -21,6 +21,7 @@ const QUICK_PROMPTS = [
   "Give me 3 NBA slips around +200",
   "Make me a safer 2-leg parlay",
   "Build a player prop slip for tonight",
+  "Build me a combo parlay with ML + player props",
   "5-leg aggressive parlay +500",
 ];
 
