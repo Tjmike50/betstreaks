@@ -19,6 +19,35 @@ const MAX_CANDIDATES_PER_PLAYER = 2;
 const MAX_CANDIDATES_TO_LLM = 100;
 const MAX_GAME_CANDIDATES_TO_LLM = 30;
 
+// Nickname -> abbreviation mapping for Odds API team names
+const TEAM_NICKNAME_TO_ABBR: Record<string, string> = {
+  "HAWKS": "ATL", "CELTICS": "BOS", "NETS": "BKN", "HORNETS": "CHA",
+  "BULLS": "CHI", "CAVALIERS": "CLE", "MAVERICKS": "DAL", "NUGGETS": "DEN",
+  "PISTONS": "DET", "WARRIORS": "GSW", "ROCKETS": "HOU", "PACERS": "IND",
+  "CLIPPERS": "LAC", "LAKERS": "LAL", "GRIZZLIES": "MEM", "HEAT": "MIA",
+  "BUCKS": "MIL", "TIMBERWOLVES": "MIN", "PELICANS": "NOP", "KNICKS": "NYK",
+  "THUNDER": "OKC", "MAGIC": "ORL", "76ERS": "PHI", "SUNS": "PHX",
+  "BLAZERS": "POR", "KINGS": "SAC", "SPURS": "SAS", "RAPTORS": "TOR",
+  "JAZZ": "UTA", "WIZARDS": "WAS",
+};
+
+/** Resolve a team name/nickname to standard NBA abbreviation */
+function resolveToAbbr(name: string): string {
+  const upper = name.toUpperCase();
+  // Already an abbreviation?
+  if (upper.length <= 3 && Object.values(TEAM_NICKNAME_TO_ABBR).includes(upper)) return upper;
+  // Try nickname
+  if (TEAM_NICKNAME_TO_ABBR[upper]) return TEAM_NICKNAME_TO_ABBR[upper];
+  // Try last word (e.g. "Los Angeles Lakers" -> "LAKERS")
+  const lastWord = upper.split(" ").pop() || upper;
+  if (TEAM_NICKNAME_TO_ABBR[lastWord]) return TEAM_NICKNAME_TO_ABBR[lastWord];
+  // Special cases
+  if (upper.includes("TRAIL") || upper.includes("PORTLAND")) return "POR";
+  if (upper.includes("THUNDER") || upper.includes("OKLAHOMA")) return "OKC";
+  if (upper.includes("GOLDEN STATE")) return "GSW";
+  return upper;
+}
+
 // ===== ODDS UTILITY FUNCTIONS =====
 
 /** Convert American odds to implied probability (0-1) */
