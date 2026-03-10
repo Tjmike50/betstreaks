@@ -16,8 +16,8 @@ const STAT_LABELS: Record<string, string> = {
 };
 
 const MAX_CANDIDATES_PER_PLAYER = 2;
-const MAX_CANDIDATES_TO_LLM = 40;
-const MAX_GAME_CANDIDATES_TO_LLM = 20;
+const MAX_CANDIDATES_TO_LLM = 100;
+const MAX_GAME_CANDIDATES_TO_LLM = 30;
 
 // ===== ODDS UTILITY FUNCTIONS =====
 
