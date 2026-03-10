@@ -1044,32 +1044,41 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
           const statNorm = normStat(leg.stat_type || "");
           let gameCand: GameLevelCandidate | undefined;
 
-          if (statNorm === "moneyline" && leg.team_abbr) {
-            gameCand = gameCandidateByKey.get(`${leg.team_abbr.toLowerCase()}::moneyline`);
-            // Also try player_name as team identifier
-            if (!gameCand && leg.player_name) {
-              const teamKey = normName(leg.player_name);
+          // Helper: fuzzy match team identifier against candidate keys
+          const fuzzyFindGame = (marketType: string): GameLevelCandidate | undefined => {
+            // Try team_abbr first, then player_name
+            const identifiers = [leg.team_abbr, leg.player_name].filter(Boolean).map(s => s!.toLowerCase());
+            for (const id of identifiers) {
+              // Exact key lookup
+              const exact = gameCandidateByKey.get(`${id}::${marketType}`);
+              if (exact) return exact;
+              // Fuzzy: check if any key for this market contains the identifier or vice versa
+              const lastWord = id.split(" ").pop() || id;
               for (const [k, v] of gameCandidateByKey.entries()) {
-                if (k.includes("moneyline") && k.includes(teamKey.split(" ").pop() || "")) {
-                  gameCand = v;
-                  break;
+                if (!k.includes(marketType)) continue;
+                const keyTeam = k.split("::")[0];
+                if (keyTeam === id || keyTeam === lastWord || keyTeam.includes(lastWord) || lastWord.includes(keyTeam)) {
+                  return v;
                 }
               }
             }
-          } else if (statNorm === "spread" && leg.team_abbr) {
-            // Try exact spread match first, then fuzzy
-            for (const [k, v] of gameCandidateByKey.entries()) {
-              if (k.startsWith(leg.team_abbr.toLowerCase()) && k.includes("spread")) {
-                gameCand = v;
-                break;
-              }
-            }
+            return undefined;
+          };
+
+          if (statNorm === "moneyline") {
+            gameCand = fuzzyFindGame("moneyline");
+          } else if (statNorm === "spread") {
+            gameCand = fuzzyFindGame("spread");
           } else if (statNorm === "total") {
-            // Try to match by teams in the game
-            for (const [k, v] of gameCandidateByKey.entries()) {
-              if (k.includes("total")) {
-                gameCand = v;
-                break;
+            // For totals, match any total candidate (or fuzzy by team)
+            gameCand = fuzzyFindGame("total");
+            if (!gameCand) {
+              // Last resort: grab any total candidate
+              for (const [k, v] of gameCandidateByKey.entries()) {
+                if (k.includes("total")) {
+                  gameCand = v;
+                  break;
+                }
               }
             }
           }
