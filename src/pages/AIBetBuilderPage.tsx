@@ -233,11 +233,28 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
 
       {/* Legs */}
       <CardContent className="px-4 pb-4 pt-0 space-y-2">
-        {slip.legs.map((leg, i) => (
+        {slip.legs.map((leg, i) => {
+          const isGameLevel = leg.bet_type === "moneyline" || leg.bet_type === "spread" || leg.bet_type === "total";
+          return (
           <div key={i} className="bg-card/80 border border-border/30 rounded-lg p-3 space-y-1">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                {leg.team_abbr && (
+                {isGameLevel && leg.bet_type === "moneyline" && (
+                  <span className="text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded shrink-0">
+                    ML
+                  </span>
+                )}
+                {isGameLevel && leg.bet_type === "spread" && (
+                  <span className="text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded shrink-0">
+                    SPR
+                  </span>
+                )}
+                {isGameLevel && leg.bet_type === "total" && (
+                  <span className="text-[10px] font-mono font-bold bg-purple-500/10 text-purple-400 px-1.5 py-0.5 rounded shrink-0">
+                    O/U
+                  </span>
+                )}
+                {!isGameLevel && leg.team_abbr && (
                   <span className="text-[10px] font-mono font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded shrink-0">
                     {leg.team_abbr}
                   </span>
@@ -256,8 +273,13 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
               )}
             </div>
             <div className="text-sm text-primary font-semibold">
-              {leg.line} {leg.stat_type}
+              {leg.line} {!isGameLevel && leg.stat_type}
             </div>
+            {isGameLevel && leg.data_context?.implied_probability != null && (
+              <div className="text-[10px] text-muted-foreground">
+                Implied: {leg.data_context.implied_probability}%
+              </div>
+            )}
             {leg.reasoning && (
               <p className="text-[11px] text-muted-foreground leading-relaxed">{leg.reasoning}</p>
             )}
@@ -265,10 +287,11 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
             {/* Data context chips */}
             {leg.data_context && <DataContextChips ctx={leg.data_context} />}
 
-            {/* Data context bar */}
-            {leg.data_context && <LegDataBar ctx={leg.data_context} />}
+            {/* Data context bar — only for player props */}
+            {!isGameLevel && leg.data_context && <LegDataBar ctx={leg.data_context} />}
           </div>
-        ))}
+          );
+        })}
 
         {/* Actions */}
         <div className="flex items-center gap-2 pt-2">
