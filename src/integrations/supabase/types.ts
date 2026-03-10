@@ -354,6 +354,51 @@ export type Database = {
         }
         Relationships: []
       }
+      game_odds_snapshots: {
+        Row: {
+          away_odds: string | null
+          away_team: string
+          game_date: string
+          home_odds: string | null
+          home_team: string
+          id: string
+          line: number | null
+          market_type: string
+          over_odds: string | null
+          snapshot_at: string
+          sportsbook: string
+          under_odds: string | null
+        }
+        Insert: {
+          away_odds?: string | null
+          away_team: string
+          game_date?: string
+          home_odds?: string | null
+          home_team: string
+          id?: string
+          line?: number | null
+          market_type: string
+          over_odds?: string | null
+          snapshot_at?: string
+          sportsbook?: string
+          under_odds?: string | null
+        }
+        Update: {
+          away_odds?: string | null
+          away_team?: string
+          game_date?: string
+          home_odds?: string | null
+          home_team?: string
+          id?: string
+          line?: number | null
+          market_type?: string
+          over_odds?: string | null
+          snapshot_at?: string
+          sportsbook?: string
+          under_odds?: string | null
+        }
+        Relationships: []
+      }
       games_today: {
         Row: {
           away_score: number | null
