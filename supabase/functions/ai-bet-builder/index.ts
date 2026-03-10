@@ -736,6 +736,51 @@ serve(async (req) => {
       console.error(`[AI-Builder] Odds API error: ${featuredRes.status} — ${errBody}`);
     }
 
+    // ===== PHASE 2a: Build set of teams playing TODAY =====
+    // Extract from Odds API (only returns upcoming/live games)
+    const teamsPlayingToday = new Set<string>();
+    for (const game of gamesData) {
+      // Odds API team names like "Los Angeles Lakers" — extract last word as abbr-like
+      const homeAbbr = (game.home_team || "").split(" ").pop()?.toUpperCase() || "";
+      const awayAbbr = (game.away_team || "").split(" ").pop()?.toUpperCase() || "";
+      if (homeAbbr) teamsPlayingToday.add(homeAbbr);
+      if (awayAbbr) teamsPlayingToday.add(awayAbbr);
+    }
+    // Also pull from games_today DB table for redundancy
+    const { data: gamesTodayRows } = await serviceClient
+      .from("games_today")
+      .select("home_team_abbr, away_team_abbr")
+      .eq("game_date", todayStr);
+    for (const g of gamesTodayRows || []) {
+      if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
+      if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
+    }
+    console.log(`[AI-Builder] Teams playing today: ${[...teamsPlayingToday].join(", ")} (${teamsPlayingToday.size} teams)`);
+
+    // ===== PHASE 2a-ii: Filter prop candidates to only teams playing today =====
+    if (teamsPlayingToday.size > 0) {
+      const beforeCount = diversifiedProps.length;
+      const removed: string[] = [];
+      const filtered: any[] = [];
+      for (const p of diversifiedProps) {
+        const teamUpper = (p.team_abbr || "").toUpperCase();
+        if (!teamUpper || teamsPlayingToday.has(teamUpper)) {
+          filtered.push(p);
+        } else {
+          removed.push(`${p.player_name} (${p.team_abbr})`);
+        }
+      }
+      if (removed.length > 0) {
+        console.log(`[AI-Builder] Removed ${removed.length} candidates from non-playing teams: ${removed.slice(0, 10).join(", ")}${removed.length > 10 ? "..." : ""}`);
+      }
+      diversifiedProps.length = 0;
+      diversifiedProps.push(...filtered);
+      debug.candidates_after_diversity = diversifiedProps.length;
+      const newUniquePlayers = new Set(diversifiedProps.map((p: any) => normName(p.player_name)));
+      debug.unique_players_in_pool = newUniquePlayers.size;
+      console.log(`[AI-Builder] After today-games filter: ${diversifiedProps.length} candidates (was ${beforeCount})`);
+    }
+
     // ===== PHASE 2b: Parse game-level odds (ML, spread, totals) =====
     let gameLevelCandidates = parseGameLevelOdds(gamesData);
 
