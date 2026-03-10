@@ -28,6 +28,8 @@ export interface LegDataContext {
   market_threshold?: number | null;
 }
 
+export type LegBetType = "player_prop" | "moneyline" | "spread" | "total";
+
 export interface AISlipLeg {
   id?: string;
   slip_id?: string;
@@ -40,6 +42,7 @@ export interface AISlipLeg {
   reasoning: string | null;
   leg_order: number;
   data_context?: LegDataContext | null;
+  bet_type?: LegBetType;
 }
 
 export interface AISlip {
