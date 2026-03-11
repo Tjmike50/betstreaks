@@ -1076,12 +1076,21 @@ serve(async (req) => {
     const allLogs: GameLog[] = [];
 
     if (scoringAllPlayers) {
-      const { data: logs } = await supabase
-        .from("player_recent_games")
-        .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
-        .order("game_date", { ascending: false })
-        .limit(1000);
-      if (logs) allLogs.push(...(logs as GameLog[]));
+      // Paginate to get enough game logs — 1000-row default is too few for all players
+      let offset = 0;
+      const PAGE_SIZE = 1000;
+      const MAX_ROWS = 5000;
+      while (offset < MAX_ROWS) {
+        const { data: logs } = await supabase
+          .from("player_recent_games")
+          .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
+          .order("game_date", { ascending: false })
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (!logs || logs.length === 0) break;
+        allLogs.push(...(logs as GameLog[]));
+        if (logs.length < PAGE_SIZE) break; // last page
+        offset += PAGE_SIZE;
+      }
     } else {
       for (const team of teamsPlaying) {
         const { data: logs } = await supabase
@@ -1089,7 +1098,7 @@ serve(async (req) => {
           .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
           .eq("team_abbr", team)
           .order("game_date", { ascending: false })
-          .limit(500);
+          .limit(1000);
         if (logs) allLogs.push(...(logs as GameLog[]));
       }
     }
