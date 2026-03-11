@@ -19,6 +19,35 @@ const MAX_CANDIDATES_PER_PLAYER = 2;
 const MAX_CANDIDATES_TO_LLM = 100;
 const MAX_GAME_CANDIDATES_TO_LLM = 30;
 
+// Nickname -> abbreviation mapping for Odds API team names
+const TEAM_NICKNAME_TO_ABBR: Record<string, string> = {
+  "HAWKS": "ATL", "CELTICS": "BOS", "NETS": "BKN", "HORNETS": "CHA",
+  "BULLS": "CHI", "CAVALIERS": "CLE", "MAVERICKS": "DAL", "NUGGETS": "DEN",
+  "PISTONS": "DET", "WARRIORS": "GSW", "ROCKETS": "HOU", "PACERS": "IND",
+  "CLIPPERS": "LAC", "LAKERS": "LAL", "GRIZZLIES": "MEM", "HEAT": "MIA",
+  "BUCKS": "MIL", "TIMBERWOLVES": "MIN", "PELICANS": "NOP", "KNICKS": "NYK",
+  "THUNDER": "OKC", "MAGIC": "ORL", "76ERS": "PHI", "SUNS": "PHX",
+  "BLAZERS": "POR", "KINGS": "SAC", "SPURS": "SAS", "RAPTORS": "TOR",
+  "JAZZ": "UTA", "WIZARDS": "WAS",
+};
+
+/** Resolve a team name/nickname to standard NBA abbreviation */
+function resolveToAbbr(name: string): string {
+  const upper = name.toUpperCase();
+  // Already an abbreviation?
+  if (upper.length <= 3 && Object.values(TEAM_NICKNAME_TO_ABBR).includes(upper)) return upper;
+  // Try nickname
+  if (TEAM_NICKNAME_TO_ABBR[upper]) return TEAM_NICKNAME_TO_ABBR[upper];
+  // Try last word (e.g. "Los Angeles Lakers" -> "LAKERS")
+  const lastWord = upper.split(" ").pop() || upper;
+  if (TEAM_NICKNAME_TO_ABBR[lastWord]) return TEAM_NICKNAME_TO_ABBR[lastWord];
+  // Special cases
+  if (upper.includes("TRAIL") || upper.includes("PORTLAND")) return "POR";
+  if (upper.includes("THUNDER") || upper.includes("OKLAHOMA")) return "OKC";
+  if (upper.includes("GOLDEN STATE")) return "GSW";
+  return upper;
+}
+
 // ===== ODDS UTILITY FUNCTIONS =====
 
 /** Convert American odds to implied probability (0-1) */
@@ -734,6 +763,50 @@ serve(async (req) => {
     } else {
       const errBody = await featuredRes.text().catch(() => "");
       console.error(`[AI-Builder] Odds API error: ${featuredRes.status} — ${errBody}`);
+    }
+
+    // ===== PHASE 2a: Build set of teams playing TODAY =====
+    // Extract from Odds API (only returns upcoming/live games) — resolve to standard abbreviations
+    const teamsPlayingToday = new Set<string>();
+    for (const game of gamesData) {
+      const homeAbbr = resolveToAbbr(game.home_team || "");
+      const awayAbbr = resolveToAbbr(game.away_team || "");
+      if (homeAbbr) teamsPlayingToday.add(homeAbbr);
+      if (awayAbbr) teamsPlayingToday.add(awayAbbr);
+    }
+    // Also pull from games_today DB table for redundancy
+    const { data: gamesTodayRows } = await serviceClient
+      .from("games_today")
+      .select("home_team_abbr, away_team_abbr")
+      .eq("game_date", todayStr);
+    for (const g of gamesTodayRows || []) {
+      if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
+      if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
+    }
+    console.log(`[AI-Builder] Teams playing today: ${[...teamsPlayingToday].join(", ")} (${teamsPlayingToday.size} teams)`);
+
+    // ===== PHASE 2a-ii: Filter prop candidates to only teams playing today =====
+    if (teamsPlayingToday.size > 0) {
+      const beforeCount = diversifiedProps.length;
+      const removed: string[] = [];
+      const filtered: any[] = [];
+      for (const p of diversifiedProps) {
+        const teamUpper = (p.team_abbr || "").toUpperCase();
+        if (!teamUpper || teamsPlayingToday.has(teamUpper)) {
+          filtered.push(p);
+        } else {
+          removed.push(`${p.player_name} (${p.team_abbr})`);
+        }
+      }
+      if (removed.length > 0) {
+        console.log(`[AI-Builder] Removed ${removed.length} candidates from non-playing teams: ${removed.slice(0, 10).join(", ")}${removed.length > 10 ? "..." : ""}`);
+      }
+      diversifiedProps.length = 0;
+      diversifiedProps.push(...filtered);
+      debug.candidates_after_diversity = diversifiedProps.length;
+      const newUniquePlayers = new Set(diversifiedProps.map((p: any) => normName(p.player_name)));
+      debug.unique_players_in_pool = newUniquePlayers.size;
+      console.log(`[AI-Builder] After today-games filter: ${diversifiedProps.length} candidates (was ${beforeCount})`);
     }
 
     // ===== PHASE 2b: Parse game-level odds (ML, spread, totals) =====
