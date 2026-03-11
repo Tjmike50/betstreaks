@@ -616,10 +616,21 @@ serve(async (req) => {
       debug.db_candidates_found = scoredProps.length;
       console.log(`[AI-Builder] Found ${scoredProps.length} raw candidates for ${todayStr}`);
 
-      // If no DB candidates for today, try yesterday
+      // Quality check: if today's data has suspiciously low sample sizes, treat as bad data
+      if (scoredProps.length > 0) {
+        const sampleSizes = scoredProps.map((p: any) => p.total_games ?? 0);
+        const medianSample = sampleSizes.sort((a: number, b: number) => a - b)[Math.floor(sampleSizes.length / 2)];
+        if (medianSample < 10) {
+          console.log(`[AI-Builder] ⚠ Today's data has median sample size ${medianSample} — likely bad refresh, skipping`);
+          scoredProps = [];
+          debug.fallback_reason = `Today's data discarded: median sample size ${medianSample} (< 10 minimum)`;
+        }
+      }
+
+      // If no DB candidates for today (or bad data), try yesterday
       if (scoredProps.length === 0) {
         const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-        console.log(`[AI-Builder] No candidates for today, trying ${yesterday}...`);
+        console.log(`[AI-Builder] No usable candidates for today, trying ${yesterday}...`);
         
         const { data: yestCandidates } = await serviceClient
           .from("player_prop_scores")
@@ -629,11 +640,19 @@ serve(async (req) => {
           .limit(200);
         
         if (yestCandidates && yestCandidates.length > 0) {
-          scoredProps = yestCandidates;
-          debug.fallback_used = true;
-          debug.fallback_reason = `No candidates for ${todayStr}, using ${yestCandidates.length} from ${yesterday}`;
-          debug.mode = "fallback_mode";
-          console.log(`[AI-Builder] Fallback: ${scoredProps.length} candidates from yesterday`);
+          // Also quality-check yesterday's data
+          const ySamples = yestCandidates.map((p: any) => p.total_games ?? 0);
+          const yMedian = ySamples.sort((a: number, b: number) => a - b)[Math.floor(ySamples.length / 2)];
+          if (yMedian >= 10) {
+            scoredProps = yestCandidates;
+            debug.fallback_used = true;
+            debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") + 
+              `Using ${yestCandidates.length} candidates from ${yesterday} (median sample: ${yMedian})`;
+            debug.mode = "fallback_mode";
+            console.log(`[AI-Builder] Fallback: ${scoredProps.length} candidates from ${yesterday} (median sample: ${yMedian})`);
+          } else {
+            console.log(`[AI-Builder] ⚠ Yesterday's data also bad (median sample: ${yMedian}), skipping`);
+          }
         }
       }
 
