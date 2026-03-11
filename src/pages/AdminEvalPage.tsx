@@ -661,6 +661,9 @@ export default function AdminEvalPage() {
           </Card>
         )}
 
+        {/* Data Quality */}
+        <DataQualityCard />
+
         {/* Line Snapshot Status */}
         {!snapLoading && snapStatus && (
           <Card>
