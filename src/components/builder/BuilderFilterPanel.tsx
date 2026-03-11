@@ -23,6 +23,7 @@ import {
 } from "@/types/builderFilters";
 import { BuilderQuickChips } from "./BuilderQuickChips";
 import { BuilderActiveFilters } from "./BuilderActiveFilters";
+import { TeamMultiSelect } from "./TeamMultiSelect";
 
 interface Props {
   filters: BuilderFilters;
@@ -244,18 +245,20 @@ export function BuilderFilterPanel({ filters, onChange, isPremium }: Props) {
 
           {/* ── TEAM / PLAYER FILTERS ── */}
           <Section title="Teams & Players" icon={<Users className="h-4 w-4" />}>
-            <TagInput
-              label="Include Teams"
-              placeholder="e.g. LAL, BOS"
-              values={filters.includeTeams}
-              onChange={(v) => update({ includeTeams: v })}
-            />
-            <TagInput
-              label="Exclude Teams"
-              placeholder="e.g. NYK"
-              values={filters.excludeTeams}
-              onChange={(v) => update({ excludeTeams: v })}
-            />
+            <div className="relative">
+              <TeamMultiSelect
+                label="Include Teams"
+                values={filters.includeTeams}
+                onChange={(v) => update({ includeTeams: v })}
+              />
+            </div>
+            <div className="relative">
+              <TeamMultiSelect
+                label="Exclude Teams"
+                values={filters.excludeTeams}
+                onChange={(v) => update({ excludeTeams: v })}
+              />
+            </div>
             <TagInput
               label="Include Players"
               placeholder="e.g. LeBron James"

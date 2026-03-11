@@ -1310,6 +1310,19 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
       throw new Error("AI returned invalid format");
     }
 
+    // ===== PHASE 4b: Fetch player availability for "out" rejection =====
+    const availabilityMap = new Map<string, { status: string; reason: string | null }>();
+    {
+      const { data: availRows } = await serviceClient
+        .from("player_availability")
+        .select("player_name, status, reason")
+        .eq("game_date", todayStr);
+      for (const row of availRows || []) {
+        availabilityMap.set(normName(row.player_name), { status: row.status, reason: row.reason });
+      }
+      console.log(`[AI-Builder] Availability: ${availabilityMap.size} players loaded, ${[...availabilityMap.values()].filter(v => v.status === "out").length} marked OUT`);
+    }
+
     // ===== PHASE 5: VALIDATE & ENRICH =====
     const playersUsedAcrossSlips = new Map<string, number>();
 
@@ -1598,9 +1611,51 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
             continue;
           }
         } else {
+          // No live odds found at all for this player prop
+          // If user has strict market filters, reject entirely
+          if (filters?.requireFreshMarketData) {
+            debug.legs_rejected++;
+            debug.rejected_legs.push({
+              player: leg.player_name,
+              stat: leg.stat_type,
+              reason: "No live odds found and requireFreshMarketData is on",
+            });
+            console.warn(`[AI-Builder] REJECTED (no live odds, strict mode): ${leg.player_name} ${leg.stat_type}`);
+            continue;
+          }
           realContext.odds_validated = false;
           realContext.market_confidence = 0;
           realContext.books_count = 0;
+        }
+
+        // ===== POST-VALIDATION: Verify player's team is playing today =====
+        const legTeam = (leg.team_abbr || dbCandidate.team_abbr || "").toUpperCase();
+        if (teamsPlayingToday.size > 0 && legTeam && !teamsPlayingToday.has(legTeam)) {
+          debug.legs_rejected++;
+          debug.rejected_legs.push({
+            player: leg.player_name,
+            stat: leg.stat_type,
+            reason: `Team ${legTeam} is not playing today`,
+          });
+          debug.legs_validated--;
+          playersInThisSlip.delete(playerNorm);
+          console.warn(`[AI-Builder] REJECTED (not playing today): ${leg.player_name} (${legTeam})`);
+          continue;
+        }
+
+        // ===== POST-VALIDATION: Check player availability (reject "out" players) =====
+        const playerAvailStatus = availabilityMap?.get(normName(leg.player_name));
+        if (playerAvailStatus && playerAvailStatus.status === "out") {
+          debug.legs_rejected++;
+          debug.rejected_legs.push({
+            player: leg.player_name,
+            stat: leg.stat_type,
+            reason: `Player is OUT: ${playerAvailStatus.reason || "injury/rest"}`,
+          });
+          debug.legs_validated--;
+          playersInThisSlip.delete(playerNorm);
+          console.warn(`[AI-Builder] REJECTED (player OUT): ${leg.player_name}`);
+          continue;
         }
 
         // Replace LLM context entirely with real data
