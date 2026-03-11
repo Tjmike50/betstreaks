@@ -1,110 +1,36 @@
 
 
-# Add Visible Tier Badge to Account Page
+# Plan: Fix Sample Size, Non-Playing Players, and Team Dropdown
 
-## Overview
-Add a prominent "Free Plan" or "Premium" tier badge directly below the user's email address on the Account page, making subscription status immediately visible without scrolling.
+## Three Issues to Address
 
----
+### 1. Sample Size — Why Not Full Season?
+The system **is** using full-season data when available. The `player_recent_games` table stores all game logs fetched by `refresh.py`. The scoring engine (`prop-scoring-engine`) uses ALL logs in the table for each player — there's no artificial cap. The "4 game sample" issue was caused by bad refresh runs where the NBA API returned partial data, overwriting full-season logs. The quality gate (median < 10 check) already protects against this. No code changes needed here — the fix is in the refresh script (running on your Mac mini), which needs a safety check to not overwrite when fewer rows are returned. That's a Python script change outside Lovable's scope, but we can add a visible warning in the UI when sample sizes are low.
 
-## Current State
+### 2. Players Not Playing Tonight / Bets Not on Sportsbook
+The today-games filter (Phase 2a-ii) correctly removes prop candidates from non-playing teams. However, game-level candidates (ML, spread, totals) from the Odds API can include games that haven't started or teams the user doesn't care about. The real issue is the **LLM occasionally hallucinating or selecting candidates that don't pass validation but still get through** due to fuzzy matching being too lenient. Fixes:
+- **Stricter validation**: After validation, verify each player prop leg's `team_abbr` is in `teamsPlayingToday`. Currently only the candidate pool is filtered, but the LLM could reference a player name that fuzzy-matches to a wrong candidate.
+- **Require live odds match**: Add a flag to reject player prop legs where no live odds were found (currently shows "Odds unverified" but still includes the leg).
+- **Filter stale availability**: Check `player_availability` for "out" status and reject those legs.
 
-The Account page shows:
-1. User avatar icon
-2. "Logged in" heading
-3. Email address
-4. Feature list
-5. Premium card (further down - easy to miss)
-
-Users must scroll to the premium card section to understand their tier status.
+### 3. Team Filter — Dropdown Instead of Text Input
+Replace the `TagInput` for "Include Teams" and "Exclude Teams" in `BuilderFilterPanel.tsx` with a multi-select dropdown showing all 30 NBA teams. Use the existing `nbaTeamMeta.ts` data for team names and abbreviations.
 
 ---
 
-## Solution
+## Implementation Details
 
-Add a colored badge directly below the email that shows:
+### A. Team Dropdown Component (`BuilderFilterPanel.tsx`)
+- Replace the two `TagInput` components for Include/Exclude Teams with a new `TeamMultiSelect` component.
+- Uses a `DropdownMenu` with checkboxes showing all 30 teams as `"{City} {Name} ({ABBR})"` (e.g., "Los Angeles Lakers (LAL)").
+- Selected teams appear as removable badges below the dropdown trigger.
+- Import team list from `nbaTeamMeta.ts`.
 
-| Status | Badge Display |
-|--------|---------------|
-| Loading | Gray spinner badge |
-| Free | "Free Plan" - neutral gray badge |
-| Premium | "Premium" - green badge with check icon |
+### B. Stricter Validation in Edge Function (`ai-bet-builder/index.ts`)
+- After player prop validation (Phase 5), add a post-validation check: if the validated candidate's `team_abbr` is not in `teamsPlayingToday`, reject the leg.
+- When `bestLine` is not found for a player prop AND the `avoidStaleAvailability` or `requireFreshMarketData` filter is on, reject the leg (currently it just marks `odds_validated: false`).
+- Check `player_availability` table for "out" status on today's date — reject any leg where the player is listed as "out".
 
----
-
-## Visual Design
-
-**Free Plan Badge:**
-```
-┌─────────────────────────────────┐
-│        [User Avatar]            │
-│         Logged in               │
-│      user@example.com           │
-│      ┌──────────────┐           │
-│      │  Free Plan   │  ← Gray   │
-│      └──────────────┘           │
-└─────────────────────────────────┘
-```
-
-**Premium Badge:**
-```
-┌─────────────────────────────────┐
-│        [User Avatar]            │
-│         Logged in               │
-│      user@example.com           │
-│      ┌────────────────┐         │
-│      │ ✓ Premium      │ ← Green │
-│      └────────────────┘         │
-└─────────────────────────────────┘
-```
-
----
-
-## Implementation
-
-### File: `src/pages/AccountPage.tsx`
-
-**Add tier badge component inline** (lines 207-214):
-
-```tsx
-<div className="text-center space-y-2">
-  <h2 className="text-lg font-semibold text-foreground">
-    Logged in
-  </h2>
-  <p className="text-sm text-muted-foreground break-all">
-    {user.email}
-  </p>
-  
-  {/* NEW: Tier Badge */}
-  {isPremiumLoading ? (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      Checking...
-    </span>
-  ) : isPremium ? (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
-      <Check className="h-3 w-3" />
-      Premium
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
-      Free Plan
-    </span>
-  )}
-</div>
-```
-
----
-
-## Summary
-
-| Change | Description |
-|--------|-------------|
-| Add tier badge | Colored pill badge showing "Free Plan" or "Premium" with icon |
-| Position | Directly below email address for immediate visibility |
-| States | Loading (spinner), Free (gray), Premium (green + check) |
-
-**Files Modified:** `src/pages/AccountPage.tsx`
-
-This makes subscription tier instantly visible at the top of the Account page, so users always know whether they're on Free or Premium without scrolling.
+### C. Low Sample Warning in UI (`AIBetBuilderPage.tsx`)
+- In `LegDataBar`, if `sample_size < 15`, show a warning badge "Low sample" in amber to flag potentially unreliable data to users.
 
