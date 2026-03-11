@@ -673,10 +673,25 @@ serve(async (req) => {
           
           if (scoringRes.ok) {
             const scoringData = await scoringRes.json();
-            scoredProps = scoringData.scored_props || [];
-            debug.fallback_used = true;
-            debug.fallback_reason = `Called scoring engine, got ${scoredProps.length} props`;
-            debug.mode = "fallback_mode";
+            const engineProps = scoringData.scored_props || [];
+            
+            // Quality check scoring engine output too
+            if (engineProps.length > 0) {
+              const eSamples = engineProps.map((p: any) => p.total_games ?? 0).sort((a: number, b: number) => a - b);
+              const eMedian = eSamples[Math.floor(eSamples.length / 2)];
+              if (eMedian >= 10) {
+                scoredProps = engineProps;
+                debug.fallback_used = true;
+                debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") +
+                  `Scoring engine: ${engineProps.length} props (median sample: ${eMedian})`;
+                debug.mode = "fallback_mode";
+                console.log(`[AI-Builder] Scoring engine: ${engineProps.length} props (median sample: ${eMedian})`);
+              } else {
+                console.log(`[AI-Builder] ⚠ Scoring engine data also bad (median sample: ${eMedian}), skipping`);
+                debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") +
+                  `Scoring engine discarded: median sample ${eMedian}`;
+              }
+            }
           } else {
             console.error("[AI-Builder] Scoring engine error:", scoringRes.status);
           }
