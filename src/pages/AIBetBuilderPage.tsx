@@ -178,10 +178,15 @@ function LegDataBar({ ctx }: { ctx: LegDataContext }) {
         <div className="text-[9px] text-muted-foreground">Volatility</div>
       </div>
       {ctx.sample_size != null && (
-        <div className="col-span-4 text-center">
+        <div className="col-span-4 text-center flex items-center justify-center gap-1.5">
           <span className="text-[9px] text-muted-foreground">
             {ctx.sample_size} game sample
           </span>
+          {ctx.sample_size < 15 && (
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20">
+              ⚠ Low sample
+            </span>
+          )}
         </div>
       )}
     </div>
