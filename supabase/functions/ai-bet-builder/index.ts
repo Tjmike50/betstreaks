@@ -1310,6 +1310,19 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
       throw new Error("AI returned invalid format");
     }
 
+    // ===== PHASE 4b: Fetch player availability for "out" rejection =====
+    const availabilityMap = new Map<string, { status: string; reason: string | null }>();
+    {
+      const { data: availRows } = await serviceClient
+        .from("player_availability")
+        .select("player_name, status, reason")
+        .eq("game_date", todayStr);
+      for (const row of availRows || []) {
+        availabilityMap.set(normName(row.player_name), { status: row.status, reason: row.reason });
+      }
+      console.log(`[AI-Builder] Availability: ${availabilityMap.size} players loaded, ${[...availabilityMap.values()].filter(v => v.status === "out").length} marked OUT`);
+    }
+
     // ===== PHASE 5: VALIDATE & ENRICH =====
     const playersUsedAcrossSlips = new Map<string, number>();
 
