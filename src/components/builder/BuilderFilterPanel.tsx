@@ -23,6 +23,7 @@ import {
 } from "@/types/builderFilters";
 import { BuilderQuickChips } from "./BuilderQuickChips";
 import { BuilderActiveFilters } from "./BuilderActiveFilters";
+import { TeamMultiSelect } from "./TeamMultiSelect";
 
 interface Props {
   filters: BuilderFilters;
