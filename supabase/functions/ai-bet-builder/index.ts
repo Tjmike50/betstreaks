@@ -1682,9 +1682,21 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
     }
 
     if (parsed.slips.length === 0) {
+      // Determine if rejections were primarily due to missing live markets
+      const marketRejections = debug.rejected_legs.filter(r => 
+        r.reason.includes("No live sportsbook market") || 
+        r.reason.includes("Market normalization failed") ||
+        r.reason.includes("Market confidence too low")
+      );
+      const isMarketIssue = marketRejections.length > debug.rejected_legs.length * 0.5;
+      
+      const errorMsg = isMarketIssue
+        ? `Live market verification was not available for enough player props to build a slip. ${marketRejections.length} prop(s) were rejected because no verified sportsbook odds could be found. Try again later when markets are open, or switch to game-level bets (Moneyline, Spread, Totals).`
+        : "AI could not build valid slips from today's candidates. Try a different prompt or adjust your filters.";
+      
       return new Response(
         JSON.stringify({ 
-          error: "AI could not build valid slips from today's candidates. Try a different prompt.",
+          error: errorMsg,
           debug,
         }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
