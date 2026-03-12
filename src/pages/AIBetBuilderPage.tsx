@@ -387,7 +387,7 @@ export default function AIBetBuilderPage() {
   const [filters, setFilters] = useState<BuilderFilters>({
     ...DEFAULT_BUILDER_FILTERS,
   });
-  const { slips, isLoading, error, buildSlips } = useAIBetBuilder();
+  const { slips, isLoading, error, buildSlips, marketDepth } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
   const navigate = useNavigate();
   const activeFilterCount = getActiveBuilderFilterCount(filters);
