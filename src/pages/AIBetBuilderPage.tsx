@@ -17,6 +17,7 @@ import type { BuilderFilters } from "@/types/builderFilters";
 import { DEFAULT_BUILDER_FILTERS, getActiveBuilderFilterCount } from "@/types/builderFilters";
 import { GameMatchupHeader } from "@/components/builder/GameMatchupHeader";
 import { MarketDepthSummary } from "@/components/builder/MarketDepthSummary";
+import { LegMarketBadges, getLegMarketBorderClass } from "@/components/builder/LegMarketBadges";
 
 const QUICK_PROMPTS = [
   "Build me a +150 parlay",
