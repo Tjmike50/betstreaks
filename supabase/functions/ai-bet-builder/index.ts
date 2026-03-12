@@ -440,6 +440,18 @@ interface VerifiedPropCandidate {
   edge_under: number | null;
 }
 
+interface MarketQualityDebug {
+  before_market_filters: number;
+  removed_by_verified_only: number;
+  removed_by_main_lines_only: number;
+  removed_by_min_books: number;
+  removed_by_min_confidence: number;
+  removed_by_single_book_exclude: number;
+  after_market_filters: number;
+  books_count_distribution: Record<string, number>;
+  market_confidence_distribution: Record<string, number>;
+}
+
 interface DebugInfo {
   db_candidates_found: number;
   db_query_date: string;
@@ -461,6 +473,7 @@ interface DebugInfo {
   verified_candidates_passed_to_llm: number;
   final_legs_accepted: number;
   final_legs_rejected_no_match: number;
+  market_quality: MarketQualityDebug | null;
 }
 
 serve(async (req) => {
@@ -474,6 +487,7 @@ serve(async (req) => {
     live_props_found: 0, game_level_candidates: 0,
     verified_prop_candidates: 0, verified_candidates_passed_to_llm: 0,
     final_legs_accepted: 0, final_legs_rejected_no_match: 0,
+    market_quality: null,
   };
 
   try {
