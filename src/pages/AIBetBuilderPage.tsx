@@ -519,6 +519,8 @@ export default function AIBetBuilderPage() {
               Your AI Slips
               <Badge variant="secondary" className="text-[10px]">{slips.length}</Badge>
             </h2>
+            {/* Market depth summary */}
+            {marketDepth && <MarketDepthSummary data={marketDepth} />}
             {/* Show active filters above results */}
             {activeFilterCount > 0 && (
               <div className="bg-card/50 border border-border/30 rounded-lg p-3 space-y-1.5">
