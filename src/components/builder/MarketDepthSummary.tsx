@@ -1,9 +1,11 @@
-import { BarChart3, BookOpen, CheckCircle2, ShieldCheck, TrendingUp, XCircle } from "lucide-react";
+import { BarChart3, BookOpen, CheckCircle2, ShieldCheck, TrendingUp, XCircle, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import type { MarketDepthData } from "@/hooks/useAIBetBuilder";
+import type { AISlip } from "@/types/aiSlip";
 
 interface Props {
   data: MarketDepthData;
+  slips?: AISlip[];
 }
 
 function StatCell({ label, value, icon: Icon, color }: { label: string; value: string | number; icon?: typeof BarChart3; color?: string }) {
@@ -72,11 +74,57 @@ function confidenceColor(key: string): string {
   return "bg-red-500";
 }
 
-export function MarketDepthSummary({ data }: Props) {
+/** Compute slip-level aggregate market quality stats */
+function computeSlipMarketStats(slips: AISlip[]) {
+  const allLegs = slips.flatMap(s => s.legs);
+  const propLegs = allLegs.filter(l => !l.bet_type || l.bet_type === "player_prop");
+  
+  let totalConf = 0, confCount = 0;
+  let minBooks = Infinity, maxBooks = 0;
+  let allMainLine = true;
+  let allVerified = true;
+  let weakCount = 0;
+
+  for (const leg of propLegs) {
+    const ctx = leg.data_context;
+    if (!ctx) continue;
+    if (ctx.market_confidence != null) {
+      totalConf += ctx.market_confidence;
+      confCount++;
+      if (ctx.market_confidence < 40) weakCount++;
+    }
+    if (ctx.books_count != null) {
+      minBooks = Math.min(minBooks, ctx.books_count);
+      maxBooks = Math.max(maxBooks, ctx.books_count);
+    }
+    if (ctx.is_main_line === false) allMainLine = false;
+    if (ctx.odds_validated === false) allVerified = false;
+  }
+
+  return {
+    avgConfidence: confCount > 0 ? Math.round(totalConf / confCount) : null,
+    booksRange: minBooks <= maxBooks ? { min: minBooks, max: maxBooks } : null,
+    allMainLine,
+    allVerified,
+    weakCount,
+    propCount: propLegs.length,
+  };
+}
+
+function getConfTier(conf: number): { label: string; color: string; bgColor: string } {
+  if (conf >= 70) return { label: "Strong", color: "text-green-400", bgColor: "bg-green-500/15 border-green-500/25" };
+  if (conf >= 45) return { label: "Moderate", color: "text-yellow-400", bgColor: "bg-yellow-500/15 border-yellow-500/25" };
+  return { label: "Weak", color: "text-red-400", bgColor: "bg-red-500/15 border-red-500/25" };
+}
+
+export function MarketDepthSummary({ data, slips }: Props) {
   const mq = data.market_quality;
   const totalFiltered = mq
     ? (mq.removed_by_verified_only + mq.removed_by_main_lines_only + mq.removed_by_min_books + mq.removed_by_min_confidence + mq.removed_by_single_book_exclude)
     : 0;
+
+  const slipStats = slips && slips.length > 0 ? computeSlipMarketStats(slips) : null;
+  const confTier = slipStats?.avgConfidence != null ? getConfTier(slipStats.avgConfidence) : null;
 
   return (
     <Card className="border-primary/20 bg-primary/[0.03]">
@@ -89,6 +137,54 @@ export function MarketDepthSummary({ data }: Props) {
             {data.mode === "verified_market_first" ? "✓ Verified-first" : data.mode}
           </span>
         </div>
+
+        {/* Slip-level trust banner */}
+        {slipStats && slipStats.propCount > 0 && (
+          <div className={`rounded-lg border p-2.5 space-y-2 ${confTier?.bgColor || "bg-muted/20 border-border/30"}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Slip Market Quality</span>
+              {confTier && (
+                <span className={`text-[10px] font-bold ${confTier.color}`}>{confTier.label}</span>
+              )}
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="text-center">
+                <div className={`text-sm font-bold ${confTier?.color || "text-foreground"}`}>
+                  {slipStats.avgConfidence ?? "—"}
+                </div>
+                <div className="text-[8px] text-muted-foreground">Avg Conf</div>
+              </div>
+              <div className="text-center">
+                <div className="text-sm font-bold text-foreground">
+                  {slipStats.booksRange
+                    ? slipStats.booksRange.min === slipStats.booksRange.max
+                      ? `${slipStats.booksRange.min}`
+                      : `${slipStats.booksRange.min}–${slipStats.booksRange.max}`
+                    : "—"}
+                </div>
+                <div className="text-[8px] text-muted-foreground">Books Range</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-sm font-bold ${slipStats.allMainLine ? "text-green-400" : "text-yellow-400"}`}>
+                  {slipStats.allMainLine ? "✓" : "Mixed"}
+                </div>
+                <div className="text-[8px] text-muted-foreground">Main Lines</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-sm font-bold ${slipStats.allVerified ? "text-green-400" : "text-yellow-400"}`}>
+                  {slipStats.allVerified ? "✓" : "Partial"}
+                </div>
+                <div className="text-[8px] text-muted-foreground">Verified</div>
+              </div>
+            </div>
+            {slipStats.weakCount > 0 && (
+              <div className="flex items-center gap-1.5 text-[10px] text-yellow-400">
+                <AlertTriangle className="h-3 w-3" />
+                {slipStats.weakCount} leg{slipStats.weakCount > 1 ? "s" : ""} with weak market backing
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Key metrics grid */}
         <div className="grid grid-cols-4 gap-2">

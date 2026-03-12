@@ -17,6 +17,7 @@ import type { BuilderFilters } from "@/types/builderFilters";
 import { DEFAULT_BUILDER_FILTERS, getActiveBuilderFilterCount } from "@/types/builderFilters";
 import { GameMatchupHeader } from "@/components/builder/GameMatchupHeader";
 import { MarketDepthSummary } from "@/components/builder/MarketDepthSummary";
+import { LegMarketBadges, getLegMarketBorderClass } from "@/components/builder/LegMarketBadges";
 
 const QUICK_PROMPTS = [
   "Build me a +150 parlay",
@@ -97,34 +98,7 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
     const isPositive = ctx.market_note.includes("improved") || ctx.market_note.includes("favorable");
     chips.push({ label: `📊 ${ctx.market_note}`, color: isPositive ? "bg-green-500/10 text-green-400" : "bg-orange-500/10 text-orange-400" });
   }
-  if (ctx.odds_source) {
-    chips.push({ label: `📖 ${ctx.odds_source}`, color: "bg-indigo-500/10 text-indigo-400" });
-  }
-  if (ctx.implied_probability != null) {
-    chips.push({ label: `Mkt: ${ctx.implied_probability}%`, color: "bg-sky-500/10 text-sky-400" });
-  }
-  if (ctx.edge != null && ctx.edge !== 0) {
-    const edgeColor = ctx.edge > 0 ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400";
-    chips.push({ label: `Edge: ${ctx.edge > 0 ? "+" : ""}${ctx.edge}%`, color: edgeColor });
-  }
-  if (ctx.books_count != null && ctx.books_count > 0) {
-    const booksColor = ctx.books_count >= 3 ? "bg-green-500/10 text-green-400" : ctx.books_count >= 2 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400";
-    chips.push({ label: `${ctx.books_count} book${ctx.books_count > 1 ? "s" : ""}`, color: booksColor });
-  }
-  if (ctx.market_confidence != null) {
-    const mcColor = ctx.market_confidence >= 70 ? "bg-green-500/10 text-green-400" : ctx.market_confidence >= 40 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400";
-    chips.push({ label: `Mkt conf: ${ctx.market_confidence}`, color: mcColor });
-  }
-  if (ctx.consensus_line != null && ctx.market_threshold != null && ctx.consensus_line !== ctx.market_threshold) {
-    chips.push({ label: `Consensus: ${ctx.consensus_line}`, color: "bg-sky-500/10 text-sky-400" });
-  }
-  if (ctx.odds_validated === false) {
-    chips.push({ label: "⚠ Odds unverified", color: "bg-red-500/10 text-red-400" });
-  }
-  if (ctx.market_threshold != null) {
-    const dir = ctx.market_threshold > 0 ? "O" : "U";
-    chips.push({ label: `Market line: ${dir}${Math.abs(ctx.market_threshold)}`, color: "bg-sky-500/10 text-sky-400" });
-  }
+  // Market badges (source, verified, books, confidence, edge) are now in LegMarketBadges — skip here
 
   if (ctx.tags?.length) {
     for (const tag of ctx.tags.slice(0, 3)) {
@@ -259,7 +233,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
         {slip.legs.map((leg, i) => {
           const isGameLevel = leg.bet_type === "moneyline" || leg.bet_type === "spread" || leg.bet_type === "total";
           return (
-          <div key={i} className="bg-card/80 border border-border/30 rounded-lg p-3 space-y-1">
+          <div key={i} className={`bg-card/80 border border-border/30 rounded-lg p-3 space-y-1 border-l-2 ${!isGameLevel ? getLegMarketBorderClass(leg.data_context) : ""}`}>
             {/* Game matchup header for game-level legs */}
             {isGameLevel && <GameMatchupHeader leg={leg} />}
             <div className="flex items-center justify-between gap-2">
@@ -289,19 +263,9 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
               {leg.odds && (
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-xs font-mono font-bold text-muted-foreground">{leg.odds}</span>
-                  {!isGameLevel && leg.data_context?.odds_source && (
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-400 uppercase border border-indigo-500/20">
-                      {leg.data_context.odds_source}
-                    </span>
-                  )}
                   {isGameLevel && leg.data_context?.odds_source && (
                     <span className="text-[8px] font-medium px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase">
                       {leg.data_context.odds_source}
-                    </span>
-                  )}
-                  {!isGameLevel && leg.data_context?.odds_validated && (
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/20">
-                      ✓ Verified
                     </span>
                   )}
                 </div>
@@ -318,6 +282,9 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
             {leg.reasoning && (
               <p className="text-[11px] text-muted-foreground leading-relaxed">{leg.reasoning}</p>
             )}
+
+            {/* Market trust badges — player props only */}
+            {!isGameLevel && leg.data_context && <LegMarketBadges ctx={leg.data_context} isGameLevel={isGameLevel} />}
 
             {/* Data context chips */}
             {leg.data_context && <DataContextChips ctx={leg.data_context} />}
@@ -520,7 +487,7 @@ export default function AIBetBuilderPage() {
               <Badge variant="secondary" className="text-[10px]">{slips.length}</Badge>
             </h2>
             {/* Market depth summary */}
-            {marketDepth && <MarketDepthSummary data={marketDepth} />}
+            {marketDepth && <MarketDepthSummary data={marketDepth} slips={slips} />}
             {/* Show active filters above results */}
             {activeFilterCount > 0 && (
               <div className="bg-card/50 border border-border/30 rounded-lg p-3 space-y-1.5">
