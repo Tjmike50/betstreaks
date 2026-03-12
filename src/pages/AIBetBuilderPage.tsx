@@ -293,6 +293,9 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
               <p className="text-[11px] text-muted-foreground leading-relaxed">{leg.reasoning}</p>
             )}
 
+            {/* Market trust badges — player props only */}
+            {!isGameLevel && leg.data_context && <LegMarketBadges ctx={leg.data_context} isGameLevel={isGameLevel} />}
+
             {/* Data context chips */}
             {leg.data_context && <DataContextChips ctx={leg.data_context} />}
 
