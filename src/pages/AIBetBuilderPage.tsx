@@ -233,7 +233,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
         {slip.legs.map((leg, i) => {
           const isGameLevel = leg.bet_type === "moneyline" || leg.bet_type === "spread" || leg.bet_type === "total";
           return (
-          <div key={i} className="bg-card/80 border border-border/30 rounded-lg p-3 space-y-1">
+          <div key={i} className={`bg-card/80 border border-border/30 rounded-lg p-3 space-y-1 border-l-2 ${!isGameLevel ? getLegMarketBorderClass(leg.data_context) : ""}`}>
             {/* Game matchup header for game-level legs */}
             {isGameLevel && <GameMatchupHeader leg={leg} />}
             <div className="flex items-center justify-between gap-2">
