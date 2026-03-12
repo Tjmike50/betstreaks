@@ -34,6 +34,13 @@ export interface BuilderFilters {
   avoidStaleAvailability: boolean;
   requireFreshMarketData: boolean;
 
+  // Market quality
+  minBooksCount: number;
+  minMarketConfidence: number;
+  verifiedOnly: boolean;
+  mainLinesOnly: boolean;
+  excludeSingleBookProps: boolean;
+
   // Diversity
   noRepeatPlayers: boolean;
   maxOnePerPlayer: boolean;
