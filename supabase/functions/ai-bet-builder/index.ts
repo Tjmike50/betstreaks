@@ -440,6 +440,18 @@ interface VerifiedPropCandidate {
   edge_under: number | null;
 }
 
+interface MarketQualityDebug {
+  before_market_filters: number;
+  removed_by_verified_only: number;
+  removed_by_main_lines_only: number;
+  removed_by_min_books: number;
+  removed_by_min_confidence: number;
+  removed_by_single_book_exclude: number;
+  after_market_filters: number;
+  books_count_distribution: Record<string, number>;
+  market_confidence_distribution: Record<string, number>;
+}
+
 interface DebugInfo {
   db_candidates_found: number;
   db_query_date: string;
@@ -461,6 +473,7 @@ interface DebugInfo {
   verified_candidates_passed_to_llm: number;
   final_legs_accepted: number;
   final_legs_rejected_no_match: number;
+  market_quality: MarketQualityDebug | null;
 }
 
 serve(async (req) => {
@@ -474,6 +487,7 @@ serve(async (req) => {
     live_props_found: 0, game_level_candidates: 0,
     verified_prop_candidates: 0, verified_candidates_passed_to_llm: 0,
     final_legs_accepted: 0, final_legs_rejected_no_match: 0,
+    market_quality: null,
   };
 
   try {
@@ -737,8 +751,72 @@ serve(async (req) => {
     debug.verified_prop_candidates = verifiedCandidates.length;
     console.log(`[AI-Builder] Verified market candidates: ${verifiedCandidates.length} (from ${bestLines.size} total lines, ${sanityRejected} rejected)`);
 
-    // ===== PHASE 3b: APPLY USER FILTERS to verified candidates =====
-    let filteredCandidates = [...verifiedCandidates];
+    // ===== PHASE 3b: APPLY MARKET QUALITY FILTERS =====
+    const mqDebug: MarketQualityDebug = {
+      before_market_filters: verifiedCandidates.length,
+      removed_by_verified_only: 0,
+      removed_by_main_lines_only: 0,
+      removed_by_min_books: 0,
+      removed_by_min_confidence: 0,
+      removed_by_single_book_exclude: 0,
+      after_market_filters: 0,
+      books_count_distribution: {},
+      market_confidence_distribution: {},
+    };
+
+    // Compute distributions before filtering
+    for (const c of verifiedCandidates) {
+      const bBucket = `${c.books_count}_books`;
+      mqDebug.books_count_distribution[bBucket] = (mqDebug.books_count_distribution[bBucket] || 0) + 1;
+      const cBucket = c.market_confidence < 30 ? "0-29" : c.market_confidence < 50 ? "30-49" : c.market_confidence < 70 ? "50-69" : c.market_confidence < 90 ? "70-89" : "90-100";
+      mqDebug.market_confidence_distribution[cBucket] = (mqDebug.market_confidence_distribution[cBucket] || 0) + 1;
+    }
+
+    let marketFilteredCandidates = [...verifiedCandidates];
+
+    // Market quality filter defaults (applied even without user filters)
+    const mqMinBooks = filters?.minBooksCount ?? 1;
+    const mqMinConfidence = filters?.minMarketConfidence ?? 25;
+    const mqVerifiedOnly = filters?.verifiedOnly ?? true;
+    const mqMainLinesOnly = filters?.mainLinesOnly ?? true;
+    const mqExcludeSingleBook = filters?.excludeSingleBookProps ?? false;
+
+    if (mqVerifiedOnly) {
+      const before = marketFilteredCandidates.length;
+      marketFilteredCandidates = marketFilteredCandidates.filter(c => c.books_count >= 1);
+      mqDebug.removed_by_verified_only = before - marketFilteredCandidates.length;
+    }
+
+    if (mqMainLinesOnly) {
+      const before = marketFilteredCandidates.length;
+      marketFilteredCandidates = marketFilteredCandidates.filter(c => c.is_main_line);
+      mqDebug.removed_by_main_lines_only = before - marketFilteredCandidates.length;
+    }
+
+    if (mqMinBooks > 1) {
+      const before = marketFilteredCandidates.length;
+      marketFilteredCandidates = marketFilteredCandidates.filter(c => c.books_count >= mqMinBooks);
+      mqDebug.removed_by_min_books = before - marketFilteredCandidates.length;
+    }
+
+    if (mqMinConfidence > 0) {
+      const before = marketFilteredCandidates.length;
+      marketFilteredCandidates = marketFilteredCandidates.filter(c => c.market_confidence >= mqMinConfidence);
+      mqDebug.removed_by_min_confidence = before - marketFilteredCandidates.length;
+    }
+
+    if (mqExcludeSingleBook) {
+      const before = marketFilteredCandidates.length;
+      marketFilteredCandidates = marketFilteredCandidates.filter(c => c.books_count > 1);
+      mqDebug.removed_by_single_book_exclude = before - marketFilteredCandidates.length;
+    }
+
+    mqDebug.after_market_filters = marketFilteredCandidates.length;
+    debug.market_quality = mqDebug;
+    console.log(`[AI-Builder] Market quality filters: ${verifiedCandidates.length} → ${marketFilteredCandidates.length} (removed: verified=${mqDebug.removed_by_verified_only}, mainLine=${mqDebug.removed_by_main_lines_only}, minBooks=${mqDebug.removed_by_min_books}, minConf=${mqDebug.removed_by_min_confidence}, singleBook=${mqDebug.removed_by_single_book_exclude})`);
+
+    // ===== PHASE 3c: APPLY USER FILTERS to market-quality-filtered candidates =====
+    let filteredCandidates = [...marketFilteredCandidates];
     if (filters && includePlayerProps) {
       const f = filters;
       if (f.statTypes?.length > 0) {

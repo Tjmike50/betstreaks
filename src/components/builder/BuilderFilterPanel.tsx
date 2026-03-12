@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ChevronDown, ChevronUp, SlidersHorizontal, X, Shield, Zap, Target,
   TrendingUp, Users, UserMinus, BarChart3, Dices, Filter, Sparkles,
+  BookOpen, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -307,6 +308,36 @@ export function BuilderFilterPanel({ filters, onChange, isPremium }: Props) {
                 <ToggleRow label="Avoid Uncertain Lineups" checked={filters.avoidUncertainLineups} onChange={(v) => update({ avoidUncertainLineups: v })} />
                 <ToggleRow label="Avoid Stale Availability" checked={filters.avoidStaleAvailability} onChange={(v) => update({ avoidStaleAvailability: v })} />
                 <ToggleRow label="Require Fresh Market Data" checked={filters.requireFreshMarketData} onChange={(v) => update({ requireFreshMarketData: v })} />
+              </Section>
+
+              {/* Market Quality */}
+              <Section title="Market Quality" icon={<CheckCircle2 className="h-4 w-4" />}>
+                <ToggleRow label="Verified Props Only" checked={filters.verifiedOnly} onChange={(v) => update({ verifiedOnly: v })} />
+                <ToggleRow label="Main Lines Only" checked={filters.mainLinesOnly} onChange={(v) => update({ mainLinesOnly: v })} />
+                <ToggleRow label="Exclude Single-Book Props" checked={filters.excludeSingleBookProps} onChange={(v) => update({ excludeSingleBookProps: v })} />
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Min Books Count</Label>
+                  <Select
+                    value={filters.minBooksCount.toString()}
+                    onValueChange={(v) => update({ minBooksCount: Number(v) })}
+                  >
+                    <SelectTrigger className="h-9 bg-secondary/50"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4].map((n) => (
+                        <SelectItem key={n} value={n.toString()}>
+                          {n === 1 ? "1+ (any)" : `${n}+`} book{n > 1 ? "s" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <SliderRow
+                  label="Min Market Confidence"
+                  value={filters.minMarketConfidence}
+                  min={0} max={100}
+                  onChange={(v) => update({ minMarketConfidence: v })}
+                  suffix=""
+                />
               </Section>
 
               {/* Diversity */}

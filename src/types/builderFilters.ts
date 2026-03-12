@@ -34,6 +34,13 @@ export interface BuilderFilters {
   avoidStaleAvailability: boolean;
   requireFreshMarketData: boolean;
 
+  // Market quality
+  minBooksCount: number;
+  minMarketConfidence: number;
+  verifiedOnly: boolean;
+  mainLinesOnly: boolean;
+  excludeSingleBookProps: boolean;
+
   // Diversity
   noRepeatPlayers: boolean;
   maxOnePerPlayer: boolean;
@@ -68,6 +75,13 @@ export const DEFAULT_BUILDER_FILTERS: BuilderFilters = {
   avoidStaleAvailability: false,
   requireFreshMarketData: false,
 
+  // Market quality defaults — safe but not overly restrictive
+  minBooksCount: 1,
+  minMarketConfidence: 25,
+  verifiedOnly: true,
+  mainLinesOnly: true,
+  excludeSingleBookProps: false,
+
   noRepeatPlayers: false,
   maxOnePerPlayer: false,
   maxOnePerTeam: false,
@@ -101,6 +115,13 @@ export function getActiveBuilderFilterCount(filters: BuilderFilters): number {
   if (filters.minSampleSize !== d.minSampleSize) count++;
   if (filters.startersOnly) count++;
   if (filters.avoidUncertainLineups) count++;
+  // Market quality (only count if changed from defaults)
+  if (filters.minBooksCount !== d.minBooksCount) count++;
+  if (filters.minMarketConfidence !== d.minMarketConfidence) count++;
+  if (filters.verifiedOnly !== d.verifiedOnly) count++;
+  if (filters.mainLinesOnly !== d.mainLinesOnly) count++;
+  if (filters.excludeSingleBookProps !== d.excludeSingleBookProps) count++;
+  // Diversity
   if (filters.noRepeatPlayers) count++;
   if (filters.maxOnePerPlayer) count++;
   if (filters.maxOnePerTeam) count++;
