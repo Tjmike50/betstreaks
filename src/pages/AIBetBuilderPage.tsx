@@ -293,6 +293,11 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
                       {leg.data_context.odds_source}
                     </span>
                   )}
+                  {!isGameLevel && leg.data_context?.odds_validated && (
+                    <span className="text-[8px] font-medium px-1 py-0.5 rounded bg-green-500/10 text-green-400">
+                      ✓ Verified
+                    </span>
+                  )}
                 </div>
               )}
             </div>

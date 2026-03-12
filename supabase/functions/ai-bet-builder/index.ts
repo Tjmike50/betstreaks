@@ -1612,15 +1612,19 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
           }
         } else {
           // No live odds found at all for this player prop
-          // If user has strict market filters, reject entirely
-          if (filters?.requireFreshMarketData) {
+          // MANDATORY: Player props require live market verification by default
+          // Internal flag allowUnverifiedOdds can override (disabled by default)
+          const allowUnverified = filters?.allowUnverifiedOdds === true;
+          if (!allowUnverified) {
             debug.legs_rejected++;
             debug.rejected_legs.push({
               player: leg.player_name,
               stat: leg.stat_type,
-              reason: "No live odds found and requireFreshMarketData is on",
+              reason: "No live sportsbook market found — player prop requires verified odds (books_count: 0)",
             });
-            console.warn(`[AI-Builder] REJECTED (no live odds, strict mode): ${leg.player_name} ${leg.stat_type}`);
+            debug.legs_validated--;
+            playersInThisSlip.delete(playerNorm);
+            console.warn(`[AI-Builder] REJECTED (no live market): ${leg.player_name} ${leg.stat_type} ${dbCandidate.threshold} — no book offers this prop`);
             continue;
           }
           realContext.odds_validated = false;
@@ -1678,9 +1682,21 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
     }
 
     if (parsed.slips.length === 0) {
+      // Determine if rejections were primarily due to missing live markets
+      const marketRejections = debug.rejected_legs.filter(r => 
+        r.reason.includes("No live sportsbook market") || 
+        r.reason.includes("Market normalization failed") ||
+        r.reason.includes("Market confidence too low")
+      );
+      const isMarketIssue = marketRejections.length > debug.rejected_legs.length * 0.5;
+      
+      const errorMsg = isMarketIssue
+        ? `Live market verification was not available for enough player props to build a slip. ${marketRejections.length} prop(s) were rejected because no verified sportsbook odds could be found. Try again later when markets are open, or switch to game-level bets (Moneyline, Spread, Totals).`
+        : "AI could not build valid slips from today's candidates. Try a different prompt or adjust your filters.";
+      
       return new Response(
         JSON.stringify({ 
-          error: "AI could not build valid slips from today's candidates. Try a different prompt.",
+          error: errorMsg,
           debug,
         }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
