@@ -1612,15 +1612,19 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
           }
         } else {
           // No live odds found at all for this player prop
-          // If user has strict market filters, reject entirely
-          if (filters?.requireFreshMarketData) {
+          // MANDATORY: Player props require live market verification by default
+          // Internal flag allowUnverifiedOdds can override (disabled by default)
+          const allowUnverified = filters?.allowUnverifiedOdds === true;
+          if (!allowUnverified) {
             debug.legs_rejected++;
             debug.rejected_legs.push({
               player: leg.player_name,
               stat: leg.stat_type,
-              reason: "No live odds found and requireFreshMarketData is on",
+              reason: "No live sportsbook market found — player prop requires verified odds (books_count: 0)",
             });
-            console.warn(`[AI-Builder] REJECTED (no live odds, strict mode): ${leg.player_name} ${leg.stat_type}`);
+            debug.legs_validated--;
+            playersInThisSlip.delete(playerNorm);
+            console.warn(`[AI-Builder] REJECTED (no live market): ${leg.player_name} ${leg.stat_type} ${dbCandidate.threshold} — no book offers this prop`);
             continue;
           }
           realContext.odds_validated = false;
