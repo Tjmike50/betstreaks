@@ -16,6 +16,7 @@ import { BuilderActiveFilters } from "@/components/builder/BuilderActiveFilters"
 import type { BuilderFilters } from "@/types/builderFilters";
 import { DEFAULT_BUILDER_FILTERS, getActiveBuilderFilterCount } from "@/types/builderFilters";
 import { GameMatchupHeader } from "@/components/builder/GameMatchupHeader";
+import { MarketDepthSummary } from "@/components/builder/MarketDepthSummary";
 
 const QUICK_PROMPTS = [
   "Build me a +150 parlay",
