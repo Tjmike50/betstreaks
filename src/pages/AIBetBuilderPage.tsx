@@ -263,19 +263,9 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
               {leg.odds && (
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-xs font-mono font-bold text-muted-foreground">{leg.odds}</span>
-                  {!isGameLevel && leg.data_context?.odds_source && (
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-400 uppercase border border-indigo-500/20">
-                      {leg.data_context.odds_source}
-                    </span>
-                  )}
                   {isGameLevel && leg.data_context?.odds_source && (
                     <span className="text-[8px] font-medium px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase">
                       {leg.data_context.odds_source}
-                    </span>
-                  )}
-                  {!isGameLevel && leg.data_context?.odds_validated && (
-                    <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/20">
-                      ✓ Verified
                     </span>
                   )}
                 </div>
