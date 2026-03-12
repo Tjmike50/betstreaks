@@ -36,6 +36,12 @@ export function BuilderActiveFilters({ filters, onChange, onClearAll }: Props) {
   if (filters.maxOnePerPlayer) chips.push({ label: "1/player", clear: () => onChange({ ...filters, maxOnePerPlayer: false }) });
   if (filters.maxOnePerTeam) chips.push({ label: "1/team", clear: () => onChange({ ...filters, maxOnePerTeam: false }) });
   if (filters.diversifySlips) chips.push({ label: "Diversify", clear: () => onChange({ ...filters, diversifySlips: false }) });
+  // Market quality
+  if (filters.minBooksCount !== d.minBooksCount) chips.push({ label: `Books≥${filters.minBooksCount}`, clear: () => onChange({ ...filters, minBooksCount: d.minBooksCount }) });
+  if (filters.minMarketConfidence !== d.minMarketConfidence) chips.push({ label: `MktConf≥${filters.minMarketConfidence}`, clear: () => onChange({ ...filters, minMarketConfidence: d.minMarketConfidence }) });
+  if (!filters.verifiedOnly) chips.push({ label: "Unverified allowed", clear: () => onChange({ ...filters, verifiedOnly: true }) });
+  if (!filters.mainLinesOnly) chips.push({ label: "Alt lines allowed", clear: () => onChange({ ...filters, mainLinesOnly: true }) });
+  if (filters.excludeSingleBookProps) chips.push({ label: "No 1-book", clear: () => onChange({ ...filters, excludeSingleBookProps: false }) });
 
   if (chips.length === 0) return null;
 

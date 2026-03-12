@@ -1,4 +1,4 @@
-import { Shield, TrendingDown, BarChart3, Target, Users, UserMinus, AlertTriangle } from "lucide-react";
+import { Shield, TrendingDown, BarChart3, Target, Users, UserMinus, AlertTriangle, CheckCircle2 } from "lucide-react";
 import type { BuilderFilters } from "@/types/builderFilters";
 import { DEFAULT_BUILDER_FILTERS } from "@/types/builderFilters";
 
@@ -20,6 +20,17 @@ const QUICK_CHIPS: QuickChipDef[] = [
     icon: Shield,
     isActive: (f) => f.riskLevel === "safe",
     apply: (f) => ({ ...f, riskLevel: f.riskLevel === "safe" ? null : "safe" }),
+  },
+  {
+    label: "Strong Markets",
+    icon: CheckCircle2,
+    isActive: (f) => f.minBooksCount >= 2 && f.minMarketConfidence >= 50 && f.excludeSingleBookProps,
+    apply: (f) => {
+      const isActive = f.minBooksCount >= 2 && f.minMarketConfidence >= 50 && f.excludeSingleBookProps;
+      return isActive
+        ? { ...f, minBooksCount: DEFAULT_BUILDER_FILTERS.minBooksCount, minMarketConfidence: DEFAULT_BUILDER_FILTERS.minMarketConfidence, excludeSingleBookProps: false }
+        : { ...f, minBooksCount: 2, minMarketConfidence: 50, excludeSingleBookProps: true, verifiedOnly: true, mainLinesOnly: true };
+    },
   },
   {
     label: "High Confidence",
