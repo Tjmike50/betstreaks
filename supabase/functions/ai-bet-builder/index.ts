@@ -16,7 +16,7 @@ const STAT_LABELS: Record<string, string> = {
 };
 
 const MAX_CANDIDATES_PER_PLAYER = 2;
-const MAX_CANDIDATES_TO_LLM = 100;
+const MAX_VERIFIED_CANDIDATES_TO_LLM = 120;
 const MAX_GAME_CANDIDATES_TO_LLM = 30;
 
 // Nickname -> abbreviation mapping for Odds API team names
@@ -74,20 +74,13 @@ function isOddsSane(overOdds: string | null, underOdds: string | null, threshold
     return { valid: false, reason: `Threshold ${threshold} outside realistic range for ${statType}` };
   }
 
-  if (overNum != null && overNum < -800) {
-    return { valid: false, reason: `Over odds ${overOdds} too extreme — likely alt line` };
-  }
-  if (underNum != null && underNum < -800) {
-    return { valid: false, reason: `Under odds ${underOdds} too extreme — likely alt line` };
-  }
+  if (overNum != null && overNum < -800) return { valid: false, reason: `Over odds ${overOdds} too extreme` };
+  if (underNum != null && underNum < -800) return { valid: false, reason: `Under odds ${underOdds} too extreme` };
 
   if (overNum != null && underNum != null) {
     const diff = Math.abs(overNum - underNum);
-    if (diff > 500) {
-      return { valid: false, reason: `Odds spread too wide: ${overOdds}/${underOdds} (diff ${diff})` };
-    }
+    if (diff > 500) return { valid: false, reason: `Odds spread too wide: ${overOdds}/${underOdds}` };
   }
-
   return { valid: true, reason: null };
 }
 
@@ -104,14 +97,13 @@ interface BestLineEntry {
   implied_under: number | null;
   odds_validated: boolean;
   rejection_reason: string | null;
-  // Market normalization fields
   is_main_line: boolean;
   consensus_line: number | null;
-  market_confidence: number;         // 0-100
+  market_confidence: number;
   books_with_line: number;
-  odds_balance_score: number | null;  // how close over/under are to balanced
+  odds_balance_score: number | null;
   alt_line_flag: boolean;
-  edge: number | null;               // % edge vs implied probability
+  edge: number | null;
 }
 
 /** Compute how balanced over/under odds are (lower = more balanced = more likely main line) */
@@ -119,7 +111,6 @@ function oddsImbalance(overOdds: string | null, underOdds: string | null): numbe
   const overImpl = americanToImplied(overOdds);
   const underImpl = americanToImplied(underOdds);
   if (overImpl == null || underImpl == null) return null;
-  // Perfect balanced line: both ~0.5 implied. Imbalance = distance from equal split.
   return Math.abs(overImpl - underImpl);
 }
 
@@ -130,12 +121,10 @@ function isLikelyAltLine(
   currentThreshold: number
 ): boolean {
   if (imbalance == null) return false;
-  // If this line is very imbalanced (one side heavy favorite)
   if (imbalance > 0.35) {
-    // Check if a more balanced line exists for same player/stat
-    const moreBalanced = allThresholdsForPlayerStat.find(t => 
-      t.threshold !== currentThreshold && 
-      t.imbalance != null && 
+    const moreBalanced = allThresholdsForPlayerStat.find(t =>
+      t.threshold !== currentThreshold &&
+      t.imbalance != null &&
       t.imbalance < imbalance - 0.15 &&
       t.booksCount >= 1
     );
@@ -146,7 +135,6 @@ function isLikelyAltLine(
 
 /** Aggregate live props across books with main-line detection and market confidence */
 function aggregateBestLines(liveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[]): Map<string, BestLineEntry> {
-  // Step 1: Group by player|stat|threshold
   const grouped = new Map<string, typeof liveProps>();
   for (const prop of liveProps) {
     const key = `${prop.player_name.toLowerCase()}|${prop.stat_type}|${prop.threshold}`;
@@ -154,7 +142,6 @@ function aggregateBestLines(liveProps: { player_name: string; stat_type: string;
     grouped.get(key)!.push(prop);
   }
 
-  // Step 2: Build per-threshold aggregates
   interface ThresholdAgg {
     threshold: number;
     entries: typeof liveProps;
@@ -169,7 +156,6 @@ function aggregateBestLines(liveProps: { player_name: string; stat_type: string;
     imbalance: number | null;
   }
 
-  // Group by player|stat to compare thresholds
   const byPlayerStat = new Map<string, ThresholdAgg[]>();
 
   for (const [key, entries] of grouped) {
@@ -189,30 +175,15 @@ function aggregateBestLines(liveProps: { player_name: string; stat_type: string;
       booksSeen.add(e.sportsbook);
       const overNum = e.over_odds ? parseInt(e.over_odds, 10) : null;
       const underNum = e.under_odds ? parseInt(e.under_odds, 10) : null;
-
       if (overNum != null) {
         overOddsList.push(overNum);
-        if (bestOverOdds == null || overNum > bestOverOdds) {
-          bestOverOdds = overNum;
-          bestOverBook = e.sportsbook;
-        }
+        if (bestOverOdds == null || overNum > bestOverOdds) { bestOverOdds = overNum; bestOverBook = e.sportsbook; }
       }
       if (underNum != null) {
         underOddsList.push(underNum);
-        if (bestUnderOdds == null || underNum > bestUnderOdds) {
-          bestUnderOdds = underNum;
-          bestUnderBook = e.sportsbook;
-        }
+        if (bestUnderOdds == null || underNum > bestUnderOdds) { bestUnderOdds = underNum; bestUnderBook = e.sportsbook; }
       }
     }
-
-    // Compute median odds
-    const median = (arr: number[]) => {
-      if (arr.length === 0) return null;
-      const sorted = [...arr].sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-    };
 
     const imbalance = oddsImbalance(
       bestOverOdds != null ? String(bestOverOdds) : null,
@@ -220,94 +191,65 @@ function aggregateBestLines(liveProps: { player_name: string; stat_type: string;
     );
 
     const agg: ThresholdAgg = {
-      threshold,
-      entries,
-      booksCount: booksSeen.size,
-      books: booksSeen,
-      bestOverOdds,
-      bestOverBook,
-      bestUnderOdds,
-      bestUnderBook,
-      medianOver: median(overOddsList),
-      medianUnder: median(underOddsList),
-      imbalance,
+      threshold, entries, booksCount: booksSeen.size, books: booksSeen,
+      bestOverOdds, bestOverBook, bestUnderOdds, bestUnderBook,
+      medianOver: null, medianUnder: null, imbalance,
     };
 
     if (!byPlayerStat.has(psKey)) byPlayerStat.set(psKey, []);
     byPlayerStat.get(psKey)!.push(agg);
   }
 
-  // Step 3: For each player/stat, detect main line and compute market confidence
   const bestLines = new Map<string, BestLineEntry>();
 
   for (const [psKey, thresholds] of byPlayerStat) {
-    // Sort by: books count desc, then imbalance asc (most balanced first)
-    const thresholdSummaries = thresholds.map(t => ({
-      threshold: t.threshold,
-      imbalance: t.imbalance,
-      booksCount: t.booksCount,
-    }));
-
-    // Find the consensus main line: most books offering it, with most balanced odds
+    const thresholdSummaries = thresholds.map(t => ({ threshold: t.threshold, imbalance: t.imbalance, booksCount: t.booksCount }));
     const mainLineCandidates = [...thresholds].sort((a, b) => {
-      // Primary: more books = more likely main
       if (b.booksCount !== a.booksCount) return b.booksCount - a.booksCount;
-      // Secondary: more balanced odds = more likely main
-      const aImb = a.imbalance ?? 1;
-      const bImb = b.imbalance ?? 1;
-      return aImb - bImb;
+      return (a.imbalance ?? 1) - (b.imbalance ?? 1);
     });
-
     const mainLine = mainLineCandidates[0];
     const consensusThreshold = mainLine.threshold;
 
     for (const t of thresholds) {
       const key = `${psKey}|${t.threshold}`;
       const firstEntry = t.entries[0];
-
-      // Determine if this threshold is an alt line
       const isAlt = isLikelyAltLine(t.imbalance, thresholdSummaries, t.threshold);
       const isMain = t.threshold === consensusThreshold && !isAlt;
 
-      // Compute market confidence (0-100)
       let marketConfidence = 0;
-      // Books factor: 1 book = 20, 2 = 45, 3 = 70, 4+ = 85
       const booksFactor = Math.min(t.booksCount * 22, 85);
       marketConfidence += booksFactor;
-      // Balance factor: well-balanced odds = +15
       if (t.imbalance != null && t.imbalance < 0.15) marketConfidence += 15;
       else if (t.imbalance != null && t.imbalance < 0.25) marketConfidence += 8;
-      // Main line bonus
       if (isMain) marketConfidence += 5;
-      // Penalty for likely alt
       if (isAlt) marketConfidence -= 30;
-      // Cap at 100
       marketConfidence = Math.max(0, Math.min(100, marketConfidence));
 
-      // Sanity check
       const sanity = isOddsSane(
         t.bestOverOdds != null ? String(t.bestOverOdds) : null,
         t.bestUnderOdds != null ? String(t.bestUnderOdds) : null,
-        t.threshold,
-        firstEntry.stat_type
+        t.threshold, firstEntry.stat_type
       );
 
-      // Additional sanity: reject if only 1 book AND very imbalanced (strong alt signal)
       let finalValid = sanity.valid;
       let finalReason = sanity.reason;
       if (t.booksCount === 1 && t.imbalance != null && t.imbalance > 0.4) {
         finalValid = false;
-        finalReason = `Single-book prop with heavy imbalance (${Math.round(t.imbalance * 100)}%) — likely alt line`;
+        finalReason = `Single-book prop with heavy imbalance (${Math.round(t.imbalance * 100)}%)`;
       }
-      // Reject if flagged as alt line with extreme juice
       if (isAlt && t.imbalance != null && t.imbalance > 0.5) {
         finalValid = false;
         finalReason = `Alt line detected: imbalance ${Math.round(t.imbalance * 100)}%, consensus main at ${consensusThreshold}`;
       }
-      // Reject if missing one side of over/under
       if (t.bestOverOdds == null && t.bestUnderOdds == null) {
         finalValid = false;
         finalReason = "No odds available for either side";
+      }
+      // Reject low market confidence
+      if (marketConfidence < 25) {
+        finalValid = false;
+        finalReason = `Market confidence too low: ${marketConfidence}/100`;
       }
 
       bestLines.set(key, {
@@ -329,7 +271,7 @@ function aggregateBestLines(liveProps: { player_name: string; stat_type: string;
         books_with_line: t.booksCount,
         odds_balance_score: t.imbalance != null ? Math.round((1 - t.imbalance) * 100) : null,
         alt_line_flag: isAlt,
-        edge: null, // computed during validation
+        edge: null,
       });
     }
   }
@@ -346,17 +288,13 @@ function detectExtremeMovement(
   if (!currentOdds || snapshots.length === 0) return null;
   const currentNum = parseInt(currentOdds, 10);
   if (isNaN(currentNum)) return null;
-
   const oldest = snapshots[snapshots.length - 1];
   const oldOdds = side === "over" ? oldest.over_odds : oldest.under_odds;
   if (!oldOdds) return null;
   const oldNum = parseInt(oldOdds, 10);
   if (isNaN(oldNum)) return null;
-
   const diff = Math.abs(currentNum - oldNum);
-  if (diff > 300) {
-    return `Extreme odds movement: ${oldOdds} → ${currentOdds} (${diff}pt shift)`;
-  }
+  if (diff > 300) return `Extreme odds movement: ${oldOdds} → ${currentOdds} (${diff}pt shift)`;
   return null;
 }
 
@@ -380,39 +318,32 @@ function normStat(s: string): string {
   return lower;
 }
 
-// ===== GAME-LEVEL ODDS PARSING =====
+// ===== Reverse stat label lookup =====
+const STAT_LABEL_TO_KEY: Record<string, string> = {};
+for (const [k, v] of Object.entries(STAT_LABELS)) { STAT_LABEL_TO_KEY[v] = k; }
 
+// ===== GAME-LEVEL ODDS PARSING =====
 interface GameLevelCandidate {
   type: "moneyline" | "spread" | "total";
-  home_team: string;
-  away_team: string;
-  team?: string;        // for ML & spread: which side
-  opponent?: string;    // the other side
-  spread?: number;      // for spread
-  total_line?: number;  // for totals
-  pick?: string;        // "Over" | "Under" for totals
-  odds: string;
-  sportsbook: string;
-  label: string;        // human-readable label
-  implied_probability: number | null;
+  home_team: string; away_team: string;
+  team?: string; opponent?: string;
+  spread?: number; total_line?: number;
+  pick?: string; odds: string; sportsbook: string;
+  label: string; implied_probability: number | null;
 }
 
 function parseGameLevelOdds(gamesData: any[]): GameLevelCandidate[] {
-  const candidates: GameLevelCandidate[] = [];
-  // Track best odds per unique bet for dedup across books
   const bestByKey = new Map<string, GameLevelCandidate>();
 
   for (const game of gamesData) {
     const homeTeam = game.home_team || "";
     const awayTeam = game.away_team || "";
-    // Extract short abbreviations
     const homeAbbr = homeTeam.split(" ").pop() || homeTeam;
     const awayAbbr = awayTeam.split(" ").pop() || awayTeam;
 
     for (const bm of game.bookmakers || []) {
       for (const market of bm.markets || []) {
         if (market.key === "h2h") {
-          // Moneyline
           for (const outcome of market.outcomes || []) {
             const isHome = outcome.name === homeTeam;
             const team = isHome ? homeAbbr : awayAbbr;
@@ -422,19 +353,8 @@ function parseGameLevelOdds(gamesData: any[]): GameLevelCandidate[] {
             const implied = americanToImplied(outcome.price);
             const existing = bestByKey.get(key);
             const existingOdds = existing ? parseInt(existing.odds, 10) : -Infinity;
-            const newOdds = parseInt(odds, 10);
-            if (!existing || newOdds > existingOdds) {
-              bestByKey.set(key, {
-                type: "moneyline",
-                home_team: homeAbbr,
-                away_team: awayAbbr,
-                team,
-                opponent,
-                odds,
-                sportsbook: bm.key,
-                label: `${team} ML`,
-                implied_probability: implied,
-              });
+            if (!existing || parseInt(odds, 10) > existingOdds) {
+              bestByKey.set(key, { type: "moneyline", home_team: homeAbbr, away_team: awayAbbr, team, opponent, odds, sportsbook: bm.key, label: `${team} ML`, implied_probability: implied });
             }
           }
         } else if (market.key === "spreads") {
@@ -448,52 +368,76 @@ function parseGameLevelOdds(gamesData: any[]): GameLevelCandidate[] {
             const implied = americanToImplied(outcome.price);
             const existing = bestByKey.get(key);
             const existingOdds = existing ? parseInt(existing.odds, 10) : -Infinity;
-            const newOdds = parseInt(odds, 10);
-            if (!existing || newOdds > existingOdds) {
-              bestByKey.set(key, {
-                type: "spread",
-                home_team: homeAbbr,
-                away_team: awayAbbr,
-                team,
-                opponent,
-                spread: spreadVal,
-                odds,
-                sportsbook: bm.key,
-                label: `${team} ${spreadVal > 0 ? "+" : ""}${spreadVal}`,
-                implied_probability: implied,
-              });
+            if (!existing || parseInt(odds, 10) > existingOdds) {
+              bestByKey.set(key, { type: "spread", home_team: homeAbbr, away_team: awayAbbr, team, opponent, spread: spreadVal, odds, sportsbook: bm.key, label: `${team} ${spreadVal > 0 ? "+" : ""}${spreadVal}`, implied_probability: implied });
             }
           }
         } else if (market.key === "totals") {
           for (const outcome of market.outcomes || []) {
             const totalLine = outcome.point;
-            const pick = outcome.name; // "Over" or "Under"
+            const pick = outcome.name;
             const odds = String(outcome.price);
             const key = `total|${homeAbbr}v${awayAbbr}|${totalLine}|${pick}`;
             const implied = americanToImplied(outcome.price);
             const existing = bestByKey.get(key);
             const existingOdds = existing ? parseInt(existing.odds, 10) : -Infinity;
-            const newOdds = parseInt(odds, 10);
-            if (!existing || newOdds > existingOdds) {
-              bestByKey.set(key, {
-                type: "total",
-                home_team: homeAbbr,
-                away_team: awayAbbr,
-                total_line: totalLine,
-                pick,
-                odds,
-                sportsbook: bm.key,
-                label: `${homeAbbr}/${awayAbbr} ${pick} ${totalLine}`,
-                implied_probability: implied,
-              });
+            if (!existing || parseInt(odds, 10) > existingOdds) {
+              bestByKey.set(key, { type: "total", home_team: homeAbbr, away_team: awayAbbr, total_line: totalLine, pick, odds, sportsbook: bm.key, label: `${homeAbbr}/${awayAbbr} ${pick} ${totalLine}`, implied_probability: implied });
             }
           }
         }
       }
     }
   }
-
   return [...bestByKey.values()];
+}
+
+// ===== VERIFIED MARKET CANDIDATE (player props built from live markets) =====
+interface VerifiedPropCandidate {
+  // Market data (from bestLines)
+  player_name: string;
+  stat_type: string;      // e.g. "Points"
+  stat_key: string;        // e.g. "pts"
+  threshold: number;
+  best_over_odds: string | null;
+  best_over_book: string | null;
+  best_under_odds: string | null;
+  best_under_book: string | null;
+  books_count: number;
+  books_seen: string[];
+  market_confidence: number;
+  consensus_line: number | null;
+  is_main_line: boolean;
+  implied_over: number | null;
+  implied_under: number | null;
+  // Scoring enrichment (from player_prop_scores, if available)
+  team_abbr: string | null;
+  opponent_abbr: string | null;
+  home_away: string | null;
+  confidence_score: number | null;
+  value_score: number | null;
+  volatility_score: number | null;
+  consistency_score: number | null;
+  season_avg: number | null;
+  last3_avg: number | null;
+  last5_avg: number | null;
+  last10_avg: number | null;
+  season_hit_rate: number | null;
+  last5_hit_rate: number | null;
+  last10_hit_rate: number | null;
+  vs_opponent_avg: number | null;
+  vs_opponent_hit_rate: number | null;
+  vs_opponent_games: number | null;
+  home_avg: number | null;
+  home_hit_rate: number | null;
+  home_games: number | null;
+  away_avg: number | null;
+  away_hit_rate: number | null;
+  away_games: number | null;
+  total_games: number | null;
+  reason_tags: string[];
+  edge_over: number | null;
+  edge_under: number | null;
 }
 
 interface DebugInfo {
@@ -510,37 +454,31 @@ interface DebugInfo {
   legs_rejected: number;
   rejected_legs: { player: string; stat: string; reason: string }[];
   scoring_engine_called: boolean;
-  mode: "scored_candidates" | "fallback_mode";
+  mode: string;
   live_props_found: number;
   game_level_candidates: number;
+  verified_prop_candidates: number;
+  verified_candidates_passed_to_llm: number;
+  final_legs_accepted: number;
+  final_legs_rejected_no_match: number;
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const debug: DebugInfo = {
-    db_candidates_found: 0,
-    db_query_date: "",
-    fallback_used: false,
-    fallback_reason: null,
-    candidates_after_diversity: 0,
-    candidates_passed_to_llm: 0,
-    unique_players_in_pool: 0,
-    top_candidates: [],
-    excluded_candidates: [],
-    legs_validated: 0,
-    legs_rejected: 0,
-    rejected_legs: [],
-    scoring_engine_called: false,
-    mode: "scored_candidates",
-    live_props_found: 0,
-    game_level_candidates: 0,
+    db_candidates_found: 0, db_query_date: "", fallback_used: false, fallback_reason: null,
+    candidates_after_diversity: 0, candidates_passed_to_llm: 0, unique_players_in_pool: 0,
+    top_candidates: [], excluded_candidates: [], legs_validated: 0, legs_rejected: 0,
+    rejected_legs: [], scoring_engine_called: false, mode: "verified_market_first",
+    live_props_found: 0, game_level_candidates: 0,
+    verified_prop_candidates: 0, verified_candidates_passed_to_llm: 0,
+    final_legs_accepted: 0, final_legs_rejected_no_match: 0,
   };
 
   try {
     const ODDS_API_KEY = Deno.env.get("ODDS_API_KEY");
     if (!ODDS_API_KEY) throw new Error("ODDS_API_KEY not configured");
-
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
@@ -560,24 +498,12 @@ serve(async (req) => {
     // --- Auth & usage limits ---
     const { data: { user } } = await supabase.auth.getUser();
     let isPremium = false;
-
     if (user) {
-      const { data: flags } = await supabase
-        .from("user_flags")
-        .select("is_premium")
-        .eq("user_id", user.id)
-        .single();
+      const { data: flags } = await supabase.from("user_flags").select("is_premium").eq("user_id", user.id).single();
       isPremium = flags?.is_premium ?? false;
-
       if (!isPremium) {
         const today = new Date().toISOString().split("T")[0];
-        const { data: usage } = await supabase
-          .from("ai_usage")
-          .select("request_count")
-          .eq("user_id", user.id)
-          .eq("usage_date", today)
-          .single();
-
+        const { data: usage } = await supabase.from("ai_usage").select("request_count").eq("user_id", user.id).eq("usage_date", today).single();
         if (usage && usage.request_count >= 1) {
           return new Response(
             JSON.stringify({ error: "free_limit_reached", message: "Free users get 1 AI slip per day. Upgrade to Premium for unlimited." }),
@@ -590,204 +516,11 @@ serve(async (req) => {
     const todayStr = new Date().toISOString().split("T")[0];
     debug.db_query_date = todayStr;
 
-    // Determine which bet types to include based on filter
     const betType = filters?.betType || null;
     const includePlayerProps = !betType || betType === "player_props" || betType === "mixed";
     const includeGameLevel = !betType || betType === "moneyline" || betType === "spread" || betType === "totals" || betType === "mixed";
 
-    // ===== PHASE 1: Get pre-scored candidates from player_prop_scores =====
-    let scoredProps: any[] = [];
-    
-    if (includePlayerProps) {
-      console.log(`[AI-Builder] Fetching scored candidates for ${todayStr}...`);
-      
-      const { data: dbCandidates, error: dbErr } = await serviceClient
-        .from("player_prop_scores")
-        .select("*")
-        .eq("game_date", todayStr)
-        .order("confidence_score", { ascending: false })
-        .limit(200);
-
-      if (dbErr) {
-        console.error("[AI-Builder] DB candidates error:", dbErr);
-      }
-
-      scoredProps = dbCandidates || [];
-      debug.db_candidates_found = scoredProps.length;
-      console.log(`[AI-Builder] Found ${scoredProps.length} raw candidates for ${todayStr}`);
-
-      // Quality check: if today's data has suspiciously low sample sizes, treat as bad data
-      if (scoredProps.length > 0) {
-        const sampleSizes = scoredProps.map((p: any) => p.total_games ?? 0);
-        const medianSample = sampleSizes.sort((a: number, b: number) => a - b)[Math.floor(sampleSizes.length / 2)];
-        if (medianSample < 10) {
-          console.log(`[AI-Builder] ⚠ Today's data has median sample size ${medianSample} — likely bad refresh, skipping`);
-          scoredProps = [];
-          debug.fallback_reason = `Today's data discarded: median sample size ${medianSample} (< 10 minimum)`;
-        }
-      }
-
-      // If no DB candidates for today (or bad data), try yesterday
-      if (scoredProps.length === 0) {
-        const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-        console.log(`[AI-Builder] No usable candidates for today, trying ${yesterday}...`);
-        
-        const { data: yestCandidates } = await serviceClient
-          .from("player_prop_scores")
-          .select("*")
-          .eq("game_date", yesterday)
-          .order("confidence_score", { ascending: false })
-          .limit(200);
-        
-        if (yestCandidates && yestCandidates.length > 0) {
-          // Also quality-check yesterday's data
-          const ySamples = yestCandidates.map((p: any) => p.total_games ?? 0);
-          const yMedian = ySamples.sort((a: number, b: number) => a - b)[Math.floor(ySamples.length / 2)];
-          if (yMedian >= 10) {
-            scoredProps = yestCandidates;
-            debug.fallback_used = true;
-            debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") + 
-              `Using ${yestCandidates.length} candidates from ${yesterday} (median sample: ${yMedian})`;
-            debug.mode = "fallback_mode";
-            console.log(`[AI-Builder] Fallback: ${scoredProps.length} candidates from ${yesterday} (median sample: ${yMedian})`);
-          } else {
-            console.log(`[AI-Builder] ⚠ Yesterday's data also bad (median sample: ${yMedian}), skipping`);
-          }
-        }
-      }
-
-      // If still none, call scoring engine
-      if (scoredProps.length === 0) {
-        console.log("[AI-Builder] No DB candidates — calling scoring engine...");
-        debug.scoring_engine_called = true;
-        
-        try {
-          const scoringRes = await fetch(`${SUPABASE_URL}/functions/v1/prop-scoring-engine`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-            },
-            body: JSON.stringify({ top_n: 60 }),
-          });
-          
-          if (scoringRes.ok) {
-            const scoringData = await scoringRes.json();
-            const engineProps = scoringData.scored_props || [];
-            
-            // Quality check scoring engine output too
-            if (engineProps.length > 0) {
-              const eSamples = engineProps.map((p: any) => p.total_games ?? 0).sort((a: number, b: number) => a - b);
-              const eMedian = eSamples[Math.floor(eSamples.length / 2)];
-              if (eMedian >= 10) {
-                scoredProps = engineProps;
-                debug.fallback_used = true;
-                debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") +
-                  `Scoring engine: ${engineProps.length} props (median sample: ${eMedian})`;
-                debug.mode = "fallback_mode";
-                console.log(`[AI-Builder] Scoring engine: ${engineProps.length} props (median sample: ${eMedian})`);
-              } else {
-                console.log(`[AI-Builder] ⚠ Scoring engine data also bad (median sample: ${eMedian}), skipping`);
-                debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") +
-                  `Scoring engine discarded: median sample ${eMedian}`;
-              }
-            }
-          } else {
-            console.error("[AI-Builder] Scoring engine error:", scoringRes.status);
-          }
-        } catch (e) {
-          console.error("[AI-Builder] Scoring engine failed:", e);
-        }
-      }
-    }
-
-    // ===== PHASE 1b: APPLY USER FILTERS before diversity cap =====
-    let filteredProps = [...scoredProps];
-
-    if (filters && includePlayerProps) {
-      const f = filters;
-
-      if (f.statTypes && f.statTypes.length > 0) {
-        const allowedStats = new Set(f.statTypes.map((s: string) => normStat(s)));
-        filteredProps = filteredProps.filter((p: any) => allowedStats.has(normStat(p.stat_type)));
-        console.log(`[AI-Builder] After stat filter: ${filteredProps.length}`);
-      }
-
-      if (f.includeTeams && f.includeTeams.length > 0) {
-        const teams = new Set(f.includeTeams.map((t: string) => t.toUpperCase()));
-        filteredProps = filteredProps.filter((p: any) => teams.has((p.team_abbr || "").toUpperCase()));
-      }
-      if (f.excludeTeams && f.excludeTeams.length > 0) {
-        const teams = new Set(f.excludeTeams.map((t: string) => t.toUpperCase()));
-        filteredProps = filteredProps.filter((p: any) => !teams.has((p.team_abbr || "").toUpperCase()));
-      }
-
-      if (f.includePlayers && f.includePlayers.length > 0) {
-        const players = new Set(f.includePlayers.map((n: string) => normName(n)));
-        filteredProps = filteredProps.filter((p: any) => players.has(normName(p.player_name)));
-      }
-      if (f.excludePlayers && f.excludePlayers.length > 0) {
-        const players = new Set(f.excludePlayers.map((n: string) => normName(n)));
-        filteredProps = filteredProps.filter((p: any) => !players.has(normName(p.player_name)));
-      }
-
-      if (f.minConfidence != null) {
-        filteredProps = filteredProps.filter((p: any) => (p.confidence_score ?? 0) >= f.minConfidence);
-      }
-      if (f.minHitRate != null) {
-        filteredProps = filteredProps.filter((p: any) => {
-          const hitRate = p.season_hit_rate != null ? p.season_hit_rate * 100 : 0;
-          return hitRate >= f.minHitRate;
-        });
-      }
-      if (f.maxVolatility != null) {
-        filteredProps = filteredProps.filter((p: any) => (p.volatility_score ?? 100) <= f.maxVolatility);
-      }
-      if (f.minSampleSize != null) {
-        filteredProps = filteredProps.filter((p: any) => (p.total_games ?? 0) >= f.minSampleSize);
-      }
-      if (f.startersOnly) {
-        filteredProps = filteredProps.filter((p: any) => {
-          const tags = p.reason_tags || [];
-          return tags.some((t: string) => t.toLowerCase().includes("starter") || t.toLowerCase().includes("high_usage"));
-        });
-      }
-      if (f.avoidUncertainLineups) {
-        filteredProps = filteredProps.filter((p: any) => {
-          const tags = p.reason_tags || [];
-          return !tags.some((t: string) => t.toLowerCase().includes("uncertain") || t.toLowerCase().includes("questionable"));
-        });
-      }
-
-      console.log(`[AI-Builder] After user filters: ${filteredProps.length} candidates`);
-    }
-
-    // ===== PHASE 1c: DIVERSITY CAP — max N props per player =====
-    const playerPropCount = new Map<string, number>();
-    const diversifiedProps: any[] = [];
-
-    for (const p of filteredProps) {
-      const pKey = normName(p.player_name);
-      const count = playerPropCount.get(pKey) || 0;
-      if (count >= MAX_CANDIDATES_PER_PLAYER) {
-        debug.excluded_candidates.push({
-          player: p.player_name,
-          stat: `${p.stat_type} ${p.threshold}`,
-          reason: `Diversity cap: already have ${MAX_CANDIDATES_PER_PLAYER} props for this player`,
-        });
-        continue;
-      }
-      playerPropCount.set(pKey, count + 1);
-      diversifiedProps.push(p);
-    }
-
-    debug.candidates_after_diversity = diversifiedProps.length;
-    const uniquePlayers = new Set(diversifiedProps.map(p => normName(p.player_name)));
-    debug.unique_players_in_pool = uniquePlayers.size;
-
-    console.log(`[AI-Builder] After diversity cap: ${diversifiedProps.length} candidates from ${uniquePlayers.size} unique players (was ${filteredProps.length})`);
-
-    // ===== PHASE 2: Fetch live odds for market context (MULTI-BOOK) =====
+    // ===== PHASE 1: FETCH LIVE ODDS (games + player props) =====
     const BOOKMAKERS = "draftkings,fanduel,betmgm,pointsbetus";
     const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
     const featuredRes = await fetch(featuredUrl);
@@ -799,8 +532,7 @@ serve(async (req) => {
       console.error(`[AI-Builder] Odds API error: ${featuredRes.status} — ${errBody}`);
     }
 
-    // ===== PHASE 2a: Build set of teams playing TODAY =====
-    // Extract from Odds API (only returns upcoming/live games) — resolve to standard abbreviations
+    // Build teams playing today
     const teamsPlayingToday = new Set<string>();
     for (const game of gamesData) {
       const homeAbbr = resolveToAbbr(game.home_team || "");
@@ -808,107 +540,14 @@ serve(async (req) => {
       if (homeAbbr) teamsPlayingToday.add(homeAbbr);
       if (awayAbbr) teamsPlayingToday.add(awayAbbr);
     }
-    // Also pull from games_today DB table for redundancy
-    const { data: gamesTodayRows } = await serviceClient
-      .from("games_today")
-      .select("home_team_abbr, away_team_abbr")
-      .eq("game_date", todayStr);
+    const { data: gamesTodayRows } = await serviceClient.from("games_today").select("home_team_abbr, away_team_abbr").eq("game_date", todayStr);
     for (const g of gamesTodayRows || []) {
       if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
       if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
     }
     console.log(`[AI-Builder] Teams playing today: ${[...teamsPlayingToday].join(", ")} (${teamsPlayingToday.size} teams)`);
 
-    // ===== PHASE 2a-ii: Filter prop candidates to only teams playing today =====
-    if (teamsPlayingToday.size > 0) {
-      const beforeCount = diversifiedProps.length;
-      const removed: string[] = [];
-      const filtered: any[] = [];
-      for (const p of diversifiedProps) {
-        const teamUpper = (p.team_abbr || "").toUpperCase();
-        if (!teamUpper || teamsPlayingToday.has(teamUpper)) {
-          filtered.push(p);
-        } else {
-          removed.push(`${p.player_name} (${p.team_abbr})`);
-        }
-      }
-      if (removed.length > 0) {
-        console.log(`[AI-Builder] Removed ${removed.length} candidates from non-playing teams: ${removed.slice(0, 10).join(", ")}${removed.length > 10 ? "..." : ""}`);
-      }
-      diversifiedProps.length = 0;
-      diversifiedProps.push(...filtered);
-      debug.candidates_after_diversity = diversifiedProps.length;
-      const newUniquePlayers = new Set(diversifiedProps.map((p: any) => normName(p.player_name)));
-      debug.unique_players_in_pool = newUniquePlayers.size;
-      console.log(`[AI-Builder] After today-games filter: ${diversifiedProps.length} candidates (was ${beforeCount})`);
-    }
-
-    // ===== PHASE 2b: Parse game-level odds (ML, spread, totals) =====
-    let gameLevelCandidates = parseGameLevelOdds(gamesData);
-
-    // Filter game-level candidates by betType
-    if (betType && betType !== "mixed") {
-      if (betType === "moneyline") {
-        gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "moneyline");
-      } else if (betType === "spread") {
-        gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "spread");
-      } else if (betType === "totals") {
-        gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "total");
-      } else if (betType === "player_props") {
-        gameLevelCandidates = []; // No game-level for props-only
-      }
-    }
-
-    // Apply team filters to game-level candidates too
-    if (filters?.includeTeams?.length > 0) {
-      const teams = new Set(filters.includeTeams.map((t: string) => t.toUpperCase()));
-      gameLevelCandidates = gameLevelCandidates.filter(c => 
-        teams.has(c.home_team.toUpperCase()) || teams.has(c.away_team.toUpperCase()) ||
-        (c.team && teams.has(c.team.toUpperCase()))
-      );
-    }
-    if (filters?.excludeTeams?.length > 0) {
-      const teams = new Set(filters.excludeTeams.map((t: string) => t.toUpperCase()));
-      gameLevelCandidates = gameLevelCandidates.filter(c => 
-        !teams.has(c.home_team.toUpperCase()) && !teams.has(c.away_team.toUpperCase())
-      );
-    }
-
-    debug.game_level_candidates = gameLevelCandidates.length;
-    console.log(`[AI-Builder] Game-level candidates: ${gameLevelCandidates.length} (betType: ${betType || "any"})`);
-
-    // Save game odds snapshots (fire-and-forget)
-    if (gameLevelCandidates.length > 0) {
-      const snapshotRows = gameLevelCandidates.map(c => ({
-        game_date: todayStr,
-        home_team: c.home_team,
-        away_team: c.away_team,
-        market_type: c.type === "moneyline" ? "h2h" : c.type,
-        line: c.type === "spread" ? c.spread : c.type === "total" ? c.total_line : null,
-        home_odds: c.type === "moneyline" && c.team === c.home_team ? c.odds : null,
-        away_odds: c.type === "moneyline" && c.team === c.away_team ? c.odds : null,
-        over_odds: c.type === "total" && c.pick === "Over" ? c.odds : null,
-        under_odds: c.type === "total" && c.pick === "Under" ? c.odds : null,
-        sportsbook: c.sportsbook,
-      }));
-      serviceClient
-        .from("game_odds_snapshots")
-        .insert(snapshotRows)
-        .then(({ error }) => { if (error) console.error("[AI-Builder] Game odds snapshot error:", error); });
-    }
-
-    // Check we have SOMETHING to work with
-    if (diversifiedProps.length === 0 && gameLevelCandidates.length === 0) {
-      return new Response(
-        JSON.stringify({ 
-          error: "No candidates available for today's games. Data may not have been refreshed yet.",
-          debug,
-        }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Fetch player props from multiple sportsbooks
+    // Fetch live player props from multiple sportsbooks
     let livePropsCount = 0;
     const lineSnapshotRows: any[] = [];
     const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[] = [];
@@ -928,7 +567,6 @@ serve(async (req) => {
                 };
                 const statType = statMap[market.key];
                 if (!statType) continue;
-
                 const outcomesByPlayer: Record<string, { over?: string; under?: string; point?: number; player?: string }> = {};
                 for (const o of market.outcomes || []) {
                   const key = `${o.description}_${o.point}`;
@@ -936,19 +574,10 @@ serve(async (req) => {
                   if (o.name === "Over") outcomesByPlayer[key].over = String(o.price);
                   if (o.name === "Under") outcomesByPlayer[key].under = String(o.price);
                 }
-
                 for (const entry of Object.values(outcomesByPlayer)) {
                   if (entry.player && entry.point != null) {
                     livePropsCount++;
-                    const row = {
-                      player_name: entry.player,
-                      stat_type: statType,
-                      threshold: entry.point,
-                      over_odds: entry.over || null,
-                      under_odds: entry.under || null,
-                      sportsbook: bm.key,
-                      game_date: todayStr,
-                    };
+                    const row = { player_name: entry.player, stat_type: statType, threshold: entry.point, over_odds: entry.over || null, under_odds: entry.under || null, sportsbook: bm.key, game_date: todayStr };
                     lineSnapshotRows.push(row);
                     allLiveProps.push(row);
                   }
@@ -963,60 +592,306 @@ serve(async (req) => {
     }
 
     debug.live_props_found = livePropsCount;
-    console.log(`[AI-Builder] Live props found: ${livePropsCount} across ${BOOKMAKERS}`);
+    console.log(`[AI-Builder] Live props found: ${livePropsCount}`);
 
-    // Aggregate best lines across books with main-line detection
+    // Aggregate best lines with main-line detection
     let bestLines = aggregateBestLines(allLiveProps);
+
+    // Snapshot fallback if no live odds
+    if (bestLines.size === 0 && includePlayerProps) {
+      console.log("[AI-Builder] No live odds — falling back to line_snapshots...");
+      const { data: snapshotFallback } = await serviceClient.from("line_snapshots")
+        .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook")
+        .eq("game_date", todayStr).order("snapshot_at", { ascending: false }).limit(800);
+      if (snapshotFallback && snapshotFallback.length > 0) {
+        const fallbackProps = snapshotFallback.map((s: any) => ({
+          player_name: s.player_name, stat_type: s.stat_type, threshold: Number(s.threshold),
+          over_odds: s.over_odds, under_odds: s.under_odds, sportsbook: s.sportsbook || "snapshot",
+        }));
+        bestLines = aggregateBestLines(fallbackProps);
+        debug.fallback_used = true;
+        debug.fallback_reason = `Snapshot fallback: ${bestLines.size} unique props from ${snapshotFallback.length} snapshots`;
+        console.log(`[AI-Builder] Snapshot fallback: ${bestLines.size} unique props`);
+      }
+    }
+
+    let mainLinesFound = 0;
     let sanityRejected = 0;
     let altLinesDetected = 0;
-    let mainLinesFound = 0;
     for (const bl of bestLines.values()) {
       if (!bl.odds_validated) sanityRejected++;
       if (bl.alt_line_flag) altLinesDetected++;
       if (bl.is_main_line) mainLinesFound++;
     }
-    console.log(`[AI-Builder] Market normalization: ${bestLines.size} unique props, ${mainLinesFound} main lines, ${altLinesDetected} alt lines detected, ${sanityRejected} rejected`);
+    console.log(`[AI-Builder] Market normalization: ${bestLines.size} unique, ${mainLinesFound} main, ${altLinesDetected} alt, ${sanityRejected} rejected`);
 
-    // ===== SNAPSHOT FALLBACK: If live odds fetch failed, use line_snapshots =====
-    if (bestLines.size === 0 && includePlayerProps) {
-      console.log("[AI-Builder] No live odds — falling back to line_snapshots...");
-      const { data: snapshotFallback } = await serviceClient
-        .from("line_snapshots")
-        .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook")
-        .eq("game_date", todayStr)
-        .order("snapshot_at", { ascending: false })
-        .limit(800);
+    // Save line snapshots (fire-and-forget)
+    if (lineSnapshotRows.length > 0) {
+      serviceClient.from("line_snapshots").insert(lineSnapshotRows)
+        .then(({ error }) => { if (error) console.error("[AI-Builder] Line snapshot insert error:", error); });
+    }
 
-      if (snapshotFallback && snapshotFallback.length > 0) {
-        const fallbackProps = snapshotFallback.map((s: any) => ({
-          player_name: s.player_name,
-          stat_type: s.stat_type,
-          threshold: Number(s.threshold),
-          over_odds: s.over_odds,
-          under_odds: s.under_odds,
-          sportsbook: s.sportsbook || "snapshot",
-        }));
-        bestLines = aggregateBestLines(fallbackProps);
-        console.log(`[AI-Builder] Snapshot fallback: ${bestLines.size} unique props from ${snapshotFallback.length} snapshots`);
+    // ===== PHASE 2: FETCH SCORING DATA FOR ENRICHMENT =====
+    let scoredProps: any[] = [];
+    if (includePlayerProps) {
+      const { data: dbCandidates } = await serviceClient.from("player_prop_scores")
+        .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(500);
+      scoredProps = dbCandidates || [];
+      debug.db_candidates_found = scoredProps.length;
+
+      if (scoredProps.length === 0) {
+        const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+        const { data: yestCandidates } = await serviceClient.from("player_prop_scores")
+          .select("*").eq("game_date", yesterday).order("confidence_score", { ascending: false }).limit(500);
+        if (yestCandidates && yestCandidates.length > 0) {
+          scoredProps = yestCandidates;
+          debug.fallback_used = true;
+          debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") + `Scoring data from ${yesterday}`;
+        }
       }
     }
 
-    // Build secondary index: player|stat (no threshold) -> BestLineEntry[] for fuzzy matching
-    const bestLinesByPlayerStat = new Map<string, BestLineEntry[]>();
+    // Build scoring lookup: normName|statKey -> best scoring row (for enrichment)
+    const scoringLookup = new Map<string, any>();
+    for (const p of scoredProps) {
+      const pKey = `${normName(p.player_name)}|${normStat(p.stat_type)}`;
+      const pKeyThreshold = `${pKey}|${p.threshold}`;
+      // Prefer exact threshold match; otherwise store best by confidence
+      if (!scoringLookup.has(pKeyThreshold)) scoringLookup.set(pKeyThreshold, p);
+      const existing = scoringLookup.get(pKey);
+      if (!existing || (p.confidence_score ?? 0) > (existing.confidence_score ?? 0)) {
+        scoringLookup.set(pKey, p);
+      }
+    }
+
+    // ===== PHASE 3: BUILD VERIFIED MARKET-FIRST CANDIDATE POOL =====
+    // Only include validated bestLine entries as candidates
+    const verifiedCandidates: VerifiedPropCandidate[] = [];
+
     for (const bl of bestLines.values()) {
-      const psKey = `${bl.player_name.toLowerCase()}|${bl.stat_type}`;
-      if (!bestLinesByPlayerStat.has(psKey)) bestLinesByPlayerStat.set(psKey, []);
-      bestLinesByPlayerStat.get(psKey)!.push(bl);
+      if (!bl.odds_validated) continue; // Skip rejected lines
+
+      const statKey = STAT_LABEL_TO_KEY[bl.stat_type] || normStat(bl.stat_type);
+      const pNorm = normName(bl.player_name);
+
+      // Find scoring enrichment
+      const exactScoringKey = `${pNorm}|${statKey}|${bl.threshold}`;
+      const fuzzyScoringKey = `${pNorm}|${statKey}`;
+      const scoring = scoringLookup.get(exactScoringKey) || scoringLookup.get(fuzzyScoringKey) || null;
+
+      // Compute edge
+      let edgeOver: number | null = null;
+      let edgeUnder: number | null = null;
+      if (scoring?.season_hit_rate != null) {
+        if (bl.implied_over != null) edgeOver = Math.round((scoring.season_hit_rate - bl.implied_over) * 100);
+        if (bl.implied_under != null) edgeUnder = Math.round(((1 - scoring.season_hit_rate) - bl.implied_under) * 100);
+      }
+
+      verifiedCandidates.push({
+        player_name: bl.player_name,
+        stat_type: bl.stat_type,
+        stat_key: statKey,
+        threshold: bl.threshold,
+        best_over_odds: bl.best_over_odds,
+        best_over_book: bl.best_over_book,
+        best_under_odds: bl.best_under_odds,
+        best_under_book: bl.best_under_book,
+        books_count: bl.books_with_line,
+        books_seen: bl.books_seen,
+        market_confidence: bl.market_confidence,
+        consensus_line: bl.consensus_line,
+        is_main_line: bl.is_main_line,
+        implied_over: bl.implied_over,
+        implied_under: bl.implied_under,
+        // Scoring enrichment
+        team_abbr: scoring?.team_abbr || null,
+        opponent_abbr: scoring?.opponent_abbr || null,
+        home_away: scoring?.home_away || null,
+        confidence_score: scoring?.confidence_score ?? null,
+        value_score: scoring?.value_score ?? null,
+        volatility_score: scoring?.volatility_score ?? null,
+        consistency_score: scoring?.consistency_score ?? null,
+        season_avg: scoring?.season_avg ?? null,
+        last3_avg: scoring?.last3_avg ?? null,
+        last5_avg: scoring?.last5_avg ?? null,
+        last10_avg: scoring?.last10_avg ?? null,
+        season_hit_rate: scoring?.season_hit_rate ?? null,
+        last5_hit_rate: scoring?.last5_hit_rate ?? null,
+        last10_hit_rate: scoring?.last10_hit_rate ?? null,
+        vs_opponent_avg: scoring?.vs_opponent_avg ?? null,
+        vs_opponent_hit_rate: scoring?.vs_opponent_hit_rate ?? null,
+        vs_opponent_games: scoring?.vs_opponent_games ?? null,
+        home_avg: scoring?.home_avg ?? null,
+        home_hit_rate: scoring?.home_hit_rate ?? null,
+        home_games: scoring?.home_games ?? null,
+        away_avg: scoring?.away_avg ?? null,
+        away_hit_rate: scoring?.away_hit_rate ?? null,
+        away_games: scoring?.away_games ?? null,
+        total_games: scoring?.total_games ?? null,
+        reason_tags: scoring?.reason_tags || [],
+        edge_over: edgeOver,
+        edge_under: edgeUnder,
+      });
+    }
+
+    debug.verified_prop_candidates = verifiedCandidates.length;
+    console.log(`[AI-Builder] Verified market candidates: ${verifiedCandidates.length} (from ${bestLines.size} total lines, ${sanityRejected} rejected)`);
+
+    // ===== PHASE 3b: APPLY USER FILTERS to verified candidates =====
+    let filteredCandidates = [...verifiedCandidates];
+    if (filters && includePlayerProps) {
+      const f = filters;
+      if (f.statTypes?.length > 0) {
+        const allowedStats = new Set(f.statTypes.map((s: string) => normStat(s)));
+        filteredCandidates = filteredCandidates.filter(c => allowedStats.has(c.stat_key));
+      }
+      if (f.includeTeams?.length > 0) {
+        const teams = new Set(f.includeTeams.map((t: string) => t.toUpperCase()));
+        filteredCandidates = filteredCandidates.filter(c => c.team_abbr && teams.has(c.team_abbr.toUpperCase()));
+      }
+      if (f.excludeTeams?.length > 0) {
+        const teams = new Set(f.excludeTeams.map((t: string) => t.toUpperCase()));
+        filteredCandidates = filteredCandidates.filter(c => !c.team_abbr || !teams.has(c.team_abbr.toUpperCase()));
+      }
+      if (f.includePlayers?.length > 0) {
+        const players = new Set(f.includePlayers.map((n: string) => normName(n)));
+        filteredCandidates = filteredCandidates.filter(c => players.has(normName(c.player_name)));
+      }
+      if (f.excludePlayers?.length > 0) {
+        const players = new Set(f.excludePlayers.map((n: string) => normName(n)));
+        filteredCandidates = filteredCandidates.filter(c => !players.has(normName(c.player_name)));
+      }
+      if (f.minConfidence != null) {
+        filteredCandidates = filteredCandidates.filter(c => (c.confidence_score ?? 0) >= f.minConfidence);
+      }
+      if (f.minHitRate != null) {
+        filteredCandidates = filteredCandidates.filter(c => {
+          const hitRate = c.season_hit_rate != null ? c.season_hit_rate * 100 : 0;
+          return hitRate >= f.minHitRate;
+        });
+      }
+      if (f.maxVolatility != null) {
+        filteredCandidates = filteredCandidates.filter(c => (c.volatility_score ?? 100) <= f.maxVolatility);
+      }
+      if (f.minSampleSize != null) {
+        filteredCandidates = filteredCandidates.filter(c => (c.total_games ?? 0) >= f.minSampleSize);
+      }
+      console.log(`[AI-Builder] After user filters: ${filteredCandidates.length} verified candidates`);
+    }
+
+    // Filter to teams playing today
+    if (teamsPlayingToday.size > 0) {
+      const before = filteredCandidates.length;
+      filteredCandidates = filteredCandidates.filter(c => {
+        if (!c.team_abbr) return true; // keep if no team info
+        return teamsPlayingToday.has(c.team_abbr.toUpperCase());
+      });
+      if (filteredCandidates.length < before) {
+        console.log(`[AI-Builder] Removed ${before - filteredCandidates.length} candidates from non-playing teams`);
+      }
+    }
+
+    // ===== PHASE 3c: DIVERSITY CAP — max N props per player, prefer main lines =====
+    // Sort: main lines first, then by market confidence desc, then confidence_score desc
+    filteredCandidates.sort((a, b) => {
+      if (a.is_main_line !== b.is_main_line) return a.is_main_line ? -1 : 1;
+      if (b.market_confidence !== a.market_confidence) return b.market_confidence - a.market_confidence;
+      return (b.confidence_score ?? 0) - (a.confidence_score ?? 0);
+    });
+
+    const playerPropCount = new Map<string, number>();
+    const diversifiedCandidates: VerifiedPropCandidate[] = [];
+    for (const c of filteredCandidates) {
+      const pKey = normName(c.player_name);
+      const count = playerPropCount.get(pKey) || 0;
+      if (count >= MAX_CANDIDATES_PER_PLAYER) {
+        debug.excluded_candidates.push({ player: c.player_name, stat: `${c.stat_type} ${c.threshold}`, reason: `Diversity cap` });
+        continue;
+      }
+      playerPropCount.set(pKey, count + 1);
+      diversifiedCandidates.push(c);
+    }
+
+    debug.candidates_after_diversity = diversifiedCandidates.length;
+    const uniquePlayers = new Set(diversifiedCandidates.map(c => normName(c.player_name)));
+    debug.unique_players_in_pool = uniquePlayers.size;
+    console.log(`[AI-Builder] After diversity: ${diversifiedCandidates.length} from ${uniquePlayers.size} players`);
+
+    // ===== PHASE 3d: GAME-LEVEL CANDIDATES =====
+    let gameLevelCandidates = includeGameLevel ? parseGameLevelOdds(gamesData) : [];
+    if (betType && betType !== "mixed") {
+      if (betType === "moneyline") gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "moneyline");
+      else if (betType === "spread") gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "spread");
+      else if (betType === "totals") gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "total");
+      else if (betType === "player_props") gameLevelCandidates = [];
+    }
+    if (filters?.includeTeams?.length > 0) {
+      const teams = new Set(filters.includeTeams.map((t: string) => t.toUpperCase()));
+      gameLevelCandidates = gameLevelCandidates.filter(c =>
+        teams.has(c.home_team.toUpperCase()) || teams.has(c.away_team.toUpperCase()) || (c.team && teams.has(c.team.toUpperCase()))
+      );
+    }
+    if (filters?.excludeTeams?.length > 0) {
+      const teams = new Set(filters.excludeTeams.map((t: string) => t.toUpperCase()));
+      gameLevelCandidates = gameLevelCandidates.filter(c => !teams.has(c.home_team.toUpperCase()) && !teams.has(c.away_team.toUpperCase()));
+    }
+    debug.game_level_candidates = gameLevelCandidates.length;
+
+    // Save game odds snapshots (fire-and-forget)
+    if (gameLevelCandidates.length > 0) {
+      const snapshotRows = gameLevelCandidates.map(c => ({
+        game_date: todayStr, home_team: c.home_team, away_team: c.away_team,
+        market_type: c.type === "moneyline" ? "h2h" : c.type,
+        line: c.type === "spread" ? c.spread : c.type === "total" ? c.total_line : null,
+        home_odds: c.type === "moneyline" && c.team === c.home_team ? c.odds : null,
+        away_odds: c.type === "moneyline" && c.team === c.away_team ? c.odds : null,
+        over_odds: c.type === "total" && c.pick === "Over" ? c.odds : null,
+        under_odds: c.type === "total" && c.pick === "Under" ? c.odds : null,
+        sportsbook: c.sportsbook,
+      }));
+      serviceClient.from("game_odds_snapshots").insert(snapshotRows)
+        .then(({ error }) => { if (error) console.error("[AI-Builder] Game odds snapshot error:", error); });
+    }
+
+    // Check we have SOMETHING
+    if (diversifiedCandidates.length === 0 && gameLevelCandidates.length === 0) {
+      return new Response(
+        JSON.stringify({
+          error: "No verified market candidates available for today's games. Live sportsbook odds may not be available yet. Try again later or switch to game-level bets.",
+          debug,
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Fetch player availability for rejection
+    const availabilityMap = new Map<string, { status: string; reason: string | null }>();
+    {
+      const { data: availRows } = await serviceClient.from("player_availability")
+        .select("player_name, status, reason").eq("game_date", todayStr);
+      for (const row of availRows || []) {
+        availabilityMap.set(normName(row.player_name), { status: row.status, reason: row.reason });
+      }
+    }
+
+    // Remove "out" players from candidates
+    const preAvailCount = diversifiedCandidates.length;
+    const finalCandidates = diversifiedCandidates.filter(c => {
+      const avail = availabilityMap.get(normName(c.player_name));
+      if (avail && avail.status === "out") {
+        debug.excluded_candidates.push({ player: c.player_name, stat: `${c.stat_type} ${c.threshold}`, reason: `Player OUT: ${avail.reason || "injury"}` });
+        return false;
+      }
+      return true;
+    });
+    if (finalCandidates.length < preAvailCount) {
+      console.log(`[AI-Builder] Removed ${preAvailCount - finalCandidates.length} OUT players from candidates`);
     }
 
     // Fetch recent snapshots for movement detection
-    const { data: recentSnapshots } = await serviceClient
-      .from("line_snapshots")
+    const { data: recentSnapshots } = await serviceClient.from("line_snapshots")
       .select("player_name, stat_type, threshold, over_odds, under_odds, snapshot_at")
-      .eq("game_date", todayStr)
-      .order("snapshot_at", { ascending: false })
-      .limit(500);
-
+      .eq("game_date", todayStr).order("snapshot_at", { ascending: false }).limit(500);
     const snapshotsByProp = new Map<string, { over_odds: string | null; under_odds: string | null; snapshot_at: string }[]>();
     for (const s of recentSnapshots || []) {
       const key = `${s.player_name.toLowerCase()}|${s.stat_type}|${s.threshold}`;
@@ -1024,138 +899,104 @@ serve(async (req) => {
       snapshotsByProp.get(key)!.push(s);
     }
 
-    // Save line snapshots (fire-and-forget)
-    if (lineSnapshotRows.length > 0) {
-      serviceClient
-        .from("line_snapshots")
-        .insert(lineSnapshotRows)
-        .then(({ error }) => { if (error) console.error("[AI-Builder] Line snapshot insert error:", error); });
+    // ===== PHASE 4: BUILD LLM PROMPT WITH EXACT VERIFIED MARKET ENTRIES =====
+    const candidatesToSend = finalCandidates.slice(0, MAX_VERIFIED_CANDIDATES_TO_LLM);
+    debug.verified_candidates_passed_to_llm = candidatesToSend.length;
+    debug.candidates_passed_to_llm = candidatesToSend.length;
+
+    // Build EXACT-MATCH validation lookup keyed on normalized player|stat|threshold
+    const verifiedCandidateByKey = new Map<string, VerifiedPropCandidate>();
+    for (const c of candidatesToSend) {
+      const key = `${normName(c.player_name)}|${normStat(c.stat_type)}|${c.threshold}`;
+      verifiedCandidateByKey.set(key, c);
     }
 
-    const oddsSummary = gamesData.slice(0, 8).map((game: any) => ({
-      home: game.home_team,
-      away: game.away_team,
-      commence: game.commence_time,
-    }));
-
-    // ===== PHASE 3: Build candidate summary for LLM =====
-    const candidatesToSend = diversifiedProps.slice(0, MAX_CANDIDATES_TO_LLM);
-
-    // Build validation lookup keyed on normalized player+stat
-    const candidateByKey = new Map<string, any>();
-
-    const candidateSummary = candidatesToSend.map((p: any) => {
-      const statLabel = STAT_LABELS[p.stat_type] || p.stat_type;
-      const normPlayer = normName(p.player_name);
-      const normStatKey = normStat(p.stat_type);
-      
-      const key1 = `${normPlayer}::${normStatKey}`;
-      const key2 = `${normPlayer}::${statLabel.toLowerCase()}`;
-      const key3 = `${normPlayer}::${normStatKey}::${p.threshold}`;
-      candidateByKey.set(key1, p);
-      candidateByKey.set(key2, p);
-      candidateByKey.set(key3, p);
-
+    // Build the candidate summary — exact market entries with odds
+    const candidateSummary = candidatesToSend.map(c => {
+      const overLabel = c.best_over_odds ? `Over ${c.threshold} at ${c.best_over_book} ${c.best_over_odds}` : null;
+      const underLabel = c.best_under_odds ? `Under ${c.threshold} at ${c.best_under_book} ${c.best_under_odds}` : null;
       return {
-        player: p.player_name,
-        team: p.team_abbr,
-        opponent: p.opponent_abbr,
-        home_away: p.home_away,
-        stat: statLabel,
-        stat_key: p.stat_type,
-        line: p.threshold,
-        confidence: p.confidence_score,
-        value: p.value_score,
-        volatility: p.volatility_score,
-        consistency: p.consistency_score,
-        season_avg: p.season_avg,
-        last3_avg: p.last3_avg,
-        last5_avg: p.last5_avg,
-        last10_avg: p.last10_avg,
-        season_hit_rate: p.season_hit_rate != null ? `${Math.round(p.season_hit_rate * 100)}%` : null,
-        last10_hit_rate: p.last10_hit_rate != null ? `${Math.round(p.last10_hit_rate * 100)}%` : null,
-        last5_hit_rate: p.last5_hit_rate != null ? `${Math.round(p.last5_hit_rate * 100)}%` : null,
-        vs_opponent: p.vs_opponent_games > 0 ? {
-          avg: p.vs_opponent_avg,
-          hit_rate: p.vs_opponent_hit_rate != null ? `${Math.round(p.vs_opponent_hit_rate * 100)}%` : null,
-          games: p.vs_opponent_games,
+        player: c.player_name,
+        team: c.team_abbr,
+        opponent: c.opponent_abbr,
+        stat: c.stat_type,
+        stat_key: c.stat_key,
+        threshold: c.threshold,
+        over: overLabel,
+        under: underLabel,
+        books_count: c.books_count,
+        books: c.books_seen,
+        market_confidence: c.market_confidence,
+        is_main_line: c.is_main_line,
+        consensus_line: c.consensus_line,
+        // Scoring context
+        confidence: c.confidence_score,
+        value: c.value_score,
+        season_avg: c.season_avg,
+        last5_avg: c.last5_avg,
+        last10_avg: c.last10_avg,
+        season_hit_rate: c.season_hit_rate != null ? `${Math.round(c.season_hit_rate * 100)}%` : null,
+        last10_hit_rate: c.last10_hit_rate != null ? `${Math.round(c.last10_hit_rate * 100)}%` : null,
+        last5_hit_rate: c.last5_hit_rate != null ? `${Math.round(c.last5_hit_rate * 100)}%` : null,
+        vs_opponent: c.vs_opponent_games && c.vs_opponent_games > 0 ? {
+          avg: c.vs_opponent_avg, hit_rate: c.vs_opponent_hit_rate != null ? `${Math.round(c.vs_opponent_hit_rate * 100)}%` : null, games: c.vs_opponent_games,
         } : null,
-        home_away_split: p.home_away === "home" ? {
-          avg: p.home_avg,
-          hit_rate: p.home_hit_rate != null ? `${Math.round(p.home_hit_rate * 100)}%` : null,
-          games: p.home_games,
-        } : {
-          avg: p.away_avg,
-          hit_rate: p.away_hit_rate != null ? `${Math.round(p.away_hit_rate * 100)}%` : null,
-          games: p.away_games,
-        },
-        tags: p.reason_tags || [],
-        total_games: p.total_games,
+        home_away: c.home_away,
+        total_games: c.total_games,
+        tags: c.reason_tags,
+        edge_over: c.edge_over,
+        edge_under: c.edge_under,
       };
     });
 
-    // Build game-level candidate summary for LLM
+    // Game-level candidates
     const gameCandidatesToSend = gameLevelCandidates.slice(0, MAX_GAME_CANDIDATES_TO_LLM);
-
-    // Build validation lookup for game-level candidates
     const gameCandidateByKey = new Map<string, GameLevelCandidate>();
     for (const gc of gameCandidatesToSend) {
-      if (gc.type === "moneyline" && gc.team) {
-        gameCandidateByKey.set(`${gc.team.toLowerCase()}::moneyline`, gc);
-      } else if (gc.type === "spread" && gc.team) {
+      if (gc.type === "moneyline" && gc.team) gameCandidateByKey.set(`${gc.team.toLowerCase()}::moneyline`, gc);
+      else if (gc.type === "spread" && gc.team) {
         gameCandidateByKey.set(`${gc.team.toLowerCase()}::spread::${gc.spread}`, gc);
-        gameCandidateByKey.set(`${gc.team.toLowerCase()}::spread`, gc); // fuzzy
+        gameCandidateByKey.set(`${gc.team.toLowerCase()}::spread`, gc);
       } else if (gc.type === "total" && gc.pick) {
         gameCandidateByKey.set(`${gc.home_team.toLowerCase()}/${gc.away_team.toLowerCase()}::total::${gc.total_line}::${gc.pick.toLowerCase()}`, gc);
-        gameCandidateByKey.set(`${gc.home_team.toLowerCase()}/${gc.away_team.toLowerCase()}::total::${gc.pick.toLowerCase()}`, gc); // fuzzy
+        gameCandidateByKey.set(`${gc.home_team.toLowerCase()}/${gc.away_team.toLowerCase()}::total::${gc.pick.toLowerCase()}`, gc);
       }
     }
-
     const gameCandidateSummary = gameCandidatesToSend.map(gc => ({
-      type: gc.type,
-      label: gc.label,
-      home_team: gc.home_team,
-      away_team: gc.away_team,
-      team: gc.team || null,
-      opponent: gc.opponent || null,
-      spread: gc.spread ?? null,
-      total_line: gc.total_line ?? null,
-      pick: gc.pick || null,
-      odds: gc.odds,
+      type: gc.type, label: gc.label, home_team: gc.home_team, away_team: gc.away_team,
+      team: gc.team || null, opponent: gc.opponent || null, spread: gc.spread ?? null,
+      total_line: gc.total_line ?? null, pick: gc.pick || null, odds: gc.odds,
       implied_probability: gc.implied_probability != null ? `${Math.round(gc.implied_probability * 100)}%` : null,
       sportsbook: gc.sportsbook,
     }));
 
-    debug.candidates_passed_to_llm = candidateSummary.length;
     debug.top_candidates = candidateSummary.slice(0, 20).map(c => ({
-      player: c.player,
-      stat: `${c.stat} ${c.line}`,
-      confidence: c.confidence ?? 0,
-      value: c.value ?? 0,
+      player: c.player, stat: `${c.stat} ${c.threshold}`, confidence: c.confidence ?? 0, value: c.value ?? 0,
     }));
 
-    console.log(`[AI-Builder] Passing ${candidateSummary.length} prop candidates + ${gameCandidateSummary.length} game candidates to LLM`);
+    console.log(`[AI-Builder] Passing ${candidateSummary.length} verified prop candidates + ${gameCandidateSummary.length} game candidates to LLM`);
 
-    // ===== PHASE 4: LLM generation =====
+    const oddsSummary = gamesData.slice(0, 8).map((game: any) => ({
+      home: game.home_team, away: game.away_team, commence: game.commence_time,
+    }));
+
+    // ===== PHASE 4b: LLM PROMPT =====
     const diversityInstruction = slipCount > 1
-      ? `\n\nIMPORTANT DIVERSITY RULE: Each slip MUST use a DIFFERENT set of players. Do NOT repeat the same player across multiple slips unless the candidate pool has fewer than ${slipCount * 3} unique players. Maximize player variety across slips.`
+      ? `\n\nIMPORTANT DIVERSITY RULE: Each slip MUST use a DIFFERENT set of players. Maximize player variety across slips.`
       : "";
 
-    // Build the scored candidates section
     let candidateSection = "";
     if (candidateSummary.length > 0) {
-      candidateSection = `\nSCORED PLAYER PROP CANDIDATES (${candidateSummary.length} candidates):
+      candidateSection = `\nVERIFIED PLAYER PROP MARKETS (${candidateSummary.length} exact entries — each is a real sportsbook market):
 ${JSON.stringify(candidateSummary, null, 1)}`;
     }
 
-    // Build game-level candidates section
     let gameCandidateSection = "";
     if (gameCandidateSummary.length > 0) {
-      gameCandidateSection = `\nGAME-LEVEL CANDIDATES (${gameCandidateSummary.length} — moneylines, spreads, totals):
+      gameCandidateSection = `\nGAME-LEVEL CANDIDATES (${gameCandidateSummary.length}):
 ${JSON.stringify(gameCandidateSummary, null, 1)}`;
     }
 
-    // Build stat_type instruction based on what's available
     const statTypeInstruction = gameCandidateSummary.length > 0
       ? `"stat_type": "Points" | "Rebounds" | "Assists" | "3-Pointers" | "Steals" | "Blocks" | "Moneyline" | "Spread" | "Total"`
       : `"stat_type": "Points" | "Rebounds" | "Assists" | "3-Pointers" | "Steals" | "Blocks"`;
@@ -1163,34 +1004,31 @@ ${JSON.stringify(gameCandidateSummary, null, 1)}`;
     const gameRules = gameCandidateSummary.length > 0
       ? `
 - For GAME-LEVEL legs (Moneyline, Spread, Total):
-  - Set "player_name" to the TEAM NAME (e.g. "Celtics" for ML/spread) or "Game Total" for totals
-  - Set "team_abbr" to the team abbreviation
+  - Set "player_name" to the TEAM NAME
   - Set "stat_type" to "Moneyline", "Spread", or "Total"
   - Set "line" to the pick description (e.g. "Celtics ML", "Celtics -4.5", "Over 220.5")
   - Set "pick" to the side (team name for ML, team name for spread, "Over"/"Under" for totals)
   - Set "odds" from the game candidate data
   - Set "bet_type" to "moneyline", "spread", or "total"
-  - For data_context, set odds_source, implied_probability, and odds_validated from the candidate data
-- You can MIX player props and game-level bets in the same slip for combo/mixed parlays`
+- You can MIX player props and game-level bets in the same slip`
       : "";
 
-    const systemPrompt = `You are an NBA betting analyst for BetStreaks. You generate structured bet slips using ONLY the pre-scored candidate legs provided below.
+    const systemPrompt = `You are an NBA betting analyst for BetStreaks. You build structured bet slips using ONLY the verified market entries provided below.
 
-CRITICAL RULES:
-- You MUST select legs ONLY from the candidate lists below
-- Do NOT invent players, stats, or numbers that are not in the candidate data
-- Every player_name you use MUST appear exactly as written in the candidates list
-- Every stat_type you use MUST match the candidate's "stat" field exactly
-- Use the candidate's "line" value as the threshold (e.g. "Over 24.5")
-- Copy data_context values DIRECTLY from the candidate data — do NOT invent or modify statistics
-- For season_avg, last5_avg, confidence, value: use the EXACT numbers from the candidate
+CRITICAL RULES FOR PLAYER PROPS:
+- You MUST select player props ONLY from the VERIFIED PLAYER PROP MARKETS list
+- Each entry represents a REAL sportsbook market with verified odds
+- You MUST use the EXACT player_name, stat_type, and threshold from the verified entry
+- You MUST use the EXACT odds from the verified entry (the "over" or "under" field)
+- Do NOT invent thresholds — the threshold must EXACTLY match a verified entry
+- Do NOT modify or round thresholds
+- For the "line" field, write "Over X.5" or "Under X.5" using the exact threshold from the verified entry
+- For "odds", use the exact odds value from the entry's "over" or "under" field
+- For "odds_source", use the sportsbook name from the entry
+- Copy scoring data (season_avg, confidence, etc.) directly from the entry
 - Never say "lock", "guaranteed", or "sure thing"
 - Each slip has a risk_label: "safe", "balanced", or "aggressive"
-- For "safe" slips: prefer candidates with higher confidence
-- For "aggressive" slips: can use lower confidence candidates with high value
-- Do NOT use the same player more than once within a single slip
-- Provide reasoning that references the actual data from the candidates
-- Generate realistic estimated combined American odds${gameRules}${diversityInstruction}
+- Do NOT use the same player more than once within a single slip${gameRules}${diversityInstruction}
 ${candidateSection}
 ${gameCandidateSection}
 
@@ -1207,30 +1045,22 @@ Respond with ONLY valid JSON:
       "reasoning": "Brief overall reasoning",
       "legs": [
         {
-          "player_name": "EXACT name from candidates (or team name for game-level bets)",
+          "player_name": "EXACT name from verified entry",
           "team_abbr": "string",
           ${statTypeInstruction},
-          "line": "Over X.5 (or 'Celtics ML', 'Celtics -4.5', 'Over 220.5' for game-level)",
-          "pick": "Over" | "Under" | "team name",
-          "odds": "-110",
-          "reasoning": "Reference actual candidate data",
+          "line": "Over 24.5 (EXACT threshold from verified entry)",
+          "pick": "Over" | "Under",
+          "odds": "-110 (EXACT odds from verified entry)",
+          "reasoning": "Reference actual data",
           "bet_type": "player_prop" | "moneyline" | "spread" | "total",
+          "odds_source": "sportsbook name from verified entry",
           "data_context": {
-            "season_avg": number from candidate (null for game-level),
-            "last5_avg": number from candidate (null for game-level),
-            "last10_hit_rate": "X%" from candidate (null for game-level),
-            "line_hit_rate": "X% over Y games" from candidate (null for game-level),
-            "vs_opponent": "X% in Y games" or null,
-            "vs_opponent_sample": number or null,
-            "home_away_split": "X% in Y games" or null,
-            "home_away_sample": number or null,
-            "confidence_score": number from candidate (null for game-level),
-            "value_score": number from candidate (null for game-level),
-            "volatility_label": "low" | "medium" | "high" (null for game-level),
-            "sample_size": total_games from candidate (null for game-level),
-            "tags": array from candidate (empty for game-level),
-            "odds_source": sportsbook name (for game-level bets),
-            "implied_probability": number (for game-level bets),
+            "season_avg": number from entry,
+            "last5_avg": number from entry,
+            "last10_hit_rate": "X%" from entry,
+            "confidence_score": number from entry,
+            "value_score": number from entry,
+            "sample_size": total_games from entry,
             "odds_validated": true
           }
         }
@@ -1239,7 +1069,6 @@ Respond with ONLY valid JSON:
   ]
 }`;
 
-    // Build filter constraints for LLM
     let filterConstraints = "";
     if (filters) {
       const parts: string[] = [];
@@ -1248,31 +1077,26 @@ Respond with ONLY valid JSON:
       if (filters.riskLevel) parts.push(`All slips must be risk_label: "${filters.riskLevel}"`);
       if (filters.overUnder === "over") parts.push("Use ONLY Over picks");
       if (filters.overUnder === "under") parts.push("Use ONLY Under picks");
-      if (filters.sameGameOnly) parts.push("All legs in each slip must be from the SAME game");
+      if (filters.sameGameOnly) parts.push("All legs must be from the SAME game");
       if (filters.crossGameOnly) parts.push("Each leg must be from a DIFFERENT game");
       if (filters.noRepeatPlayers) parts.push("Do NOT use the same player in multiple slips");
       if (filters.maxOnePerPlayer) parts.push("Max one leg per player in each slip");
       if (filters.maxOnePerTeam) parts.push("Max one leg per team in each slip");
-      if (filters.diversifySlips) parts.push("Maximize diversity: different players, teams, and stat types across slips");
-      if (betType === "moneyline") parts.push("Use ONLY moneyline (ML) bets — no player props, no spreads, no totals");
-      if (betType === "spread") parts.push("Use ONLY spread bets — no player props, no moneylines, no totals");
-      if (betType === "totals") parts.push("Use ONLY game totals (over/under) bets — no player props, no moneylines, no spreads");
-      if (betType === "mixed") parts.push("Mix player props with game-level bets (ML, spread, totals) for combo parlays");
-      if (parts.length > 0) {
-        filterConstraints = `\n\nUSER FILTER CONSTRAINTS (MUST follow):\n${parts.map(p => `- ${p}`).join("\n")}`;
-      }
+      if (filters.diversifySlips) parts.push("Maximize diversity across slips");
+      if (betType === "moneyline") parts.push("Use ONLY moneyline bets");
+      if (betType === "spread") parts.push("Use ONLY spread bets");
+      if (betType === "totals") parts.push("Use ONLY game totals bets");
+      if (betType === "mixed") parts.push("Mix player props with game-level bets for combo parlays");
+      if (parts.length > 0) filterConstraints = `\n\nUSER FILTER CONSTRAINTS (MUST follow):\n${parts.map(p => `- ${p}`).join("\n")}`;
     }
 
     const userPrompt = `Generate ${Math.min(slipCount, 5)} NBA bet slip(s) for: "${prompt}"
 
-Use ONLY players/teams and stats from the candidate lists. Copy their statistics directly into data_context. Each slip should have ${filters?.legCount ? filters.legCount : "2-4"} legs.${filterConstraints}`;
+Use ONLY players/stats/thresholds from the verified market entries. Each slip should have ${filters?.legCount ? filters.legCount : "2-4"} legs.${filterConstraints}`;
 
     const aiRes = await fetch(AI_GATEWAY, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: [
@@ -1283,16 +1107,8 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
     });
 
     if (!aiRes.ok) {
-      if (aiRes.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again in a moment.", debug }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (aiRes.status === 402) {
-        return new Response(JSON.stringify({ error: "AI service temporarily unavailable.", debug }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      if (aiRes.status === 429) return new Response(JSON.stringify({ error: "Rate limit exceeded.", debug }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (aiRes.status === 402) return new Response(JSON.stringify({ error: "AI service temporarily unavailable.", debug }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       const errText = await aiRes.text();
       console.error("[AI-Builder] AI gateway error:", aiRes.status, errText);
       throw new Error("AI generation failed");
@@ -1310,153 +1126,127 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
       throw new Error("AI returned invalid format");
     }
 
-    // ===== PHASE 4b: Fetch player availability for "out" rejection =====
-    const availabilityMap = new Map<string, { status: string; reason: string | null }>();
-    {
-      const { data: availRows } = await serviceClient
-        .from("player_availability")
-        .select("player_name, status, reason")
-        .eq("game_date", todayStr);
-      for (const row of availRows || []) {
-        availabilityMap.set(normName(row.player_name), { status: row.status, reason: row.reason });
-      }
-      console.log(`[AI-Builder] Availability: ${availabilityMap.size} players loaded, ${[...availabilityMap.values()].filter(v => v.status === "out").length} marked OUT`);
-    }
-
-    // ===== PHASE 5: VALIDATE & ENRICH =====
+    // ===== PHASE 5: VALIDATE & ENRICH (strict exact-market matching for player props) =====
     const playersUsedAcrossSlips = new Map<string, number>();
 
     for (const slip of parsed.slips) {
       const validLegs: any[] = [];
       const playersInThisSlip = new Set<string>();
-      
+
       for (const leg of slip.legs || []) {
         const legBetType = leg.bet_type || "player_prop";
         const isGameLevel = legBetType === "moneyline" || legBetType === "spread" || legBetType === "total";
 
         if (isGameLevel) {
-          // ===== GAME-LEVEL LEG VALIDATION =====
+          // ===== GAME-LEVEL VALIDATION (unchanged) =====
           const statNorm = normStat(leg.stat_type || "");
           let gameCand: GameLevelCandidate | undefined;
 
-          // Helper: fuzzy match team identifier against candidate keys
           const fuzzyFindGame = (marketType: string): GameLevelCandidate | undefined => {
-            // Try team_abbr first, then player_name
             const identifiers = [leg.team_abbr, leg.player_name].filter(Boolean).map(s => s!.toLowerCase());
             for (const id of identifiers) {
-              // Exact key lookup
               const exact = gameCandidateByKey.get(`${id}::${marketType}`);
               if (exact) return exact;
-              // Fuzzy: check if any key for this market contains the identifier or vice versa
               const lastWord = id.split(" ").pop() || id;
               for (const [k, v] of gameCandidateByKey.entries()) {
                 if (!k.includes(marketType)) continue;
                 const keyTeam = k.split("::")[0];
-                if (keyTeam === id || keyTeam === lastWord || keyTeam.includes(lastWord) || lastWord.includes(keyTeam)) {
-                  return v;
-                }
+                if (keyTeam === id || keyTeam === lastWord || keyTeam.includes(lastWord) || lastWord.includes(keyTeam)) return v;
               }
             }
             return undefined;
           };
 
-          if (statNorm === "moneyline") {
-            gameCand = fuzzyFindGame("moneyline");
-          } else if (statNorm === "spread") {
-            gameCand = fuzzyFindGame("spread");
-          } else if (statNorm === "total") {
-            // For totals, match any total candidate (or fuzzy by team)
+          if (statNorm === "moneyline") gameCand = fuzzyFindGame("moneyline");
+          else if (statNorm === "spread") gameCand = fuzzyFindGame("spread");
+          else if (statNorm === "total") {
             gameCand = fuzzyFindGame("total");
             if (!gameCand) {
-              // Last resort: grab any total candidate
-              for (const [k, v] of gameCandidateByKey.entries()) {
-                if (k.includes("total")) {
-                  gameCand = v;
-                  break;
-                }
-              }
+              for (const [k, v] of gameCandidateByKey.entries()) { if (k.includes("total")) { gameCand = v; break; } }
             }
           }
 
           if (!gameCand) {
             debug.legs_rejected++;
-            debug.rejected_legs.push({
-              player: leg.player_name || "unknown",
-              stat: leg.stat_type || "unknown",
-              reason: `Game-level bet not found in candidates (type: ${legBetType})`,
-            });
-            console.warn(`[AI-Builder] REJECTED game leg: ${leg.player_name} ${leg.stat_type}`);
+            debug.rejected_legs.push({ player: leg.player_name || "unknown", stat: leg.stat_type || "unknown", reason: `Game-level bet not found in candidates` });
             continue;
           }
 
           debug.legs_validated++;
-
-          // Build data_context for game-level legs
           const realContext: Record<string, any> = {
             odds_source: gameCand.sportsbook,
             implied_probability: gameCand.implied_probability != null ? Math.round(gameCand.implied_probability * 100) : null,
-            odds_validated: true,
-            tags: [],
-            // Matchup info for UI rendering
-            home_team: gameCand.home_team,
-            away_team: gameCand.away_team,
+            odds_validated: true, tags: [],
+            home_team: gameCand.home_team, away_team: gameCand.away_team,
             opponent: gameCand.opponent || (gameCand.team === gameCand.home_team ? gameCand.away_team : gameCand.home_team),
             is_home: gameCand.team === gameCand.home_team,
-            spread: gameCand.spread,
-            total_line: gameCand.total_line,
-            pick_side: gameCand.pick, // "Over" / "Under" for totals
+            spread: gameCand.spread, total_line: gameCand.total_line, pick_side: gameCand.pick,
           };
-
           leg.data_context = realContext;
           leg.odds = gameCand.odds;
           leg.bet_type = legBetType;
           leg.team_abbr = leg.team_abbr || gameCand.team || gameCand.home_team;
-
           validLegs.push(leg);
+          debug.final_legs_accepted++;
           continue;
         }
 
-        // ===== PLAYER PROP VALIDATION (existing logic) =====
+        // ===== PLAYER PROP VALIDATION — EXACT VERIFIED MARKET MATCH =====
         const playerNorm = normName(leg.player_name || "");
         const statNorm = normStat(leg.stat_type || "");
 
         // Skip duplicate player within same slip
         if (playersInThisSlip.has(playerNorm)) {
           debug.legs_rejected++;
-          debug.rejected_legs.push({
-            player: leg.player_name || "unknown",
-            stat: leg.stat_type || "unknown",
-            reason: "Duplicate player within same slip",
-          });
+          debug.rejected_legs.push({ player: leg.player_name || "unknown", stat: leg.stat_type || "unknown", reason: "Duplicate player within same slip" });
           continue;
         }
 
-        // Try multiple key formats to find the DB candidate
-        const key1 = `${playerNorm}::${statNorm}`;
-        const statLabel = STAT_LABELS[statNorm] || leg.stat_type || "";
-        const key2 = `${playerNorm}::${statLabel.toLowerCase()}`;
+        // Parse threshold from leg.line (e.g. "Over 24.5" -> 24.5)
+        const lineMatch = (leg.line || "").match(/([\d.]+)/);
+        const legThreshold = lineMatch ? parseFloat(lineMatch[1]) : null;
 
-        let dbCandidate = candidateByKey.get(key1) || candidateByKey.get(key2);
+        // Try exact key match first
+        let verifiedCandidate: VerifiedPropCandidate | undefined;
+        if (legThreshold != null) {
+          const exactKey = `${playerNorm}|${statNorm}|${legThreshold}`;
+          verifiedCandidate = verifiedCandidateByKey.get(exactKey);
+        }
 
-        // If no exact match, try fuzzy
-        if (!dbCandidate) {
-          for (const [k, v] of candidateByKey.entries()) {
-            if (k.startsWith(playerNorm + "::")) {
-              dbCandidate = v;
-              console.log(`[AI-Builder] Fuzzy matched ${leg.player_name}/${leg.stat_type} to DB key ${k}`);
-              break;
+        // If no exact match, try with stat label
+        if (!verifiedCandidate && legThreshold != null) {
+          const statLabel = STAT_LABELS[statNorm] || leg.stat_type || "";
+          const altKey = `${playerNorm}|${normStat(statLabel)}|${legThreshold}`;
+          verifiedCandidate = verifiedCandidateByKey.get(altKey);
+        }
+
+        // If still no match, try fuzzy: same player + stat, closest threshold
+        if (!verifiedCandidate) {
+          let closestDist = Infinity;
+          for (const [k, c] of verifiedCandidateByKey.entries()) {
+            const parts = k.split("|");
+            if (parts[0] === playerNorm && (parts[1] === statNorm || parts[1] === normStat(STAT_LABELS[statNorm] || ""))) {
+              const dist = legThreshold != null ? Math.abs(c.threshold - legThreshold) : Infinity;
+              if (dist <= 1.0 && dist < closestDist) { // Allow up to 1.0 threshold tolerance for rounding
+                closestDist = dist;
+                verifiedCandidate = c;
+              }
             }
+          }
+          if (verifiedCandidate && closestDist > 0) {
+            console.log(`[AI-Builder] Fuzzy threshold match: ${leg.player_name} ${leg.stat_type} ${legThreshold} → ${verifiedCandidate.threshold} (dist: ${closestDist})`);
           }
         }
 
-        if (!dbCandidate) {
+        if (!verifiedCandidate) {
           debug.legs_rejected++;
+          debug.final_legs_rejected_no_match++;
           debug.rejected_legs.push({
             player: leg.player_name || "unknown",
-            stat: leg.stat_type || "unknown",
-            reason: `Not in candidate set. Tried keys: [${key1}], [${key2}]`,
+            stat: `${leg.stat_type || "unknown"} ${legThreshold ?? "?"}`,
+            reason: `No exact verified market match found. Player prop requires a verified sportsbook entry with matching player/stat/threshold.`,
           });
-          console.warn(`[AI-Builder] REJECTED: ${leg.player_name} / ${leg.stat_type} — not in candidates`);
+          console.warn(`[AI-Builder] REJECTED (no verified market): ${leg.player_name} ${leg.stat_type} ${legThreshold}`);
           continue;
         }
 
@@ -1464,241 +1254,105 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
         playersInThisSlip.add(playerNorm);
         playersUsedAcrossSlips.set(playerNorm, (playersUsedAcrossSlips.get(playerNorm) || 0) + 1);
 
-        // CRITICAL: Override LLM data_context with REAL database values
+        // Build data_context from verified candidate
+        const pick = (leg.pick || "").toLowerCase();
+        const overOdds = verifiedCandidate.best_over_odds;
+        const underOdds = verifiedCandidate.best_under_odds;
+
+        // Force odds from verified market (never use LLM odds)
+        if (pick === "over" && overOdds) {
+          leg.odds = overOdds;
+        } else if (pick === "under" && underOdds) {
+          leg.odds = underOdds;
+        } else if (overOdds) {
+          leg.odds = overOdds; // default to over
+        }
+
+        // Force threshold from verified market
+        leg.line = `${pick === "under" ? "Under" : "Over"} ${verifiedCandidate.threshold}`;
+
         const realContext: Record<string, any> = {
-          season_avg: dbCandidate.season_avg ?? null,
-          last5_avg: dbCandidate.last5_avg ?? null,
-          confidence_score: dbCandidate.confidence_score ?? null,
-          value_score: dbCandidate.value_score ?? null,
-          sample_size: dbCandidate.total_games ?? null,
-          tags: dbCandidate.reason_tags || [],
+          season_avg: verifiedCandidate.season_avg,
+          last5_avg: verifiedCandidate.last5_avg,
+          confidence_score: verifiedCandidate.confidence_score,
+          value_score: verifiedCandidate.value_score,
+          sample_size: verifiedCandidate.total_games,
+          tags: verifiedCandidate.reason_tags,
+          odds_validated: true,
+          odds_source: pick === "under" ? verifiedCandidate.best_under_book : verifiedCandidate.best_over_book,
+          implied_probability: pick === "under"
+            ? (verifiedCandidate.implied_under != null ? Math.round(verifiedCandidate.implied_under * 100) : null)
+            : (verifiedCandidate.implied_over != null ? Math.round(verifiedCandidate.implied_over * 100) : null),
+          best_over_odds: verifiedCandidate.best_over_odds,
+          best_under_odds: verifiedCandidate.best_under_odds,
+          market_confidence: verifiedCandidate.market_confidence,
+          consensus_line: verifiedCandidate.consensus_line,
+          books_count: verifiedCandidate.books_count,
+          is_main_line: verifiedCandidate.is_main_line,
+          edge: pick === "under" ? verifiedCandidate.edge_under : verifiedCandidate.edge_over,
+          market_threshold: verifiedCandidate.threshold,
         };
 
-        if (dbCandidate.last10_hit_rate != null) {
-          realContext.last10_hit_rate = `${Math.round(dbCandidate.last10_hit_rate * 100)}%`;
-        }
-        if (dbCandidate.season_hit_rate != null) {
-          realContext.line_hit_rate = `${Math.round(dbCandidate.season_hit_rate * 100)}% over ${dbCandidate.total_games || "?"} games`;
-        }
+        if (verifiedCandidate.last10_hit_rate != null) realContext.last10_hit_rate = `${Math.round(verifiedCandidate.last10_hit_rate * 100)}%`;
+        if (verifiedCandidate.season_hit_rate != null) realContext.line_hit_rate = `${Math.round(verifiedCandidate.season_hit_rate * 100)}% over ${verifiedCandidate.total_games || "?"} games`;
 
-        if (dbCandidate.volatility_score != null) {
-          realContext.volatility_label = dbCandidate.volatility_score <= 30 ? "low" : dbCandidate.volatility_score <= 60 ? "medium" : "high";
+        if (verifiedCandidate.volatility_score != null) {
+          realContext.volatility_label = verifiedCandidate.volatility_score <= 30 ? "low" : verifiedCandidate.volatility_score <= 60 ? "medium" : "high";
         }
-
-        if (dbCandidate.vs_opponent_games > 0 && dbCandidate.vs_opponent_hit_rate != null) {
-          realContext.vs_opponent = `${Math.round(dbCandidate.vs_opponent_hit_rate * 100)}% in ${dbCandidate.vs_opponent_games} games`;
-          realContext.vs_opponent_sample = dbCandidate.vs_opponent_games;
+        if (verifiedCandidate.vs_opponent_games && verifiedCandidate.vs_opponent_games > 0 && verifiedCandidate.vs_opponent_hit_rate != null) {
+          realContext.vs_opponent = `${Math.round(verifiedCandidate.vs_opponent_hit_rate * 100)}% in ${verifiedCandidate.vs_opponent_games} games`;
+          realContext.vs_opponent_sample = verifiedCandidate.vs_opponent_games;
         }
-
-        if (dbCandidate.home_away === "home" && dbCandidate.home_hit_rate != null) {
-          realContext.home_away_split = `${Math.round(dbCandidate.home_hit_rate * 100)}% at home in ${dbCandidate.home_games || "?"} games`;
-          realContext.home_away_sample = dbCandidate.home_games;
-        } else if (dbCandidate.away_hit_rate != null) {
-          realContext.home_away_split = `${Math.round(dbCandidate.away_hit_rate * 100)}% away in ${dbCandidate.away_games || "?"} games`;
-          realContext.home_away_sample = dbCandidate.away_games;
+        if (verifiedCandidate.home_away === "home" && verifiedCandidate.home_hit_rate != null) {
+          realContext.home_away_split = `${Math.round(verifiedCandidate.home_hit_rate * 100)}% at home in ${verifiedCandidate.home_games || "?"} games`;
+          realContext.home_away_sample = verifiedCandidate.home_games;
+        } else if (verifiedCandidate.away_hit_rate != null) {
+          realContext.home_away_split = `${Math.round(verifiedCandidate.away_hit_rate * 100)}% away in ${verifiedCandidate.away_games || "?"} games`;
+          realContext.home_away_sample = verifiedCandidate.away_games;
         }
 
-        // ===== BEST LINE & ODDS VALIDATION (with main-line detection) =====
-        const legStatLabel = STAT_LABELS[normStat(leg.stat_type)] || leg.stat_type;
-        const lineThreshold = dbCandidate.threshold;
-        const exactKey = `${normName(leg.player_name)}|${legStatLabel}|${lineThreshold}`;
-        let bestLine = bestLines.get(exactKey);
-        let marketThreshold: number | null = null;
+        // Movement detection
+        const snapKey = `${normName(verifiedCandidate.player_name)}|${verifiedCandidate.stat_type}|${verifiedCandidate.threshold}`;
+        const propSnapshots = snapshotsByProp.get(snapKey) || [];
+        const movementWarning = detectExtremeMovement(
+          pick === "over" ? verifiedCandidate.best_over_odds : verifiedCandidate.best_under_odds,
+          propSnapshots, pick === "over" ? "over" : "under"
+        );
+        if (movementWarning) realContext.market_note = movementWarning;
 
-        if (!bestLine) {
-          const psKey = `${normName(leg.player_name)}|${legStatLabel}`;
-          const candidates = bestLinesByPlayerStat.get(psKey);
-          if (candidates && candidates.length > 0) {
-            // Prefer main lines over alt lines when fuzzy matching
-            const mainLines = candidates.filter(c => c.is_main_line);
-            const searchPool = mainLines.length > 0 ? mainLines : candidates;
-            
-            let closestDist = Infinity;
-            let closestEntry: BestLineEntry | null = null;
-            for (const c of searchPool) {
-              const dist = Math.abs(c.threshold - lineThreshold);
-              if (dist < closestDist) {
-                closestDist = dist;
-                closestEntry = c;
-              }
-            }
-            if (closestEntry) {
-              bestLine = closestEntry;
-              marketThreshold = closestEntry.threshold;
-              const pick = (leg.pick || "").toLowerCase();
-              leg.line = `${pick === "under" ? "Under" : "Over"} ${closestEntry.threshold}`;
-              console.log(`[AI-Builder] Fuzzy matched ${leg.player_name} ${legStatLabel}: scoring ${lineThreshold} → market ${closestEntry.threshold} (main: ${closestEntry.is_main_line}, confidence: ${closestEntry.market_confidence})`);
-            }
-          }
+        if (verifiedCandidate.alt_line_flag) {
+          realContext.market_note = (realContext.market_note ? realContext.market_note + " | " : "") +
+            `⚠ Possible alt line — consensus main at ${verifiedCandidate.consensus_line}`;
         }
 
-        if (bestLine) {
-          const pick = (leg.pick || "").toLowerCase();
-          if (pick === "over" && bestLine.best_over_odds) {
-            leg.odds = bestLine.best_over_odds;
-            realContext.odds_source = bestLine.best_over_book;
-            realContext.implied_probability = bestLine.implied_over != null ? Math.round(bestLine.implied_over * 100) : null;
-            realContext.best_over_odds = bestLine.best_over_odds;
-            realContext.best_under_odds = bestLine.best_under_odds;
-          } else if (pick === "under" && bestLine.best_under_odds) {
-            leg.odds = bestLine.best_under_odds;
-            realContext.odds_source = bestLine.best_under_book;
-            realContext.implied_probability = bestLine.implied_under != null ? Math.round(bestLine.implied_under * 100) : null;
-            realContext.best_over_odds = bestLine.best_over_odds;
-            realContext.best_under_odds = bestLine.best_under_odds;
-          }
-
-          realContext.odds_validated = bestLine.odds_validated;
-          if (marketThreshold != null && marketThreshold !== lineThreshold) {
-            realContext.market_threshold = marketThreshold;
-          }
-
-          // === NEW: Market normalization metadata ===
-          realContext.market_confidence = bestLine.market_confidence;
-          realContext.consensus_line = bestLine.consensus_line;
-          realContext.books_count = bestLine.books_with_line;
-          realContext.is_main_line = bestLine.is_main_line;
-
-          // Compute edge: difference between scoring hit rate and implied probability
-          const implProb = pick === "over" ? bestLine.implied_over : bestLine.implied_under;
-          const hitRate = dbCandidate.season_hit_rate;
-          if (implProb != null && hitRate != null) {
-            const edgePct = Math.round((hitRate - implProb) * 100);
-            realContext.edge = edgePct;
-          }
-
-          const snapKey = `${normName(leg.player_name)}|${legStatLabel}|${bestLine.threshold}`;
-          const propSnapshots = snapshotsByProp.get(snapKey) || [];
-          const movementWarning = detectExtremeMovement(
-            pick === "over" ? bestLine.best_over_odds : bestLine.best_under_odds,
-            propSnapshots,
-            pick === "over" ? "over" : "under"
-          );
-          if (movementWarning) {
-            realContext.market_note = movementWarning;
-          }
-
-          // Alt line warning (not hard reject, but flag)
-          if (bestLine.alt_line_flag) {
-            realContext.market_note = (realContext.market_note ? realContext.market_note + " | " : "") +
-              `⚠ Possible alt line — consensus main at ${bestLine.consensus_line}`;
-          }
-
-          if (!bestLine.odds_validated) {
-            debug.legs_rejected++;
-            debug.rejected_legs.push({
-              player: leg.player_name,
-              stat: leg.stat_type,
-              reason: `Market normalization failed: ${bestLine.rejection_reason}`,
-            });
-            debug.legs_validated--;
-            playersInThisSlip.delete(playerNorm);
-            console.warn(`[AI-Builder] REJECTED (market): ${leg.player_name} ${leg.stat_type} — ${bestLine.rejection_reason}`);
-            continue;
-          }
-
-          // Soft penalty: if market confidence is very low, reduce the leg's attractiveness
-          if (bestLine.market_confidence < 25) {
-            debug.legs_rejected++;
-            debug.rejected_legs.push({
-              player: leg.player_name,
-              stat: leg.stat_type,
-              reason: `Market confidence too low: ${bestLine.market_confidence}/100 (${bestLine.books_with_line} book(s), alt: ${bestLine.alt_line_flag})`,
-            });
-            debug.legs_validated--;
-            playersInThisSlip.delete(playerNorm);
-            console.warn(`[AI-Builder] REJECTED (low market confidence): ${leg.player_name} ${leg.stat_type} — confidence ${bestLine.market_confidence}`);
-            continue;
-          }
-        } else {
-          // No live odds found at all for this player prop
-          // MANDATORY: Player props require live market verification by default
-          // Internal flag allowUnverifiedOdds can override (disabled by default)
-          const allowUnverified = filters?.allowUnverifiedOdds === true;
-          if (!allowUnverified) {
-            debug.legs_rejected++;
-            debug.rejected_legs.push({
-              player: leg.player_name,
-              stat: leg.stat_type,
-              reason: "No live sportsbook market found — player prop requires verified odds (books_count: 0)",
-            });
-            debug.legs_validated--;
-            playersInThisSlip.delete(playerNorm);
-            console.warn(`[AI-Builder] REJECTED (no live market): ${leg.player_name} ${leg.stat_type} ${dbCandidate.threshold} — no book offers this prop`);
-            continue;
-          }
-          realContext.odds_validated = false;
-          realContext.market_confidence = 0;
-          realContext.books_count = 0;
-        }
-
-        // ===== POST-VALIDATION: Verify player's team is playing today =====
-        const legTeam = (leg.team_abbr || dbCandidate.team_abbr || "").toUpperCase();
-        if (teamsPlayingToday.size > 0 && legTeam && !teamsPlayingToday.has(legTeam)) {
-          debug.legs_rejected++;
-          debug.rejected_legs.push({
-            player: leg.player_name,
-            stat: leg.stat_type,
-            reason: `Team ${legTeam} is not playing today`,
-          });
-          debug.legs_validated--;
-          playersInThisSlip.delete(playerNorm);
-          console.warn(`[AI-Builder] REJECTED (not playing today): ${leg.player_name} (${legTeam})`);
-          continue;
-        }
-
-        // ===== POST-VALIDATION: Check player availability (reject "out" players) =====
-        const playerAvailStatus = availabilityMap?.get(normName(leg.player_name));
-        if (playerAvailStatus && playerAvailStatus.status === "out") {
-          debug.legs_rejected++;
-          debug.rejected_legs.push({
-            player: leg.player_name,
-            stat: leg.stat_type,
-            reason: `Player is OUT: ${playerAvailStatus.reason || "injury/rest"}`,
-          });
-          debug.legs_validated--;
-          playersInThisSlip.delete(playerNorm);
-          console.warn(`[AI-Builder] REJECTED (player OUT): ${leg.player_name}`);
-          continue;
-        }
-
-        // Replace LLM context entirely with real data
         leg.data_context = realContext;
-        leg.team_abbr = leg.team_abbr || dbCandidate.team_abbr;
-        leg.bet_type = leg.bet_type || "player_prop";
+        leg.team_abbr = leg.team_abbr || verifiedCandidate.team_abbr;
+        leg.bet_type = "player_prop";
 
         validLegs.push(leg);
+        debug.final_legs_accepted++;
       }
-      
+
       slip.legs = validLegs;
     }
 
     // Remove slips with 0 valid legs
     parsed.slips = parsed.slips.filter((s: any) => s.legs && s.legs.length > 0);
 
-    console.log(`[AI-Builder] Validation: ${debug.legs_validated} passed, ${debug.legs_rejected} rejected`);
-    if (debug.rejected_legs.length > 0) {
-      console.log(`[AI-Builder] Rejected details:`, JSON.stringify(debug.rejected_legs));
-    }
+    console.log(`[AI-Builder] Validation complete: ${debug.legs_validated} passed, ${debug.legs_rejected} rejected, ${debug.final_legs_rejected_no_match} no verified match`);
+    if (debug.rejected_legs.length > 0) console.log(`[AI-Builder] Rejected:`, JSON.stringify(debug.rejected_legs));
 
     if (parsed.slips.length === 0) {
-      // Determine if rejections were primarily due to missing live markets
-      const marketRejections = debug.rejected_legs.filter(r => 
-        r.reason.includes("No live sportsbook market") || 
-        r.reason.includes("Market normalization failed") ||
-        r.reason.includes("Market confidence too low")
+      const marketRejections = debug.rejected_legs.filter(r =>
+        r.reason.includes("No exact verified market") || r.reason.includes("No live sportsbook") || r.reason.includes("Market")
       );
       const isMarketIssue = marketRejections.length > debug.rejected_legs.length * 0.5;
-      
       const errorMsg = isMarketIssue
-        ? `Live market verification was not available for enough player props to build a slip. ${marketRejections.length} prop(s) were rejected because no verified sportsbook odds could be found. Try again later when markets are open, or switch to game-level bets (Moneyline, Spread, Totals).`
-        : "AI could not build valid slips from today's candidates. Try a different prompt or adjust your filters.";
-      
+        ? `Live market verification was not available for enough player props to build a slip. ${marketRejections.length} prop(s) were rejected because no matching verified sportsbook market was found. Try again later when markets are open, or switch to game-level bets.`
+        : "AI could not build valid slips from today's verified candidates. Try a different prompt or adjust your filters.";
+
       return new Response(
-        JSON.stringify({ 
-          error: errorMsg,
-          debug,
-        }),
+        JSON.stringify({ error: errorMsg, debug }),
         { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -1706,77 +1360,54 @@ Use ONLY players/teams and stats from the candidate lists. Copy their statistics
     // ===== PHASE 6: Save to database =====
     const savedSlips = [];
     for (const slip of parsed.slips) {
-      const { data: slipRow, error: slipErr } = await supabase
-        .from("ai_slips")
-        .insert({
-          user_id: user?.id || null,
-          prompt,
-          slip_name: slip.slip_name,
-          risk_label: slip.risk_label,
-          estimated_odds: slip.estimated_odds,
-          reasoning: slip.reasoning,
-        })
-        .select()
-        .single();
+      const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
+        user_id: user?.id || null, prompt, slip_name: slip.slip_name,
+        risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
+      }).select().single();
 
-      if (slipErr) {
-        console.error("[AI-Builder] Error saving slip:", slipErr);
-        continue;
-      }
+      if (slipErr) { console.error("[AI-Builder] Error saving slip:", slipErr); continue; }
 
       const legs = (slip.legs || []).map((leg: any, idx: number) => ({
-        slip_id: slipRow.id,
-        player_name: leg.player_name,
-        team_abbr: leg.team_abbr,
-        stat_type: leg.stat_type,
-        line: leg.line,
-        pick: leg.pick,
-        odds: leg.odds,
-        reasoning: leg.reasoning,
-        leg_order: idx,
+        slip_id: slipRow.id, player_name: leg.player_name, team_abbr: leg.team_abbr,
+        stat_type: leg.stat_type, line: leg.line, pick: leg.pick,
+        odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
       }));
 
-      const { data: legRows, error: legErr } = await supabase
-        .from("ai_slip_legs")
-        .insert(legs)
-        .select();
-
+      const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
       if (legErr) console.error("[AI-Builder] Error saving legs:", legErr);
 
       const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
-        ...lr,
-        data_context: slip.legs?.[idx]?.data_context || null,
+        ...lr, data_context: slip.legs?.[idx]?.data_context || null,
         bet_type: slip.legs?.[idx]?.bet_type || "player_prop",
       }));
 
       savedSlips.push({ ...slipRow, legs: legsWithContext });
     }
 
-    // Track usage for free users
+    // Track usage
     if (user && !isPremium) {
       const today = new Date().toISOString().split("T")[0];
-      supabase
-        .from("ai_usage")
-        .upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" })
-        .then(() => {});
+      supabase.from("ai_usage").upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" }).then(() => {});
     }
 
     return new Response(JSON.stringify({
       slips: savedSlips,
       debug,
       scoring_metadata: {
-        candidates_available: scoredProps.length,
+        verified_prop_candidates: debug.verified_prop_candidates,
+        verified_candidates_passed_to_llm: debug.verified_candidates_passed_to_llm,
         candidates_after_diversity: debug.candidates_after_diversity,
-        candidates_sent_to_llm: candidateSummary.length,
-        game_candidates_sent_to_llm: gameCandidateSummary.length,
         unique_players: debug.unique_players_in_pool,
         legs_validated: debug.legs_validated,
         legs_rejected: debug.legs_rejected,
+        final_legs_accepted: debug.final_legs_accepted,
+        final_legs_rejected_no_match: debug.final_legs_rejected_no_match,
         games_today: gamesData.length,
         live_props_found: livePropsCount,
         game_level_candidates: debug.game_level_candidates,
         mode: debug.mode,
         fallback_used: debug.fallback_used,
+        scoring_data_available: scoredProps.length,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
