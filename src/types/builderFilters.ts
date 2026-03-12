@@ -75,6 +75,13 @@ export const DEFAULT_BUILDER_FILTERS: BuilderFilters = {
   avoidStaleAvailability: false,
   requireFreshMarketData: false,
 
+  // Market quality defaults — safe but not overly restrictive
+  minBooksCount: 1,
+  minMarketConfidence: 25,
+  verifiedOnly: true,
+  mainLinesOnly: true,
+  excludeSingleBookProps: false,
+
   noRepeatPlayers: false,
   maxOnePerPlayer: false,
   maxOnePerTeam: false,
