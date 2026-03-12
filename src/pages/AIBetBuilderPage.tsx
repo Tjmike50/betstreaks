@@ -16,6 +16,7 @@ import { BuilderActiveFilters } from "@/components/builder/BuilderActiveFilters"
 import type { BuilderFilters } from "@/types/builderFilters";
 import { DEFAULT_BUILDER_FILTERS, getActiveBuilderFilterCount } from "@/types/builderFilters";
 import { GameMatchupHeader } from "@/components/builder/GameMatchupHeader";
+import { MarketDepthSummary } from "@/components/builder/MarketDepthSummary";
 
 const QUICK_PROMPTS = [
   "Build me a +150 parlay",
@@ -386,7 +387,7 @@ export default function AIBetBuilderPage() {
   const [filters, setFilters] = useState<BuilderFilters>({
     ...DEFAULT_BUILDER_FILTERS,
   });
-  const { slips, isLoading, error, buildSlips } = useAIBetBuilder();
+  const { slips, isLoading, error, buildSlips, marketDepth } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
   const navigate = useNavigate();
   const activeFilterCount = getActiveBuilderFilterCount(filters);
@@ -518,6 +519,8 @@ export default function AIBetBuilderPage() {
               Your AI Slips
               <Badge variant="secondary" className="text-[10px]">{slips.length}</Badge>
             </h2>
+            {/* Market depth summary */}
+            {marketDepth && <MarketDepthSummary data={marketDepth} />}
             {/* Show active filters above results */}
             {activeFilterCount > 0 && (
               <div className="bg-card/50 border border-border/30 rounded-lg p-3 space-y-1.5">
