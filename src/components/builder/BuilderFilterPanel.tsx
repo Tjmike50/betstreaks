@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ChevronDown, ChevronUp, SlidersHorizontal, X, Shield, Zap, Target,
   TrendingUp, Users, UserMinus, BarChart3, Dices, Filter, Sparkles,
+  BookOpen, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
