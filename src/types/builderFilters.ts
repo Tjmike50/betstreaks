@@ -115,6 +115,13 @@ export function getActiveBuilderFilterCount(filters: BuilderFilters): number {
   if (filters.minSampleSize !== d.minSampleSize) count++;
   if (filters.startersOnly) count++;
   if (filters.avoidUncertainLineups) count++;
+  // Market quality (only count if changed from defaults)
+  if (filters.minBooksCount !== d.minBooksCount) count++;
+  if (filters.minMarketConfidence !== d.minMarketConfidence) count++;
+  if (filters.verifiedOnly !== d.verifiedOnly) count++;
+  if (filters.mainLinesOnly !== d.mainLinesOnly) count++;
+  if (filters.excludeSingleBookProps !== d.excludeSingleBookProps) count++;
+  // Diversity
   if (filters.noRepeatPlayers) count++;
   if (filters.maxOnePerPlayer) count++;
   if (filters.maxOnePerTeam) count++;
