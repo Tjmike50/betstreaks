@@ -106,5 +106,5 @@ export function useAIBetBuilder() {
     }
   };
 
-  return { slips, isLoading, error, buildSlips, marketDepth };
+  return { slips, isLoading, error, errorType, buildSlips, marketDepth };
 }
