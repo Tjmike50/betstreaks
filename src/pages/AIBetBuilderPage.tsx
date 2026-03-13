@@ -463,14 +463,62 @@ export default function AIBetBuilderPage() {
           </Card>
         )}
 
-        {isApiError && (
+        {isCreditsError && (
+          <Card className="border-orange-500/30 bg-orange-500/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <CreditCard className="h-5 w-5 text-orange-400 shrink-0 mt-0.5" />
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-orange-400">AI credits exhausted</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" onClick={() => navigate("/premium")}>
+                  Check Plan
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isNoDataError && (
+          <Card className="border-blue-500/30 bg-blue-500/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <Database className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-blue-400">Prop data not ready</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isNetworkError && (
           <Card className="border-destructive/30 bg-destructive/5">
             <CardContent className="pt-4 flex items-start gap-3">
               <WifiOff className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-              <div className="space-y-1">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-destructive">Connection failed</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isGenericError && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="space-y-2">
                 <p className="text-sm font-medium text-destructive">Something went wrong</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="mt-2" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                  <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
               </div>
