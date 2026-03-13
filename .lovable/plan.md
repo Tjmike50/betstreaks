@@ -1,110 +1,60 @@
 
 
-# Add Visible Tier Badge to Account Page
+## Plan: Fix Scoring Stats, Verify Market Depth, Add 402 Fallback
 
-## Overview
-Add a prominent "Free Plan" or "Premium" tier badge directly below the user's email address on the Account page, making subscription status immediately visible without scrolling.
+### Three Issues Identified
 
----
+**Issue 1: Confidence, Value, Szn Avg, Volatility show dashes**
 
-## Current State
+Root cause: `player_prop_scores` table has **zero rows** for today (2026-03-13). The edge function enriches candidates from this table (lines 648-678), but when empty, all scoring fields (`confidence_score`, `value_score`, `season_avg`, `volatility_score`) are null. The `LegDataBar` component correctly renders "—" for null values.
 
-The Account page shows:
-1. User avatar icon
-2. "Logged in" heading
-3. Email address
-4. Feature list
-5. Premium card (further down - easy to miss)
+This is a **data pipeline issue** — the `prop-scoring-engine` edge function hasn't been run today. The fix is to trigger it, but we should also make the UI graceful when scoring data is missing.
 
-Users must scroll to the premium card section to understand their tier status.
+**Issue 2: Market Depth Summary**
 
----
+Code review confirms the `MarketDepthSummary` component renders correctly at line 541 of `AIBetBuilderPage.tsx`, gated on `marketDepth` being truthy. The hook captures it from `data.scoring_metadata` and `data.debug`. This should be working — the `scoring_metadata` field is always returned in the success response (line 1474). No code fix needed here.
 
-## Solution
+**Issue 3: 402 Fallback — return top candidates without LLM**
 
-Add a colored badge directly below the email that shows:
-
-| Status | Badge Display |
-|--------|---------------|
-| Loading | Gray spinner badge |
-| Free | "Free Plan" - neutral gray badge |
-| Premium | "Premium" - green badge with check icon |
+When the AI gateway returns 402 (line 1187-1189), the function currently returns an error immediately, even though it has already scored and ranked all candidates. We should build slips deterministically from the top candidates.
 
 ---
 
-## Visual Design
+### Changes
 
-**Free Plan Badge:**
-```
-┌─────────────────────────────────┐
-│        [User Avatar]            │
-│         Logged in               │
-│      user@example.com           │
-│      ┌──────────────┐           │
-│      │  Free Plan   │  ← Gray   │
-│      └──────────────┘           │
-└─────────────────────────────────┘
-```
+#### 1. Edge Function: Add deterministic fallback slip builder (`supabase/functions/ai-bet-builder/index.ts`)
 
-**Premium Badge:**
-```
-┌─────────────────────────────────┐
-│        [User Avatar]            │
-│         Logged in               │
-│      user@example.com           │
-│      ┌────────────────┐         │
-│      │ ✓ Premium      │ ← Green │
-│      └────────────────┘         │
-└─────────────────────────────────┘
-```
+After the 402 check at line 1187, instead of returning an error, build slips programmatically:
 
----
+- Add a `buildFallbackSlips()` function that takes the top diversified candidates and game-level candidates, groups them into slips by sorting on `confidence_score` (desc) then `market_confidence` (desc)
+- Each slip gets `legCount` legs (from filters or default 3), picks the best side (over/under) based on edge, and builds `data_context` identically to the LLM path
+- Sets `slip_name` to "Data-Driven Picks" with a risk label based on average confidence
+- Sets `reasoning` to explain this is a fallback without AI formatting
+- Saves to DB same as LLM path, returns with a `fallback: true` flag in the response
+- Applies to both 402 and 429 status codes from the AI gateway
 
-## Implementation
+#### 2. Hook: Surface fallback flag (`src/hooks/useAIBetBuilder.ts`)
 
-### File: `src/pages/AccountPage.tsx`
+- Add `isFallback` boolean state
+- Set it from `data.fallback` in the response
+- Export it from the hook
 
-**Add tier badge component inline** (lines 207-214):
+#### 3. UI: Show fallback banner and handle missing scoring (`src/pages/AIBetBuilderPage.tsx`)
 
-```tsx
-<div className="text-center space-y-2">
-  <h2 className="text-lg font-semibold text-foreground">
-    Logged in
-  </h2>
-  <p className="text-sm text-muted-foreground break-all">
-    {user.email}
-  </p>
-  
-  {/* NEW: Tier Badge */}
-  {isPremiumLoading ? (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      Checking...
-    </span>
-  ) : isPremium ? (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
-      <Check className="h-3 w-3" />
-      Premium
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
-      Free Plan
-    </span>
-  )}
-</div>
-```
+- When `isFallback` is true, show a subtle info banner above slips: "These picks were built from scored data without AI formatting. Upgrade or try again later for full AI analysis."
+- In `LegDataBar`, when all 4 stats are null, show a compact "Scoring data pending" message instead of four dashes
+
+#### 4. Trigger scoring engine for today
+
+- Invoke `prop-scoring-engine` to populate today's `player_prop_scores` so future requests have scoring data
 
 ---
 
-## Summary
+### File Summary
 
-| Change | Description |
-|--------|-------------|
-| Add tier badge | Colored pill badge showing "Free Plan" or "Premium" with icon |
-| Position | Directly below email address for immediate visibility |
-| States | Loading (spinner), Free (gray), Premium (green + check) |
-
-**Files Modified:** `src/pages/AccountPage.tsx`
-
-This makes subscription tier instantly visible at the top of the Account page, so users always know whether they're on Free or Premium without scrolling.
+| File | Change |
+|------|--------|
+| `supabase/functions/ai-bet-builder/index.ts` | Add `buildFallbackSlips()` function; use it on 402/429 instead of returning error |
+| `src/hooks/useAIBetBuilder.ts` | Add `isFallback` state, capture from response |
+| `src/pages/AIBetBuilderPage.tsx` | Add fallback banner; improve `LegDataBar` for missing data |
 
