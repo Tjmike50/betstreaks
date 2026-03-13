@@ -126,6 +126,16 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
 }
 
 function LegDataBar({ ctx }: { ctx: LegDataContext }) {
+  const allStatsNull = ctx.confidence_score == null && ctx.value_score == null && ctx.season_avg == null && ctx.volatility_label == null;
+
+  if (allStatsNull) {
+    return (
+      <div className="mt-2 pt-2 border-t border-border/20 text-center">
+        <span className="text-[10px] text-muted-foreground italic">Scoring data pending — stats populate after the scoring engine runs</span>
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-4 gap-2 mt-2 pt-2 border-t border-border/20">
       <div className="text-center">
