@@ -1185,8 +1185,177 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
     });
 
     if (!aiRes.ok) {
-      if (aiRes.status === 429) return new Response(JSON.stringify({ error: "Rate limit exceeded.", debug }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      if (aiRes.status === 402) return new Response(JSON.stringify({ error: "AI service temporarily unavailable.", debug }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (aiRes.status === 429 || aiRes.status === 402) {
+        console.log(`[AI-Builder] AI gateway ${aiRes.status} — building deterministic fallback slips`);
+
+        // ===== DETERMINISTIC FALLBACK: build slips from scored candidates without LLM =====
+        const legCount = filters?.legCount || 3;
+        const requestedSlipCount = Math.min(slipCount, 5);
+
+        // Sort candidates: confidence desc, then market_confidence desc
+        const sortedCandidates = [...finalCandidates].sort((a, b) => {
+          const confDiff = (b.confidence_score ?? 0) - (a.confidence_score ?? 0);
+          if (confDiff !== 0) return confDiff;
+          return b.market_confidence - a.market_confidence;
+        });
+
+        // Add game-level candidates sorted by implied probability
+        const sortedGameCandidates = [...gameLevelCandidates].sort((a, b) =>
+          (b.implied_probability ?? 0) - (a.implied_probability ?? 0)
+        );
+
+        const fallbackSlips: any[] = [];
+        const usedPlayers = new Set<string>();
+
+        for (let s = 0; s < requestedSlipCount && (sortedCandidates.length > 0 || sortedGameCandidates.length > 0); s++) {
+          const slipLegs: any[] = [];
+          const slipPlayers = new Set<string>();
+
+          // Fill with player props first
+          for (const c of sortedCandidates) {
+            if (slipLegs.length >= legCount) break;
+            const pKey = normName(c.player_name);
+            if (slipPlayers.has(pKey)) continue;
+            // For multi-slip diversity, skip players used in previous slips
+            if (requestedSlipCount > 1 && usedPlayers.has(pKey) && sortedCandidates.length > legCount * requestedSlipCount) continue;
+
+            // Pick the better side based on edge
+            const pickOver = (c.edge_over ?? -999) >= (c.edge_under ?? -999);
+            const pick = pickOver ? "Over" : "Under";
+            const odds = pickOver ? c.best_over_odds : c.best_under_odds;
+
+            const realContext: Record<string, any> = {
+              season_avg: c.season_avg, last5_avg: c.last5_avg,
+              confidence_score: c.confidence_score, value_score: c.value_score,
+              sample_size: c.total_games, tags: c.reason_tags,
+              odds_validated: true,
+              odds_source: pickOver ? c.best_over_book : c.best_under_book,
+              implied_probability: pickOver
+                ? (c.implied_over != null ? Math.round(c.implied_over * 100) : null)
+                : (c.implied_under != null ? Math.round(c.implied_under * 100) : null),
+              best_over_odds: c.best_over_odds, best_under_odds: c.best_under_odds,
+              market_confidence: c.market_confidence, consensus_line: c.consensus_line,
+              books_count: c.books_count, is_main_line: c.is_main_line,
+              edge: pickOver ? c.edge_over : c.edge_under,
+              market_threshold: c.threshold,
+            };
+            if (c.last10_hit_rate != null) realContext.last10_hit_rate = `${Math.round(c.last10_hit_rate * 100)}%`;
+            if (c.season_hit_rate != null) realContext.line_hit_rate = `${Math.round(c.season_hit_rate * 100)}% over ${c.total_games || "?"} games`;
+            if (c.volatility_score != null) {
+              realContext.volatility_label = c.volatility_score <= 30 ? "low" : c.volatility_score <= 60 ? "medium" : "high";
+            }
+            if (c.vs_opponent_games && c.vs_opponent_games > 0 && c.vs_opponent_hit_rate != null) {
+              realContext.vs_opponent = `${Math.round(c.vs_opponent_hit_rate * 100)}% in ${c.vs_opponent_games} games`;
+              realContext.vs_opponent_sample = c.vs_opponent_games;
+            }
+
+            slipLegs.push({
+              player_name: c.player_name, team_abbr: c.team_abbr, stat_type: c.stat_type,
+              line: `${pick} ${c.threshold}`, pick, odds: odds || null,
+              reasoning: `Top-ranked by scoring engine (confidence: ${c.confidence_score ?? "N/A"}, market confidence: ${c.market_confidence}).`,
+              bet_type: "player_prop", data_context: realContext,
+            });
+            slipPlayers.add(pKey);
+            usedPlayers.add(pKey);
+          }
+
+          // Fill remaining with game-level candidates if needed
+          if (slipLegs.length < legCount) {
+            for (const gc of sortedGameCandidates) {
+              if (slipLegs.length >= legCount) break;
+              const gcKey = `${gc.type}|${gc.team || gc.home_team}`;
+              if (slipPlayers.has(gcKey)) continue;
+              slipLegs.push({
+                player_name: gc.team || gc.home_team, team_abbr: gc.team || gc.home_team,
+                stat_type: gc.type === "moneyline" ? "Moneyline" : gc.type === "spread" ? "Spread" : "Total",
+                line: gc.label, pick: gc.pick || gc.team || gc.home_team, odds: gc.odds,
+                reasoning: `Game-level pick from verified odds.`,
+                bet_type: gc.type, data_context: {
+                  odds_source: gc.sportsbook, implied_probability: gc.implied_probability != null ? Math.round(gc.implied_probability * 100) : null,
+                  odds_validated: true, tags: [], home_team: gc.home_team, away_team: gc.away_team,
+                  spread: gc.spread, total_line: gc.total_line, pick_side: gc.pick,
+                },
+              });
+              slipPlayers.add(gcKey);
+            }
+          }
+
+          if (slipLegs.length === 0) break;
+
+          // Compute combined odds & risk label
+          let combinedImplied = 1;
+          for (const leg of slipLegs) {
+            const impl = americanToImplied(leg.odds);
+            if (impl) combinedImplied *= impl;
+          }
+          const americanOdds = combinedImplied > 0 && combinedImplied < 1
+            ? (combinedImplied >= 0.5 ? `${Math.round(-100 * combinedImplied / (1 - combinedImplied))}` : `+${Math.round(100 * (1 - combinedImplied) / combinedImplied)}`)
+            : null;
+
+          const avgConf = slipLegs.reduce((sum, l) => sum + (l.data_context?.confidence_score ?? 50), 0) / slipLegs.length;
+          const riskLabel = avgConf >= 60 ? "safe" : avgConf >= 40 ? "balanced" : "aggressive";
+
+          fallbackSlips.push({
+            slip_name: `Data-Driven Picks${requestedSlipCount > 1 ? ` #${s + 1}` : ""}`,
+            risk_label: riskLabel, estimated_odds: americanOdds,
+            reasoning: "Built from top-scored candidates using the scoring engine. AI formatting was temporarily unavailable.",
+            legs: slipLegs,
+          });
+        }
+
+        if (fallbackSlips.length === 0) {
+          return new Response(JSON.stringify({ error: "AI service temporarily unavailable and no candidates available for fallback.", debug }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        // Save fallback slips to DB (same as LLM path)
+        const savedFallbackSlips = [];
+        for (const slip of fallbackSlips) {
+          const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
+            user_id: user?.id || null, prompt, slip_name: slip.slip_name,
+            risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
+          }).select().single();
+          if (slipErr) { console.error("[AI-Builder] Error saving fallback slip:", slipErr); continue; }
+
+          const legs = slip.legs.map((leg: any, idx: number) => ({
+            slip_id: slipRow.id, player_name: leg.player_name, team_abbr: leg.team_abbr,
+            stat_type: leg.stat_type, line: leg.line, pick: leg.pick,
+            odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
+          }));
+          const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
+          if (legErr) console.error("[AI-Builder] Error saving fallback legs:", legErr);
+
+          const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
+            ...lr, data_context: slip.legs[idx]?.data_context || null,
+            bet_type: slip.legs[idx]?.bet_type || "player_prop",
+          }));
+          savedFallbackSlips.push({ ...slipRow, legs: legsWithContext });
+        }
+
+        // Track usage
+        if (user && !isPremium) {
+          const today = new Date().toISOString().split("T")[0];
+          supabase.from("ai_usage").upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" }).then(() => {});
+        }
+
+        console.log(`[AI-Builder] Fallback: built ${savedFallbackSlips.length} slips from scored candidates`);
+
+        return new Response(JSON.stringify({
+          slips: savedFallbackSlips, fallback: true, debug,
+          scoring_metadata: {
+            verified_prop_candidates: debug.verified_prop_candidates,
+            verified_candidates_passed_to_llm: debug.verified_candidates_passed_to_llm,
+            candidates_after_diversity: debug.candidates_after_diversity,
+            unique_players: debug.unique_players_in_pool,
+            legs_validated: savedFallbackSlips.reduce((s, sl) => s + sl.legs.length, 0),
+            legs_rejected: 0, final_legs_accepted: savedFallbackSlips.reduce((s, sl) => s + sl.legs.length, 0),
+            final_legs_rejected_no_match: 0,
+            games_today: gamesData.length, live_props_found: livePropsCount,
+            game_level_candidates: debug.game_level_candidates,
+            mode: "deterministic_fallback", fallback_used: true,
+            scoring_data_available: scoredProps.length,
+          },
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
       const errText = await aiRes.text();
       console.error("[AI-Builder] AI gateway error:", aiRes.status, errText);
       throw new Error("AI generation failed");
