@@ -54,9 +54,17 @@ export function useAIBetBuilder() {
       });
 
       if (fnError) {
-        if (fnError.message?.includes("429") || fnError.message?.includes("free_limit_reached")) {
+        const msg = fnError.message || "";
+        if (msg.includes("429") || msg.includes("free_limit_reached")) {
           setError("You've used your free AI slip for today. Upgrade to Premium for unlimited.");
+          setErrorType("limit");
           toast({ title: "Daily limit reached", description: "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
+          return;
+        }
+        if (msg.includes("402") || msg.includes("non-2xx")) {
+          setError("AI service credits exhausted. Please try again later or check your plan.");
+          setErrorType("credits");
+          toast({ title: "Credits exhausted", description: "The AI service is temporarily unavailable. Please try again later.", variant: "destructive" });
           return;
         }
         throw fnError;
@@ -65,7 +73,14 @@ export function useAIBetBuilder() {
       if (data?.error) {
         if (data.error === "free_limit_reached") {
           setError(data.message || "Daily limit reached.");
+          setErrorType("limit");
           toast({ title: "Daily limit reached", description: data.message, variant: "destructive" });
+          return;
+        }
+        if (data.error === "no_candidates" || data.error?.includes("no candidates")) {
+          setError(data.message || "Today's prop data isn't ready yet. Try again after games are loaded.");
+          setErrorType("no-data");
+          toast({ title: "No data available", description: "Prop data hasn't been loaded yet for today's games.", variant: "destructive" });
           return;
         }
         throw new Error(data.error);
