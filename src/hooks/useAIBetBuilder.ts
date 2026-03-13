@@ -32,15 +32,19 @@ export interface MarketDepthData {
   } | null;
 }
 
+export type ErrorType = "credits" | "limit" | "no-data" | "network" | "generic";
+
 export function useAIBetBuilder() {
   const [slips, setSlips] = useState<AISlip[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<ErrorType | null>(null);
   const [marketDepth, setMarketDepth] = useState<MarketDepthData | null>(null);
 
   const buildSlips = async (prompt: string, slipCount = 1, filters?: BuilderFilters) => {
     setIsLoading(true);
     setError(null);
+    setErrorType(null);
     setSlips([]);
     setMarketDepth(null);
 
@@ -50,9 +54,17 @@ export function useAIBetBuilder() {
       });
 
       if (fnError) {
-        if (fnError.message?.includes("429") || fnError.message?.includes("free_limit_reached")) {
+        const msg = fnError.message || "";
+        if (msg.includes("429") || msg.includes("free_limit_reached")) {
           setError("You've used your free AI slip for today. Upgrade to Premium for unlimited.");
+          setErrorType("limit");
           toast({ title: "Daily limit reached", description: "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
+          return;
+        }
+        if (msg.includes("402") || msg.includes("non-2xx")) {
+          setError("AI service credits exhausted. Please try again later or check your plan.");
+          setErrorType("credits");
+          toast({ title: "Credits exhausted", description: "The AI service is temporarily unavailable. Please try again later.", variant: "destructive" });
           return;
         }
         throw fnError;
@@ -61,7 +73,14 @@ export function useAIBetBuilder() {
       if (data?.error) {
         if (data.error === "free_limit_reached") {
           setError(data.message || "Daily limit reached.");
+          setErrorType("limit");
           toast({ title: "Daily limit reached", description: data.message, variant: "destructive" });
+          return;
+        }
+        if (data.error === "no_candidates" || data.error?.includes("no candidates")) {
+          setError(data.message || "Today's prop data isn't ready yet. Try again after games are loaded.");
+          setErrorType("no-data");
+          toast({ title: "No data available", description: "Prop data hasn't been loaded yet for today's games.", variant: "destructive" });
           return;
         }
         throw new Error(data.error);
@@ -80,12 +99,19 @@ export function useAIBetBuilder() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to generate slips";
-      setError(msg);
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("network")) {
+        setError("Connection failed. Check your internet and try again.");
+        setErrorType("network");
+        toast({ title: "Network error", description: "Check your internet connection.", variant: "destructive" });
+      } else {
+        setError(msg);
+        setErrorType("generic");
+        toast({ title: "Something went wrong", description: msg, variant: "destructive" });
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  return { slips, isLoading, error, buildSlips, marketDepth };
+  return { slips, isLoading, error, errorType, buildSlips, marketDepth };
 }

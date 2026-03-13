@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff, TrendingUp, BarChart3, Activity, Users, UserMinus, Trophy, ArrowUpDown, Hash } from "lucide-react";
+import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff, CreditCard, Database, TrendingUp, BarChart3, Activity, Users, UserMinus, Trophy, ArrowUpDown, Hash, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -354,7 +354,7 @@ export default function AIBetBuilderPage() {
   const [filters, setFilters] = useState<BuilderFilters>({
     ...DEFAULT_BUILDER_FILTERS,
   });
-  const { slips, isLoading, error, buildSlips, marketDepth } = useAIBetBuilder();
+  const { slips, isLoading, error, errorType, buildSlips, marketDepth } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
   const navigate = useNavigate();
   const activeFilterCount = getActiveBuilderFilterCount(filters);
@@ -365,8 +365,11 @@ export default function AIBetBuilderPage() {
     buildSlips(prompt.trim(), slipCount, filters);
   };
 
-  const isLimitError = error?.includes("free") || error?.includes("limit") || error?.includes("Upgrade");
-  const isApiError = error && !isLimitError;
+  const isLimitError = errorType === "limit";
+  const isCreditsError = errorType === "credits";
+  const isNoDataError = errorType === "no-data";
+  const isNetworkError = errorType === "network";
+  const isGenericError = errorType === "generic";
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -460,14 +463,62 @@ export default function AIBetBuilderPage() {
           </Card>
         )}
 
-        {isApiError && (
+        {isCreditsError && (
+          <Card className="border-orange-500/30 bg-orange-500/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <CreditCard className="h-5 w-5 text-orange-400 shrink-0 mt-0.5" />
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-orange-400">AI credits exhausted</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" onClick={() => navigate("/premium")}>
+                  Check Plan
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isNoDataError && (
+          <Card className="border-blue-500/30 bg-blue-500/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <Database className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-blue-400">Prop data not ready</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isNetworkError && (
           <Card className="border-destructive/30 bg-destructive/5">
             <CardContent className="pt-4 flex items-start gap-3">
               <WifiOff className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-              <div className="space-y-1">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-destructive">Connection failed</p>
+                <p className="text-xs text-muted-foreground">{error}</p>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isGenericError && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="pt-4 flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="space-y-2">
                 <p className="text-sm font-medium text-destructive">Something went wrong</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="mt-2" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                  <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
               </div>

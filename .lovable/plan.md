@@ -1,34 +1,110 @@
 
 
-## Better Error Handling for AI Bet Builder
+# Add Visible Tier Badge to Account Page
 
-### Problem
-The hook's catch block shows a generic error message for all failures, including 402 (credits exhausted) from the Lovable AI gateway. The `supabase.functions.invoke` wraps non-2xx responses into a generic `FunctionsHttpError`.
+## Overview
+Add a prominent "Free Plan" or "Premium" tier badge directly below the user's email address on the Account page, making subscription status immediately visible without scrolling.
 
-### Plan
+---
 
-**File: `src/hooks/useAIBetBuilder.ts`** — Enhance the error handling in `buildSlips`:
+## Current State
 
-1. **Add 402 detection** in the `fnError` block (alongside existing 429 check):
-   - Check for `"402"` or `"non-2xx"` in the error message
-   - Set a user-friendly error: "AI service credits exhausted. Please try again later or check your plan."
-   - Show a descriptive toast
+The Account page shows:
+1. User avatar icon
+2. "Logged in" heading
+3. Email address
+4. Feature list
+5. Premium card (further down - easy to miss)
 
-2. **Add no-data detection** for when scoring data is missing:
-   - Check for `"no candidates"` or similar in the error
-   - Show: "Today's prop data isn't ready yet. Try again after games are loaded."
+Users must scroll to the premium card section to understand their tier status.
 
-3. **Improve the generic catch** to show more actionable messages:
-   - Network errors → "Connection failed. Check your internet and try again."
-   - Default → "Something went wrong generating your slip. Please try again."
+---
 
-4. **Add a `retryable` boolean** to state so the UI can show a retry button.
+## Solution
 
-**File: `src/pages/AIBetBuilderPage.tsx`** — Update error display:
+Add a colored badge directly below the email that shows:
 
-5. **Show contextual error UI** with an Alert component instead of just toast:
-   - Different icons/colors for credits vs network vs generic errors
-   - Add a "Try Again" button next to the error message
+| Status | Badge Display |
+|--------|---------------|
+| Loading | Gray spinner badge |
+| Free | "Free Plan" - neutral gray badge |
+| Premium | "Premium" - green badge with check icon |
 
-This is a small, focused change across 2 files.
+---
+
+## Visual Design
+
+**Free Plan Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌──────────────┐           │
+│      │  Free Plan   │  ← Gray   │
+│      └──────────────┘           │
+└─────────────────────────────────┘
+```
+
+**Premium Badge:**
+```
+┌─────────────────────────────────┐
+│        [User Avatar]            │
+│         Logged in               │
+│      user@example.com           │
+│      ┌────────────────┐         │
+│      │ ✓ Premium      │ ← Green │
+│      └────────────────┘         │
+└─────────────────────────────────┘
+```
+
+---
+
+## Implementation
+
+### File: `src/pages/AccountPage.tsx`
+
+**Add tier badge component inline** (lines 207-214):
+
+```tsx
+<div className="text-center space-y-2">
+  <h2 className="text-lg font-semibold text-foreground">
+    Logged in
+  </h2>
+  <p className="text-sm text-muted-foreground break-all">
+    {user.email}
+  </p>
+  
+  {/* NEW: Tier Badge */}
+  {isPremiumLoading ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Checking...
+    </span>
+  ) : isPremium ? (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
+      <Check className="h-3 w-3" />
+      Premium
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+      Free Plan
+    </span>
+  )}
+</div>
+```
+
+---
+
+## Summary
+
+| Change | Description |
+|--------|-------------|
+| Add tier badge | Colored pill badge showing "Free Plan" or "Premium" with icon |
+| Position | Directly below email address for immediate visibility |
+| States | Loading (spinner), Free (gray), Premium (green + check) |
+
+**Files Modified:** `src/pages/AccountPage.tsx`
+
+This makes subscription tier instantly visible at the top of the Account page, so users always know whether they're on Free or Premium without scrolling.
 
