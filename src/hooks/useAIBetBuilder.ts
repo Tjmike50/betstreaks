@@ -32,10 +32,13 @@ export interface MarketDepthData {
   } | null;
 }
 
+export type ErrorType = "credits" | "limit" | "no-data" | "network" | "generic";
+
 export function useAIBetBuilder() {
   const [slips, setSlips] = useState<AISlip[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<ErrorType | null>(null);
   const [marketDepth, setMarketDepth] = useState<MarketDepthData | null>(null);
 
   const buildSlips = async (prompt: string, slipCount = 1, filters?: BuilderFilters) => {
