@@ -544,9 +544,20 @@ export default function AIBetBuilderPage() {
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" />
-              Your AI Slips
+              {isFallback ? "Data-Driven Picks" : "Your AI Slips"}
               <Badge variant="secondary" className="text-[10px]">{slips.length}</Badge>
             </h2>
+            {/* Fallback banner */}
+            {isFallback && (
+              <Card className="border-blue-500/30 bg-blue-500/5">
+                <CardContent className="pt-3 pb-3 flex items-start gap-2.5">
+                  <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-muted-foreground">
+                    These picks were built from scored data without AI formatting. Try again later for full AI analysis.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
             {/* Market depth summary */}
             {marketDepth && <MarketDepthSummary data={marketDepth} slips={slips} />}
             {/* Show active filters above results */}
