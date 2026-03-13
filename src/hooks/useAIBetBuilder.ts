@@ -99,8 +99,15 @@ export function useAIBetBuilder() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to generate slips";
-      setError(msg);
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("network")) {
+        setError("Connection failed. Check your internet and try again.");
+        setErrorType("network");
+        toast({ title: "Network error", description: "Check your internet connection.", variant: "destructive" });
+      } else {
+        setError(msg);
+        setErrorType("generic");
+        toast({ title: "Something went wrong", description: msg, variant: "destructive" });
+      }
     } finally {
       setIsLoading(false);
     }
