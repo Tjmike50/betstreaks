@@ -44,6 +44,7 @@ export function useAIBetBuilder() {
   const buildSlips = async (prompt: string, slipCount = 1, filters?: BuilderFilters) => {
     setIsLoading(true);
     setError(null);
+    setErrorType(null);
     setSlips([]);
     setMarketDepth(null);
 
