@@ -40,6 +40,7 @@ export function useAIBetBuilder() {
   const [error, setError] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<ErrorType | null>(null);
   const [marketDepth, setMarketDepth] = useState<MarketDepthData | null>(null);
+  const [isFallback, setIsFallback] = useState(false);
 
   const buildSlips = async (prompt: string, slipCount = 1, filters?: BuilderFilters) => {
     setIsLoading(true);
@@ -47,6 +48,7 @@ export function useAIBetBuilder() {
     setErrorType(null);
     setSlips([]);
     setMarketDepth(null);
+    setIsFallback(false);
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke("ai-bet-builder", {
