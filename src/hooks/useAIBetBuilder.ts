@@ -89,6 +89,7 @@ export function useAIBetBuilder() {
       }
 
       setSlips(data.slips || []);
+      setIsFallback(!!data.fallback);
 
       // Capture market depth debug data
       if (data?.scoring_metadata || data?.debug) {
