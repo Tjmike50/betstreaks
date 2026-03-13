@@ -365,8 +365,11 @@ export default function AIBetBuilderPage() {
     buildSlips(prompt.trim(), slipCount, filters);
   };
 
-  const isLimitError = error?.includes("free") || error?.includes("limit") || error?.includes("Upgrade");
-  const isApiError = error && !isLimitError;
+  const isLimitError = errorType === "limit";
+  const isCreditsError = errorType === "credits";
+  const isNoDataError = errorType === "no-data";
+  const isNetworkError = errorType === "network";
+  const isGenericError = errorType === "generic";
 
   return (
     <div className="min-h-screen bg-background pb-20">
