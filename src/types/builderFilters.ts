@@ -57,6 +57,7 @@ export const DEFAULT_BUILDER_FILTERS: BuilderFilters = {
   betType: null,
   sport: "NBA",
 
+  includeGames: [],
   includeTeams: [],
   excludeTeams: [],
   includePlayers: [],
