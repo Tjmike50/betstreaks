@@ -1176,6 +1176,17 @@ serve(async (req) => {
     const statsToScore = stat_types || ["pts", "reb", "ast", "fg3m", "stl", "blk"];
     const allScored: ScoredProp[] = [];
 
+    // === OPTIMIZATION: Cache defensive context per (opponent, stat) pair ===
+    const defCtxCache: Record<string, ReturnType<typeof computeDefensiveContext>> = {};
+    function getCachedDefCtx(opponent: string | null, stat: string) {
+      if (!opponent) return { avg_allowed: null, games: 0, note: null };
+      const key = `${opponent}:${stat}`;
+      if (!defCtxCache[key]) {
+        defCtxCache[key] = computeDefensiveContext(playerLogs, opponent, stat);
+      }
+      return defCtxCache[key];
+    }
+
     for (const [pidStr, logs] of Object.entries(playerLogs)) {
       const playerId = Number(pidStr);
       const team = logs[0]?.team_abbr;
@@ -1195,12 +1206,13 @@ serve(async (req) => {
 
       for (const stat of statsToScore) {
         const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
-        const defCtx = computeDefensiveContext(playerLogs, opponent, stat);
+        const defCtx = getCachedDefCtx(opponent, stat);
 
         const tmRosters = teamRosters[team] || new Map();
+        // Compute teammate context once per stat (reuse for all thresholds)
         const teammateCtx = computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
 
-        // Identify key teammate IDs for availability check
+        // Identify key teammate IDs once per stat
         const keyTmIds = teammateCtx.with_without_splits.map(s => {
           for (const [pid, pLogs] of Object.entries(playerLogs)) {
             if (pLogs[0]?.player_name === s.teammate) return Number(pid);
@@ -1214,15 +1226,14 @@ serve(async (req) => {
 
         for (const threshold of thresholds) {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
-          const tmCtxForThreshold = threshold === thresholds[0] ? teammateCtx :
-            computeTeammateContext(playerId, logs, stat, threshold, team, tmRosters, playerLogs);
 
           // Compute market movement for this specific prop
           const STAT_LABELS_REV: Record<string, string> = { pts: "Points", reb: "Rebounds", ast: "Assists", fg3m: "3-Pointers", stl: "Steals", blk: "Blocks" };
           const playerName = logs[0]?.player_name || "";
           const mktMovement = computeMarketMovement(playerName, STAT_LABELS_REV[stat] || stat, threshold, lineSnapshots);
 
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx, mktMovement);
+          // Reuse teammate context for all thresholds (the threshold only affects scoring, not teammate identification)
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, teammateCtx, availCtx, mktMovement);
           if (scored) allScored.push(scored);
         }
       }
