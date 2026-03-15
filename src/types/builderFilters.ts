@@ -145,6 +145,7 @@ export function filtersToPromptConstraints(filters: BuilderFilters): string {
   if (filters.overUnder === "under") parts.push("Unders only");
   if (filters.sameGameOnly) parts.push("Same-game parlay only");
   if (filters.crossGameOnly) parts.push("Cross-game only");
+  if (filters.includeGames.length) parts.push(`Only use players from these game IDs: ${filters.includeGames.join(", ")}`);
   if (filters.includeTeams.length) parts.push(`Include teams: ${filters.includeTeams.join(", ")}`);
   if (filters.excludeTeams.length) parts.push(`Exclude teams: ${filters.excludeTeams.join(", ")}`);
   if (filters.includePlayers.length) parts.push(`Include players: ${filters.includePlayers.join(", ")}`);
