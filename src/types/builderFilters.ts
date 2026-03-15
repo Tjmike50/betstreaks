@@ -13,6 +13,7 @@ export interface BuilderFilters {
   sport: string;
 
   // Game / Team / Player
+  includeGames: string[]; // game IDs from games_today
   includeTeams: string[];
   excludeTeams: string[];
   includePlayers: string[];
