@@ -1183,6 +1183,7 @@ serve(async (req) => {
       if (snaps) lineSnapshots = snaps as LineSnapshot[];
       console.log(`Loaded ${lineSnapshots.length} line snapshots for market movement analysis`);
     }
+    const snapshotIndex = buildSnapshotIndex(lineSnapshots);
 
     const statsToScore = stat_types || ["pts", "reb", "ast", "fg3m", "stl", "blk"];
     const allScored: ScoredProp[] = [];
