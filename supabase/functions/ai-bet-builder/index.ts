@@ -921,6 +921,11 @@ serve(async (req) => {
       else if (betType === "totals") gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "total");
       else if (betType === "player_props") gameLevelCandidates = [];
     }
+    if (gameFilterTeams && gameFilterTeams.size > 0) {
+      gameLevelCandidates = gameLevelCandidates.filter(c =>
+        gameFilterTeams!.has(resolveToAbbr(c.home_team)) || gameFilterTeams!.has(resolveToAbbr(c.away_team))
+      );
+    }
     if (filters?.includeTeams?.length > 0) {
       const teams = new Set(filters.includeTeams.map((t: string) => t.toUpperCase()));
       gameLevelCandidates = gameLevelCandidates.filter(c =>
