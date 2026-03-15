@@ -977,21 +977,19 @@ function computeMarketMovement(
   playerName: string,
   statType: string,
   threshold: number,
-  snapshots: LineSnapshot[]
+  snapshotIndex: Map<string, LineSnapshot[]>
 ): MarketMovement | null {
-  // Filter relevant snapshots
-  const relevant = snapshots
-    .filter(s => s.player_name === playerName && s.stat_type === statType && Number(s.threshold) === threshold)
-    .sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
+  // Use pre-indexed snapshots for O(1) lookup
+  const key = `${playerName}|${statType}|${threshold}`;
+  const relevant = snapshotIndex.get(key);
 
-  // Require at least 2 snapshots from different time periods to draw conclusions
-  if (relevant.length < 2) return null;
+  if (!relevant || relevant.length < 2) return null;
 
-  // Check time spread: if all snapshots are within 5 minutes, treat as single data point
+  // Check time spread
   const firstTime = new Date(relevant[0].snapshot_at).getTime();
   const lastTime = new Date(relevant[relevant.length - 1].snapshot_at).getTime();
   const spanMinutes = (lastTime - firstTime) / (1000 * 60);
-  if (spanMinutes < 30) return null; // Need at least 30min between first and last snapshot
+  if (spanMinutes < 30) return null;
 
   const opening = relevant[0];
   const current = relevant[relevant.length - 1];
@@ -1001,7 +999,6 @@ function computeMarketMovement(
 
   let odds_improved: boolean | null = null;
   if (openOdds != null && currOdds != null) {
-    // For over bets: higher American odds = better value (e.g., -110 → +100 is better)
     odds_improved = currOdds > openOdds;
   }
 
@@ -1014,7 +1011,6 @@ function computeMarketMovement(
     line_moved = "unchanged";
   }
 
-  // Generate movement note
   let movement_note: string | null = null;
   if (odds_improved === true && openOdds != null && currOdds != null) {
     movement_note = `Value improved: ${opening.over_odds} → ${current.over_odds}`;
@@ -1036,6 +1032,21 @@ function computeMarketMovement(
     odds_improved,
     movement_note,
   };
+}
+
+// Pre-index line snapshots for fast lookup
+function buildSnapshotIndex(snapshots: LineSnapshot[]): Map<string, LineSnapshot[]> {
+  const index = new Map<string, LineSnapshot[]>();
+  for (const s of snapshots) {
+    const key = `${s.player_name}|${s.stat_type}|${Number(s.threshold)}`;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key)!.push(s);
+  }
+  // Sort each group by time
+  for (const [, arr] of index) {
+    arr.sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
+  }
+  return index;
 }
 
 serve(async (req) => {
@@ -1172,9 +1183,21 @@ serve(async (req) => {
       if (snaps) lineSnapshots = snaps as LineSnapshot[];
       console.log(`Loaded ${lineSnapshots.length} line snapshots for market movement analysis`);
     }
+    const snapshotIndex = buildSnapshotIndex(lineSnapshots);
 
     const statsToScore = stat_types || ["pts", "reb", "ast", "fg3m", "stl", "blk"];
     const allScored: ScoredProp[] = [];
+
+    // === OPTIMIZATION: Cache defensive context per (opponent, stat) pair ===
+    const defCtxCache: Record<string, ReturnType<typeof computeDefensiveContext>> = {};
+    function getCachedDefCtx(opponent: string | null, stat: string) {
+      if (!opponent) return { avg_allowed: null, games: 0, note: null };
+      const key = `${opponent}:${stat}`;
+      if (!defCtxCache[key]) {
+        defCtxCache[key] = computeDefensiveContext(playerLogs, opponent, stat);
+      }
+      return defCtxCache[key];
+    }
 
     for (const [pidStr, logs] of Object.entries(playerLogs)) {
       const playerId = Number(pidStr);
@@ -1195,12 +1218,13 @@ serve(async (req) => {
 
       for (const stat of statsToScore) {
         const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
-        const defCtx = computeDefensiveContext(playerLogs, opponent, stat);
+        const defCtx = getCachedDefCtx(opponent, stat);
 
         const tmRosters = teamRosters[team] || new Map();
+        // Compute teammate context once per stat (reuse for all thresholds)
         const teammateCtx = computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
 
-        // Identify key teammate IDs for availability check
+        // Identify key teammate IDs once per stat
         const keyTmIds = teammateCtx.with_without_splits.map(s => {
           for (const [pid, pLogs] of Object.entries(playerLogs)) {
             if (pLogs[0]?.player_name === s.teammate) return Number(pid);
@@ -1214,15 +1238,14 @@ serve(async (req) => {
 
         for (const threshold of thresholds) {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
-          const tmCtxForThreshold = threshold === thresholds[0] ? teammateCtx :
-            computeTeammateContext(playerId, logs, stat, threshold, team, tmRosters, playerLogs);
 
           // Compute market movement for this specific prop
           const STAT_LABELS_REV: Record<string, string> = { pts: "Points", reb: "Rebounds", ast: "Assists", fg3m: "3-Pointers", stl: "Steals", blk: "Blocks" };
           const playerName = logs[0]?.player_name || "";
-          const mktMovement = computeMarketMovement(playerName, STAT_LABELS_REV[stat] || stat, threshold, lineSnapshots);
+          const mktMovement = computeMarketMovement(playerName, STAT_LABELS_REV[stat] || stat, threshold, snapshotIndex);
 
-          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, tmCtxForThreshold, availCtx, mktMovement);
+          // Reuse teammate context for all thresholds (the threshold only affects scoring, not teammate identification)
+          const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, teammateCtx, availCtx, mktMovement);
           if (scored) allScored.push(scored);
         }
       }
