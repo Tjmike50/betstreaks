@@ -977,21 +977,19 @@ function computeMarketMovement(
   playerName: string,
   statType: string,
   threshold: number,
-  snapshots: LineSnapshot[]
+  snapshotIndex: Map<string, LineSnapshot[]>
 ): MarketMovement | null {
-  // Filter relevant snapshots
-  const relevant = snapshots
-    .filter(s => s.player_name === playerName && s.stat_type === statType && Number(s.threshold) === threshold)
-    .sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
+  // Use pre-indexed snapshots for O(1) lookup
+  const key = `${playerName}|${statType}|${threshold}`;
+  const relevant = snapshotIndex.get(key);
 
-  // Require at least 2 snapshots from different time periods to draw conclusions
-  if (relevant.length < 2) return null;
+  if (!relevant || relevant.length < 2) return null;
 
-  // Check time spread: if all snapshots are within 5 minutes, treat as single data point
+  // Check time spread
   const firstTime = new Date(relevant[0].snapshot_at).getTime();
   const lastTime = new Date(relevant[relevant.length - 1].snapshot_at).getTime();
   const spanMinutes = (lastTime - firstTime) / (1000 * 60);
-  if (spanMinutes < 30) return null; // Need at least 30min between first and last snapshot
+  if (spanMinutes < 30) return null;
 
   const opening = relevant[0];
   const current = relevant[relevant.length - 1];
@@ -1001,7 +999,6 @@ function computeMarketMovement(
 
   let odds_improved: boolean | null = null;
   if (openOdds != null && currOdds != null) {
-    // For over bets: higher American odds = better value (e.g., -110 → +100 is better)
     odds_improved = currOdds > openOdds;
   }
 
@@ -1014,7 +1011,6 @@ function computeMarketMovement(
     line_moved = "unchanged";
   }
 
-  // Generate movement note
   let movement_note: string | null = null;
   if (odds_improved === true && openOdds != null && currOdds != null) {
     movement_note = `Value improved: ${opening.over_odds} → ${current.over_odds}`;
@@ -1036,6 +1032,21 @@ function computeMarketMovement(
     odds_improved,
     movement_note,
   };
+}
+
+// Pre-index line snapshots for fast lookup
+function buildSnapshotIndex(snapshots: LineSnapshot[]): Map<string, LineSnapshot[]> {
+  const index = new Map<string, LineSnapshot[]>();
+  for (const s of snapshots) {
+    const key = `${s.player_name}|${s.stat_type}|${Number(s.threshold)}`;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key)!.push(s);
+  }
+  // Sort each group by time
+  for (const [, arr] of index) {
+    arr.sort((a, b) => a.snapshot_at.localeCompare(b.snapshot_at));
+  }
+  return index;
 }
 
 serve(async (req) => {
