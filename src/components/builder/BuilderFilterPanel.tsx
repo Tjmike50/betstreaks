@@ -25,6 +25,7 @@ import {
 import { BuilderQuickChips } from "./BuilderQuickChips";
 import { BuilderActiveFilters } from "./BuilderActiveFilters";
 import { TeamMultiSelect } from "./TeamMultiSelect";
+import { GameSelector } from "./GameSelector";
 
 interface Props {
   filters: BuilderFilters;
@@ -246,6 +247,10 @@ export function BuilderFilterPanel({ filters, onChange, isPremium }: Props) {
 
           {/* ── TEAM / PLAYER FILTERS ── */}
           <Section title="Teams & Players" icon={<Users className="h-4 w-4" />}>
+            <GameSelector
+              values={filters.includeGames}
+              onChange={(v) => update({ includeGames: v })}
+            />
             <div className="relative">
               <TeamMultiSelect
                 label="Include Teams"

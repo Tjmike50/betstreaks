@@ -13,6 +13,7 @@ export interface BuilderFilters {
   sport: string;
 
   // Game / Team / Player
+  includeGames: string[]; // game IDs from games_today
   includeTeams: string[];
   excludeTeams: string[];
   includePlayers: string[];
@@ -56,6 +57,7 @@ export const DEFAULT_BUILDER_FILTERS: BuilderFilters = {
   betType: null,
   sport: "NBA",
 
+  includeGames: [],
   includeTeams: [],
   excludeTeams: [],
   includePlayers: [],
@@ -101,6 +103,7 @@ export function getActiveBuilderFilterCount(filters: BuilderFilters): number {
   if (filters.legCount !== d.legCount) count++;
   if (filters.riskLevel !== d.riskLevel) count++;
   if (filters.betType !== d.betType) count++;
+  if (filters.includeGames.length > 0) count++;
   if (filters.includeTeams.length > 0) count++;
   if (filters.excludeTeams.length > 0) count++;
   if (filters.includePlayers.length > 0) count++;
@@ -142,6 +145,7 @@ export function filtersToPromptConstraints(filters: BuilderFilters): string {
   if (filters.overUnder === "under") parts.push("Unders only");
   if (filters.sameGameOnly) parts.push("Same-game parlay only");
   if (filters.crossGameOnly) parts.push("Cross-game only");
+  if (filters.includeGames.length) parts.push(`Only use players from these game IDs: ${filters.includeGames.join(", ")}`);
   if (filters.includeTeams.length) parts.push(`Include teams: ${filters.includeTeams.join(", ")}`);
   if (filters.excludeTeams.length) parts.push(`Exclude teams: ${filters.excludeTeams.join(", ")}`);
   if (filters.includePlayers.length) parts.push(`Include players: ${filters.includePlayers.join(", ")}`);

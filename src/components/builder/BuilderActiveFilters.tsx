@@ -22,6 +22,7 @@ export function BuilderActiveFilters({ filters, onChange, onClearAll }: Props) {
   if (filters.overUnder !== "both") chips.push({ label: `${filters.overUnder} only`, clear: () => onChange({ ...filters, overUnder: "both" }) });
   if (filters.sameGameOnly) chips.push({ label: "SGP", clear: () => onChange({ ...filters, sameGameOnly: false }) });
   if (filters.crossGameOnly) chips.push({ label: "Cross-game", clear: () => onChange({ ...filters, crossGameOnly: false }) });
+  if (filters.includeGames.length) chips.push({ label: `${filters.includeGames.length} game${filters.includeGames.length > 1 ? "s" : ""}`, clear: () => onChange({ ...filters, includeGames: [] }) });
   if (filters.includeTeams.length) chips.push({ label: `+${filters.includeTeams.join(",")}`, clear: () => onChange({ ...filters, includeTeams: [] }) });
   if (filters.excludeTeams.length) chips.push({ label: `-${filters.excludeTeams.join(",")}`, clear: () => onChange({ ...filters, excludeTeams: [] }) });
   if (filters.includePlayers.length) chips.push({ label: `+Players(${filters.includePlayers.length})`, clear: () => onChange({ ...filters, includePlayers: [] }) });

@@ -554,11 +554,25 @@ serve(async (req) => {
       if (homeAbbr) teamsPlayingToday.add(homeAbbr);
       if (awayAbbr) teamsPlayingToday.add(awayAbbr);
     }
-    const { data: gamesTodayRows } = await serviceClient.from("games_today").select("home_team_abbr, away_team_abbr").eq("game_date", todayStr);
+    const { data: gamesTodayRows } = await serviceClient.from("games_today").select("id, home_team_abbr, away_team_abbr").eq("game_date", todayStr);
     for (const g of gamesTodayRows || []) {
       if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
       if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
     }
+
+    // If user selected specific games, restrict teams to only those games
+    let gameFilterTeams: Set<string> | null = null;
+    if (filters?.includeGames?.length > 0) {
+      gameFilterTeams = new Set<string>();
+      for (const g of gamesTodayRows || []) {
+        if (filters.includeGames.includes(g.id)) {
+          if (g.home_team_abbr) gameFilterTeams.add(g.home_team_abbr.toUpperCase());
+          if (g.away_team_abbr) gameFilterTeams.add(g.away_team_abbr.toUpperCase());
+        }
+      }
+      console.log(`[AI-Builder] Game filter active — restricting to teams: ${[...gameFilterTeams].join(", ")}`);
+    }
+
     console.log(`[AI-Builder] Teams playing today: ${[...teamsPlayingToday].join(", ")} (${teamsPlayingToday.size} teams)`);
 
     // Fetch live player props from multiple sportsbooks
@@ -819,6 +833,10 @@ serve(async (req) => {
     let filteredCandidates = [...marketFilteredCandidates];
     if (filters && includePlayerProps) {
       const f = filters;
+      // Game selector filter — restrict to teams from selected games
+      if (gameFilterTeams && gameFilterTeams.size > 0) {
+        filteredCandidates = filteredCandidates.filter(c => c.team_abbr && gameFilterTeams!.has(c.team_abbr.toUpperCase()));
+      }
       if (f.statTypes?.length > 0) {
         const allowedStats = new Set(f.statTypes.map((s: string) => normStat(s)));
         filteredCandidates = filteredCandidates.filter(c => allowedStats.has(c.stat_key));
@@ -902,6 +920,11 @@ serve(async (req) => {
       else if (betType === "spread") gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "spread");
       else if (betType === "totals") gameLevelCandidates = gameLevelCandidates.filter(c => c.type === "total");
       else if (betType === "player_props") gameLevelCandidates = [];
+    }
+    if (gameFilterTeams && gameFilterTeams.size > 0) {
+      gameLevelCandidates = gameLevelCandidates.filter(c =>
+        gameFilterTeams!.has(resolveToAbbr(c.home_team)) || gameFilterTeams!.has(resolveToAbbr(c.away_team))
+      );
     }
     if (filters?.includeTeams?.length > 0) {
       const teams = new Set(filters.includeTeams.map((t: string) => t.toUpperCase()));
