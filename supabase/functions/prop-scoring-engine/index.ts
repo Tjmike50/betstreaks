@@ -1242,7 +1242,7 @@ serve(async (req) => {
           // Compute market movement for this specific prop
           const STAT_LABELS_REV: Record<string, string> = { pts: "Points", reb: "Rebounds", ast: "Assists", fg3m: "3-Pointers", stl: "Steals", blk: "Blocks" };
           const playerName = logs[0]?.player_name || "";
-          const mktMovement = computeMarketMovement(playerName, STAT_LABELS_REV[stat] || stat, threshold, lineSnapshots);
+          const mktMovement = computeMarketMovement(playerName, STAT_LABELS_REV[stat] || stat, threshold, snapshotIndex);
 
           // Reuse teammate context for all thresholds (the threshold only affects scoring, not teammate identification)
           const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, teammateCtx, availCtx, mktMovement);
