@@ -833,6 +833,10 @@ serve(async (req) => {
     let filteredCandidates = [...marketFilteredCandidates];
     if (filters && includePlayerProps) {
       const f = filters;
+      // Game selector filter — restrict to teams from selected games
+      if (gameFilterTeams && gameFilterTeams.size > 0) {
+        filteredCandidates = filteredCandidates.filter(c => c.team_abbr && gameFilterTeams!.has(c.team_abbr.toUpperCase()));
+      }
       if (f.statTypes?.length > 0) {
         const allowedStats = new Set(f.statTypes.map((s: string) => normStat(s)));
         filteredCandidates = filteredCandidates.filter(c => allowedStats.has(c.stat_key));
