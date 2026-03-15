@@ -103,6 +103,7 @@ export function getActiveBuilderFilterCount(filters: BuilderFilters): number {
   if (filters.legCount !== d.legCount) count++;
   if (filters.riskLevel !== d.riskLevel) count++;
   if (filters.betType !== d.betType) count++;
+  if (filters.includeGames.length > 0) count++;
   if (filters.includeTeams.length > 0) count++;
   if (filters.excludeTeams.length > 0) count++;
   if (filters.includePlayers.length > 0) count++;
