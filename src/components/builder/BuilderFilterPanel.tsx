@@ -25,6 +25,7 @@ import {
 import { BuilderQuickChips } from "./BuilderQuickChips";
 import { BuilderActiveFilters } from "./BuilderActiveFilters";
 import { TeamMultiSelect } from "./TeamMultiSelect";
+import { GameSelector } from "./GameSelector";
 
 interface Props {
   filters: BuilderFilters;
