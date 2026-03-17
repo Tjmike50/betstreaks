@@ -578,10 +578,24 @@ serve(async (req) => {
     // Fetch live player props from multiple sportsbooks
     let livePropsCount = 0;
     const lineSnapshotRows: any[] = [];
-    const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[] = [];
+    const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string; game_home_abbr?: string; game_away_abbr?: string }[] = [];
+
+    // Map player names to their game's teams for team_abbr resolution
+    const playerToGameTeams = new Map<string, { home: string; away: string }>();
 
     if (includePlayerProps) {
-      for (const game of gamesData.slice(0, 5)) {
+      // Filter games to only selected ones if game filter is active
+      const gamesToFetchProps = gameFilterTeams && gameFilterTeams.size > 0
+        ? gamesData.filter((g: any) => {
+            const homeAbbr = resolveToAbbr(g.home_team || "");
+            const awayAbbr = resolveToAbbr(g.away_team || "");
+            return gameFilterTeams!.has(homeAbbr) || gameFilterTeams!.has(awayAbbr);
+          })
+        : gamesData;
+      console.log(`[AI-Builder] Fetching props from ${gamesToFetchProps.length} games${gameFilterTeams ? ` (filtered from ${gamesData.length})` : ""}`);
+      for (const game of gamesToFetchProps.slice(0, 5)) {
+        const gameHomeAbbr = resolveToAbbr(game.home_team || "");
+        const gameAwayAbbr = resolveToAbbr(game.away_team || "");
         try {
           const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
           const propsRes = await fetch(propsUrl);
