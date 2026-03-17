@@ -1049,7 +1049,29 @@ function buildSnapshotIndex(snapshots: LineSnapshot[]): Map<string, LineSnapshot
   return index;
 }
 
-serve(async (req) => {
+// Name normalization matching ai-bet-builder's normName
+function normNameScoring(n: string): string {
+  return n
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(jr\.?|sr\.?|ii|iii|iv)\b/gi, "")
+    .replace(/[^a-z ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normStatScoring(s: string): string {
+  const lower = s.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (lower === "points" || lower === "pts") return "pts";
+  if (lower === "rebounds" || lower === "reb" || lower === "totalrebounds") return "reb";
+  if (lower === "assists" || lower === "ast") return "ast";
+  if (lower === "3-pointers" || lower === "3pointers" || lower === "3pm" || lower === "fg3m" || lower === "threes") return "fg3m";
+  if (lower === "steals" || lower === "stl") return "stl";
+  if (lower === "blocks" || lower === "blk") return "blk";
+  return lower;
+}
+
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
