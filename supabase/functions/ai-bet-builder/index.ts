@@ -298,9 +298,16 @@ function detectExtremeMovement(
   return null;
 }
 
-// Normalize name for fuzzy matching
+// Normalize name for fuzzy matching — transliterate diacritics and strip suffixes
 function normName(n: string): string {
-  return n.toLowerCase().replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
+  return n
+    .normalize("NFD")                    // decompose diacritics: ć → c + combining accent
+    .replace(/[\u0300-\u036f]/g, "")     // strip combining marks: Jokić → Jokic
+    .toLowerCase()
+    .replace(/\b(jr\.?|sr\.?|ii|iii|iv)\b/gi, "")  // strip suffixes: Jr. Jr Sr III
+    .replace(/[^a-z ]/g, "")             // strip remaining non-alpha
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // Normalize stat type for matching
