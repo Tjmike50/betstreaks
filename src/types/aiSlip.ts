@@ -40,6 +40,10 @@ export interface LegDataContext {
   spread?: number | null;
   total_line?: number | null;
   pick_side?: string | null;
+  // Scoring freshness fields
+  scoring_source?: "today" | "auto-triggered" | "yesterday" | "none" | null;
+  scoring_stale?: boolean | null;
+  scoring_freshness_note?: string | null;
 }
 
 export type LegBetType = "player_prop" | "moneyline" | "spread" | "total";

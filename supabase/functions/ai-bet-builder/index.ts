@@ -1631,6 +1631,17 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         // Force threshold from verified market
         leg.line = `${pick === "under" ? "Under" : "Over"} ${verifiedCandidate.threshold}`;
 
+        // Determine scoring freshness for this leg
+        const hasScoringData = verifiedCandidate.confidence_score != null && verifiedCandidate.confidence_score !== 0;
+        const isScoringStale = scoringSource === "yesterday" || scoringSource === "none" || (!hasScoringData && scoringSource !== "today");
+        const scoringFreshnessNote = !hasScoringData
+          ? "Scoring data not yet available for this player"
+          : scoringSource === "yesterday"
+          ? "Using yesterday's scoring data"
+          : scoringSource === "auto-triggered"
+          ? "Scoring auto-refreshed"
+          : null;
+
         const realContext: Record<string, any> = {
           season_avg: verifiedCandidate.season_avg,
           last5_avg: verifiedCandidate.last5_avg,
@@ -1651,6 +1662,10 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
           is_main_line: verifiedCandidate.is_main_line,
           edge: pick === "under" ? verifiedCandidate.edge_under : verifiedCandidate.edge_over,
           market_threshold: verifiedCandidate.threshold,
+          // Scoring freshness
+          scoring_source: scoringSource,
+          scoring_stale: isScoringStale,
+          scoring_freshness_note: scoringFreshnessNote,
         };
 
         if (verifiedCandidate.last10_hit_rate != null) realContext.last10_hit_rate = `${Math.round(verifiedCandidate.last10_hit_rate * 100)}%`;
