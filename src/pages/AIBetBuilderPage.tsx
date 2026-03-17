@@ -125,13 +125,50 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
   );
 }
 
+function ScoringFreshnessBadge({ ctx }: { ctx: LegDataContext }) {
+  if (!ctx.scoring_stale && ctx.scoring_source !== "yesterday" && ctx.scoring_source !== "auto-triggered") return null;
+  
+  const isYesterday = ctx.scoring_source === "yesterday";
+  const isAutoTriggered = ctx.scoring_source === "auto-triggered";
+  const isMissing = ctx.scoring_stale && !isYesterday;
+  
+  if (isAutoTriggered && !ctx.scoring_stale) return null; // auto-triggered + fresh = no warning
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1.5">
+      {isYesterday && (
+        <span className="inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          ⏳ Yesterday's data
+        </span>
+      )}
+      {isMissing && !isYesterday && (
+        <span className="inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-muted/30 text-muted-foreground border border-border/30">
+          ◌ Limited scoring context
+        </span>
+      )}
+      {ctx.scoring_freshness_note && (
+        <span className="text-[8px] text-muted-foreground italic">{ctx.scoring_freshness_note}</span>
+      )}
+    </div>
+  );
+}
+
 function LegDataBar({ ctx }: { ctx: LegDataContext }) {
   const allStatsNull = ctx.confidence_score == null && ctx.value_score == null && ctx.season_avg == null && ctx.volatility_label == null;
 
   if (allStatsNull) {
     return (
-      <div className="mt-2 pt-2 border-t border-border/20 text-center">
-        <span className="text-[10px] text-muted-foreground italic">Scoring data pending — stats populate after the scoring engine runs</span>
+      <div className="mt-2 pt-2 border-t border-border/20 space-y-1">
+        <div className="text-center">
+          <span className="inline-flex items-center gap-1 text-[9px] font-medium px-2 py-1 rounded-full bg-muted/20 text-muted-foreground border border-border/20">
+            ◌ Scoring data pending
+          </span>
+        </div>
+        {ctx.scoring_freshness_note && (
+          <div className="text-center">
+            <span className="text-[8px] text-muted-foreground italic">{ctx.scoring_freshness_note}</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -298,6 +335,9 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
 
             {/* Data context chips */}
             {leg.data_context && <DataContextChips ctx={leg.data_context} />}
+
+            {/* Scoring freshness warning */}
+            {!isGameLevel && leg.data_context && <ScoringFreshnessBadge ctx={leg.data_context} />}
 
             {/* Data context bar — only for player props */}
             {!isGameLevel && leg.data_context && <LegDataBar ctx={leg.data_context} />}
