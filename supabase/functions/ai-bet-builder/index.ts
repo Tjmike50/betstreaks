@@ -1855,6 +1855,12 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         fallback_used: debug.fallback_used,
         scoring_data_available: scoredProps.length,
         scoring_source: scoringSource,
+        enrichment_coverage: {
+          full: enrichmentFull,
+          partial: enrichmentPartial,
+          none: enrichmentNone,
+          miss_reasons: enrichmentMissReasons,
+        },
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
