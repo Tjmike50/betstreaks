@@ -1,9 +1,25 @@
-import { Check } from "lucide-react";
+import { Check, Circle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { getTeamMeta } from "@/lib/nbaTeamMeta";
 import { useGamesToday } from "@/hooks/useGamesToday";
-import { X } from "lucide-react";
+
+function formatGameTime(gameTime: string | null, status: string | null): { label: string; isLive: boolean } {
+  const s = (status || "").toLowerCase();
+  if (s.includes("qtr") || s.includes("half") || s.includes("ot")) {
+    return { label: status!, isLive: true };
+  }
+  if (s.includes("final")) {
+    return { label: "Final", isLive: false };
+  }
+  if (gameTime && gameTime.includes("ET")) {
+    return { label: gameTime.replace(/\s+ET$/, " ET"), isLive: false };
+  }
+  if (gameTime) {
+    return { label: gameTime, isLive: false };
+  }
+  return { label: "", isLive: false };
+}
 
 interface Props {
   values: string[];
