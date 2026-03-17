@@ -19,6 +19,7 @@ export interface MarketDepthData {
   mode: string;
   fallback_used: boolean;
   scoring_data_available: number;
+  scoring_source: "today" | "auto-triggered" | "yesterday" | "none";
   market_quality: {
     before_market_filters: number;
     removed_by_verified_only: number;

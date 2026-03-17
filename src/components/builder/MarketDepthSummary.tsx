@@ -133,9 +133,21 @@ export function MarketDepthSummary({ data, slips }: Props) {
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-primary" />
           <span className="text-xs font-semibold text-primary">Market Depth Summary</span>
-          <span className="text-[9px] text-muted-foreground ml-auto font-mono">
-            {data.mode === "verified_market_first" ? "✓ Verified-first" : data.mode}
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {data.scoring_source && (
+              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border ${
+                data.scoring_source === "today" ? "bg-green-500/10 text-green-400 border-green-500/20"
+                  : data.scoring_source === "auto-triggered" ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                  : data.scoring_source === "yesterday" ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
+                  : "bg-muted/20 text-muted-foreground border-border/30"
+              }`}>
+                Scoring: {data.scoring_source}
+              </span>
+            )}
+            <span className="text-[9px] text-muted-foreground font-mono">
+              {data.mode === "verified_market_first" ? "✓ Verified-first" : data.mode}
+            </span>
+          </div>
         </div>
 
         {/* Slip-level trust banner */}
