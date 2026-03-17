@@ -766,18 +766,55 @@ serve(async (req) => {
     }
     debug.scoring_source = scoringSource;
 
-    // Build scoring lookup: normName|statKey -> best scoring row (for enrichment)
+    // Build scoring lookup: normName|statKey|threshold -> scoring row, plus normName|statKey -> all rows
     const scoringLookup = new Map<string, any>();
+    const scoringByPlayerStat = new Map<string, any[]>(); // for closest-threshold fallback
     for (const p of scoredProps) {
       const pKey = `${normName(p.player_name)}|${normStat(p.stat_type)}`;
       const pKeyThreshold = `${pKey}|${p.threshold}`;
-      // Prefer exact threshold match; otherwise store best by confidence
       if (!scoringLookup.has(pKeyThreshold)) scoringLookup.set(pKeyThreshold, p);
+      // Best-by-confidence for fuzzy key
       const existing = scoringLookup.get(pKey);
       if (!existing || (p.confidence_score ?? 0) > (existing.confidence_score ?? 0)) {
         scoringLookup.set(pKey, p);
       }
+      // Collect all rows per player|stat for closest-threshold lookup
+      if (!scoringByPlayerStat.has(pKey)) scoringByPlayerStat.set(pKey, []);
+      scoringByPlayerStat.get(pKey)!.push(p);
     }
+
+    // Helper: find best scoring match for a verified candidate
+    function findScoringMatch(playerName: string, statType: string, threshold: number): any | null {
+      const pNorm = normName(playerName);
+      const statKey = STAT_LABEL_TO_KEY[statType] || normStat(statType);
+      const exactKey = `${pNorm}|${statKey}|${threshold}`;
+      
+      // 1. Exact threshold match
+      if (scoringLookup.has(exactKey)) return scoringLookup.get(exactKey);
+      
+      // 2. Closest threshold match (within 2.0 tolerance)
+      const allForStat = scoringByPlayerStat.get(`${pNorm}|${statKey}`);
+      if (allForStat && allForStat.length > 0) {
+        let closest: any = null;
+        let closestDist = Infinity;
+        for (const row of allForStat) {
+          const dist = Math.abs(Number(row.threshold) - threshold);
+          if (dist < closestDist) {
+            closestDist = dist;
+            closest = row;
+          }
+        }
+        if (closest && closestDist <= 2.0) return closest;
+      }
+      
+      // 3. Best-by-confidence fallback (any threshold for this player+stat)
+      const fuzzyKey = `${pNorm}|${statKey}`;
+      return scoringLookup.get(fuzzyKey) || null;
+    }
+
+    // ===== ENRICHMENT COVERAGE TRACKING =====
+    let enrichmentFull = 0, enrichmentPartial = 0, enrichmentNone = 0;
+    const enrichmentMissReasons: Record<string, number> = {};
 
     // ===== PHASE 3: BUILD VERIFIED MARKET-FIRST CANDIDATE POOL =====
     // Only include validated bestLine entries as candidates
@@ -789,10 +826,24 @@ serve(async (req) => {
       const statKey = STAT_LABEL_TO_KEY[bl.stat_type] || normStat(bl.stat_type);
       const pNorm = normName(bl.player_name);
 
-      // Find scoring enrichment
-      const exactScoringKey = `${pNorm}|${statKey}|${bl.threshold}`;
-      const fuzzyScoringKey = `${pNorm}|${statKey}`;
-      const scoring = scoringLookup.get(exactScoringKey) || scoringLookup.get(fuzzyScoringKey) || null;
+      // Find scoring enrichment with improved matching
+      const scoring = findScoringMatch(bl.player_name, bl.stat_type, bl.threshold);
+      
+      // Track enrichment coverage
+      if (scoring && scoring.confidence_score != null && scoring.confidence_score > 0) {
+        enrichmentFull++;
+      } else if (scoring) {
+        enrichmentPartial++;
+        const reason = "zero_confidence";
+        enrichmentMissReasons[reason] = (enrichmentMissReasons[reason] || 0) + 1;
+      } else {
+        enrichmentNone++;
+        // Classify why
+        const hasAnyScoring = scoringByPlayerStat.has(`${pNorm}|${statKey}`);
+        const hasPlayer = [...scoringByPlayerStat.keys()].some(k => k.startsWith(`${pNorm}|`));
+        const reason = !hasPlayer ? "player_not_scored" : !hasAnyScoring ? "stat_not_scored" : "threshold_too_far";
+        enrichmentMissReasons[reason] = (enrichmentMissReasons[reason] || 0) + 1;
+      }
 
       // Compute edge
       let edgeOver: number | null = null;
