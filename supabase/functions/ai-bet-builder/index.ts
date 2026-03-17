@@ -709,6 +709,14 @@ serve(async (req) => {
         // Auto-trigger scoring engine
         console.log(`[AI-Builder] Scoring data sparse (${scoredProps.length} < ${SCORING_SPARSE_THRESHOLD}) — auto-triggering scoring engine`);
         try {
+          // Extract market lines from bestLines to pass actual market thresholds
+          const marketLines: { player_name: string; stat_type: string; threshold: number }[] = [];
+          for (const bl of bestLines.values()) {
+            if (bl.odds_validated) {
+              marketLines.push({ player_name: bl.player_name, stat_type: bl.stat_type, threshold: bl.threshold });
+            }
+          }
+
           const scoringUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/prop-scoring-engine`;
           const scoringRes = await Promise.race([
             fetch(scoringUrl, {
@@ -717,7 +725,7 @@ serve(async (req) => {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
               },
-              body: JSON.stringify({ top_n: 200 }),
+              body: JSON.stringify({ top_n: 500, market_lines: marketLines }),
             }),
             new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("scoring-timeout")), 45000)),
           ]);
