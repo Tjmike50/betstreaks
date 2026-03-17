@@ -1358,10 +1358,12 @@ function normStatScoring(s: string): string {
     return new Response(
       JSON.stringify({
         scored_props: topProps,
+        scored_count: topProps.length,
         total_candidates: allScored.length,
         teams_matched: teamsPlaying.length,
         players_analyzed: Object.keys(playerLogs).length,
         scoring_all_players: scoringAllPlayers,
+        market_lines_used: marketThresholdsByPlayer.size > 0,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
