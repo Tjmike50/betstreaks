@@ -1049,6 +1049,29 @@ function buildSnapshotIndex(snapshots: LineSnapshot[]): Map<string, LineSnapshot
   return index;
 }
 
+// Name normalization matching ai-bet-builder's normName
+function normNameScoring(n: string): string {
+  return n
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(jr\.?|sr\.?|ii|iii|iv)\b/gi, "")
+    .replace(/[^a-z ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normStatScoring(s: string): string {
+  const lower = s.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (lower === "points" || lower === "pts") return "pts";
+  if (lower === "rebounds" || lower === "reb" || lower === "totalrebounds") return "reb";
+  if (lower === "assists" || lower === "ast") return "ast";
+  if (lower === "3-pointers" || lower === "3pointers" || lower === "3pm" || lower === "fg3m" || lower === "threes") return "fg3m";
+  if (lower === "steals" || lower === "stl") return "stl";
+  if (lower === "blocks" || lower === "blk") return "blk";
+  return lower;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -1058,7 +1081,23 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     const body = await req.json().catch(() => ({}));
-    const { game_date, top_n = 200, stat_types, thresholds_override, matchups } = body;
+    const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines } = body;
+
+    // market_lines: optional array of {player_name, stat_type, threshold} from live market
+    // When provided, we use market thresholds per player instead of defaults
+    const marketThresholdsByPlayer = new Map<string, Map<string, Set<number>>>();
+    if (market_lines && Array.isArray(market_lines)) {
+      for (const ml of market_lines) {
+        const pName = normNameScoring(ml.player_name || "");
+        const stat = normStatScoring(ml.stat_type || "");
+        if (!pName || !stat) continue;
+        if (!marketThresholdsByPlayer.has(pName)) marketThresholdsByPlayer.set(pName, new Map());
+        const statMap = marketThresholdsByPlayer.get(pName)!;
+        if (!statMap.has(stat)) statMap.set(stat, new Set());
+        statMap.get(stat)!.add(Number(ml.threshold));
+      }
+      console.log(`Loaded ${market_lines.length} market lines for ${marketThresholdsByPlayer.size} players`);
+    }
 
     const today = game_date || new Date().toISOString().split("T")[0];
 
@@ -1217,7 +1256,19 @@ serve(async (req) => {
       const restCtx = computeRestContext(logs, today);
 
       for (const stat of statsToScore) {
-        const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
+        // Use market thresholds if available for this player+stat, otherwise use defaults
+        const playerNorm = normNameScoring(logs[0]?.player_name || "");
+        const playerMarket = marketThresholdsByPlayer.get(playerNorm);
+        const marketThresholdsForStat = playerMarket?.get(stat);
+        
+        let thresholds: number[];
+        if (marketThresholdsForStat && marketThresholdsForStat.size > 0) {
+          // Merge market thresholds with defaults to ensure coverage
+          const combined = new Set([...marketThresholdsForStat, ...(DEFAULT_THRESHOLDS[stat] || [])]);
+          thresholds = [...combined].sort((a, b) => a - b);
+        } else {
+          thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
+        }
         const defCtx = getCachedDefCtx(opponent, stat);
 
         const tmRosters = teamRosters[team] || new Map();
@@ -1308,10 +1359,12 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         scored_props: topProps,
+        scored_count: topProps.length,
         total_candidates: allScored.length,
         teams_matched: teamsPlaying.length,
         players_analyzed: Object.keys(playerLogs).length,
         scoring_all_players: scoringAllPlayers,
+        market_lines_used: marketThresholdsByPlayer.size > 0,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
