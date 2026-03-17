@@ -1350,6 +1350,11 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
               books_count: c.books_count, is_main_line: c.is_main_line,
               edge: pickOver ? c.edge_over : c.edge_under,
               market_threshold: c.threshold,
+              scoring_source: scoringSource,
+              scoring_stale: scoringSource === "yesterday" || scoringSource === "none" || (c.confidence_score == null || c.confidence_score === 0),
+              scoring_freshness_note: (c.confidence_score == null || c.confidence_score === 0)
+                ? "Scoring data not yet available for this player"
+                : scoringSource === "yesterday" ? "Using yesterday's scoring data" : null,
             };
             if (c.last10_hit_rate != null) realContext.last10_hit_rate = `${Math.round(c.last10_hit_rate * 100)}%`;
             if (c.season_hit_rate != null) realContext.line_hit_rate = `${Math.round(c.season_hit_rate * 100)}% over ${c.total_games || "?"} games`;

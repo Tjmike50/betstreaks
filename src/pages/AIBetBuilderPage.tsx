@@ -336,6 +336,9 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
             {/* Data context chips */}
             {leg.data_context && <DataContextChips ctx={leg.data_context} />}
 
+            {/* Scoring freshness warning */}
+            {!isGameLevel && leg.data_context && <ScoringFreshnessBadge ctx={leg.data_context} />}
+
             {/* Data context bar — only for player props */}
             {!isGameLevel && leg.data_context && <LegDataBar ctx={leg.data_context} />}
           </div>
