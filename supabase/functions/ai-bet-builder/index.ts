@@ -677,9 +677,10 @@ serve(async (req) => {
     }
     console.log(`[AI-Builder] Market normalization: ${bestLines.size} unique, ${mainLinesFound} main, ${altLinesDetected} alt, ${sanityRejected} rejected`);
 
-    // Save line snapshots (fire-and-forget)
+    // Save line snapshots (fire-and-forget) — strip game team fields not in DB schema
     if (lineSnapshotRows.length > 0) {
-      serviceClient.from("line_snapshots").insert(lineSnapshotRows)
+      const cleanRows = lineSnapshotRows.map(({ game_home_abbr, game_away_abbr, ...rest }) => rest);
+      serviceClient.from("line_snapshots").insert(cleanRows)
         .then(({ error }) => { if (error) console.error("[AI-Builder] Line snapshot insert error:", error); });
     }
 
