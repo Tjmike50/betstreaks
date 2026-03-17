@@ -45,11 +45,27 @@ export function resolveTeamAbbr(identifier: string | null | undefined): string |
   if (!identifier) return null;
   const upper = identifier.toUpperCase();
   if (teams[upper]) return upper;
-  // Try matching by name
+  // Try matching by name or city
   const lower = identifier.toLowerCase();
   for (const [abbr, meta] of Object.entries(teams)) {
     if (meta.name.toLowerCase() === lower || meta.city.toLowerCase() === lower) return abbr;
   }
+  // Nickname lookup (e.g. "Suns" -> "PHX", "Celtics" -> "BOS")
+  const NICKNAME_MAP: Record<string, string> = {
+    "HAWKS": "ATL", "CELTICS": "BOS", "NETS": "BKN", "HORNETS": "CHA",
+    "BULLS": "CHI", "CAVALIERS": "CLE", "CAVS": "CLE", "MAVERICKS": "DAL", "MAVS": "DAL",
+    "NUGGETS": "DEN", "PISTONS": "DET", "WARRIORS": "GSW", "ROCKETS": "HOU",
+    "PACERS": "IND", "CLIPPERS": "LAC", "LAKERS": "LAL", "GRIZZLIES": "MEM",
+    "HEAT": "MIA", "BUCKS": "MIL", "TIMBERWOLVES": "MIN", "WOLVES": "MIN",
+    "PELICANS": "NOP", "KNICKS": "NYK", "THUNDER": "OKC", "MAGIC": "ORL",
+    "76ERS": "PHI", "SIXERS": "PHI", "SUNS": "PHX", "BLAZERS": "POR",
+    "TRAIL BLAZERS": "POR", "KINGS": "SAC", "SPURS": "SAS", "RAPTORS": "TOR",
+    "JAZZ": "UTA", "WIZARDS": "WAS",
+  };
+  if (NICKNAME_MAP[upper]) return NICKNAME_MAP[upper];
+  // Try last word for multi-word inputs like "Phoenix Suns"
+  const lastWord = upper.split(" ").pop() || upper;
+  if (lastWord !== upper && NICKNAME_MAP[lastWord]) return NICKNAME_MAP[lastWord];
   return null;
 }
 
