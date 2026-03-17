@@ -749,8 +749,11 @@ serve(async (req) => {
         is_main_line: bl.is_main_line,
         implied_over: bl.implied_over,
         implied_under: bl.implied_under,
-        // Scoring enrichment
-        team_abbr: scoring?.team_abbr || null,
+        // Scoring enrichment — fallback to game-derived team if scoring is unavailable
+        team_abbr: scoring?.team_abbr || (() => {
+          const gameTeams = playerToGameTeams.get(pNorm);
+          return gameTeams ? gameTeams.home : null; // Best guess: we know the game but not which team — will be resolved by game filter
+        })(),
         opponent_abbr: scoring?.opponent_abbr || null,
         home_away: scoring?.home_away || null,
         confidence_score: scoring?.confidence_score ?? null,
