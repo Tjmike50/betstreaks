@@ -619,9 +619,13 @@ serve(async (req) => {
                 for (const entry of Object.values(outcomesByPlayer)) {
                   if (entry.player && entry.point != null) {
                     livePropsCount++;
-                    const row = { player_name: entry.player, stat_type: statType, threshold: entry.point, over_odds: entry.over || null, under_odds: entry.under || null, sportsbook: bm.key, game_date: todayStr };
+                    const row = { player_name: entry.player, stat_type: statType, threshold: entry.point, over_odds: entry.over || null, under_odds: entry.under || null, sportsbook: bm.key, game_date: todayStr, game_home_abbr: gameHomeAbbr, game_away_abbr: gameAwayAbbr };
                     lineSnapshotRows.push(row);
                     allLiveProps.push(row);
+                    // Track player -> game teams mapping
+                    if (entry.player && !playerToGameTeams.has(normName(entry.player))) {
+                      playerToGameTeams.set(normName(entry.player), { home: gameHomeAbbr, away: gameAwayAbbr });
+                    }
                   }
                 }
               }
