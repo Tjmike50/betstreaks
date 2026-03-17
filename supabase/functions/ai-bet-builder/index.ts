@@ -717,7 +717,7 @@ serve(async (req) => {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
               },
-              body: JSON.stringify({}),
+              body: JSON.stringify({ top_n: 200 }),
             }),
             new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("scoring-timeout")), 45000)),
           ]);
