@@ -692,62 +692,81 @@ serve(async (req) => {
     }
 
     // ===== PHASE 2: FETCH SCORING DATA FOR ENRICHMENT =====
-    const SCORING_SPARSE_THRESHOLD = 10; // fewer than this = "sparse", worth auto-triggering
+    const SCORING_SPARSE_THRESHOLD = 10;
     let scoredProps: any[] = [];
     let scoringSource: "today" | "auto-triggered" | "yesterday" | "none" = "none";
 
+    // Helper: trigger scoring engine with market lines
+    async function triggerScoringEngine(marketLines: { player_name: string; stat_type: string; threshold: number }[]) {
+      const scoringUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/prop-scoring-engine`;
+      const scoringRes = await Promise.race([
+        fetch(scoringUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify({ top_n: 500, market_lines: marketLines }),
+        }),
+        new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("scoring-timeout")), 45000)),
+      ]);
+      if (!scoringRes.ok) {
+        console.warn(`[AI-Builder] Scoring engine returned ${scoringRes.status}`);
+        await scoringRes.text().catch(() => {});
+        return false;
+      }
+      const scoringResult = await scoringRes.json();
+      console.log(`[AI-Builder] Scoring engine completed: ${scoringResult.scored_count ?? "?"} props scored (market_lines=${marketLines.length})`);
+      const { data: freshScores } = await serviceClient.from("player_prop_scores")
+        .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(1000);
+      if (freshScores && freshScores.length > scoredProps.length) {
+        scoredProps = freshScores;
+        debug.db_candidates_found = scoredProps.length;
+        scoringSource = "auto-triggered";
+        console.log(`[AI-Builder] After scoring: ${scoredProps.length} scored props`);
+      }
+      return true;
+    }
+
     if (includePlayerProps) {
       const { data: dbCandidates } = await serviceClient.from("player_prop_scores")
-        .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(500);
+        .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(1000);
       scoredProps = dbCandidates || [];
       debug.db_candidates_found = scoredProps.length;
+
+      // Extract market lines from bestLines
+      const marketLines: { player_name: string; stat_type: string; threshold: number }[] = [];
+      for (const bl of bestLines.values()) {
+        if (bl.odds_validated) {
+          marketLines.push({ player_name: bl.player_name, stat_type: bl.stat_type, threshold: bl.threshold });
+        }
+      }
 
       if (scoredProps.length >= SCORING_SPARSE_THRESHOLD) {
         scoringSource = "today";
         console.log(`[AI-Builder] Scoring data available: ${scoredProps.length} props for ${todayStr}`);
+
+        // Check coverage: do existing scores cover the market well?
+        const scoredNames = new Set(scoredProps.map((p: any) => normName(p.player_name)));
+        const marketNames = new Set(marketLines.map(ml => normName(ml.player_name)));
+        const uncoveredPlayers = [...marketNames].filter(n => !scoredNames.has(n));
+        const coverageRatio = marketNames.size > 0 ? (marketNames.size - uncoveredPlayers.length) / marketNames.size : 1;
+        
+        if (coverageRatio < 0.6 && marketLines.length > 0) {
+          console.log(`[AI-Builder] Low scoring coverage (${Math.round(coverageRatio * 100)}%, ${uncoveredPlayers.length} uncovered players) — re-scoring with market lines`);
+          try {
+            await triggerScoringEngine(marketLines);
+          } catch (e) {
+            console.warn(`[AI-Builder] Scoring re-trigger failed (non-blocking): ${e instanceof Error ? e.message : e}`);
+          }
+        }
       } else {
-        // Auto-trigger scoring engine
+        // Sparse data — auto-trigger with market lines
         console.log(`[AI-Builder] Scoring data sparse (${scoredProps.length} < ${SCORING_SPARSE_THRESHOLD}) — auto-triggering scoring engine`);
         try {
-          // Extract market lines from bestLines to pass actual market thresholds
-          const marketLines: { player_name: string; stat_type: string; threshold: number }[] = [];
-          for (const bl of bestLines.values()) {
-            if (bl.odds_validated) {
-              marketLines.push({ player_name: bl.player_name, stat_type: bl.stat_type, threshold: bl.threshold });
-            }
-          }
-
-          const scoringUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/prop-scoring-engine`;
-          const scoringRes = await Promise.race([
-            fetch(scoringUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-              },
-              body: JSON.stringify({ top_n: 500, market_lines: marketLines }),
-            }),
-            new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("scoring-timeout")), 45000)),
-          ]);
-          if (scoringRes.ok) {
-            const scoringResult = await scoringRes.json();
-            console.log(`[AI-Builder] Scoring engine completed: ${scoringResult.scored_count ?? "?"} props scored`);
-            // Re-fetch scored props
-            const { data: freshScores } = await serviceClient.from("player_prop_scores")
-              .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(500);
-            if (freshScores && freshScores.length > scoredProps.length) {
-              scoredProps = freshScores;
-              debug.db_candidates_found = scoredProps.length;
-              scoringSource = "auto-triggered";
-              console.log(`[AI-Builder] After auto-trigger: ${scoredProps.length} scored props`);
-            }
-          } else {
-            console.warn(`[AI-Builder] Scoring engine returned ${scoringRes.status}`);
-            await scoringRes.text().catch(() => {}); // consume body
-          }
+          await triggerScoringEngine(marketLines);
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          console.warn(`[AI-Builder] Scoring engine auto-trigger failed (non-blocking): ${msg}`);
+          console.warn(`[AI-Builder] Scoring engine auto-trigger failed (non-blocking): ${e instanceof Error ? e.message : e}`);
         }
 
         // If still sparse, try yesterday's data
