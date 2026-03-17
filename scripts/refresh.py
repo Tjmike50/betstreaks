@@ -839,6 +839,9 @@ def main():
     # 10. Update refresh status
     update_refresh_status(supabase, 1)  # id=1 for players/streaks
     
+    # 11. Trigger prop-scoring-engine edge function
+    trigger_scoring_engine(supabase)
+    
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     
