@@ -855,8 +855,18 @@ serve(async (req) => {
     if (filters && includePlayerProps) {
       const f = filters;
       // Game selector filter — restrict to teams from selected games
+      // Uses team_abbr from scoring data OR playerToGameTeams fallback from Odds API
       if (gameFilterTeams && gameFilterTeams.size > 0) {
-        filteredCandidates = filteredCandidates.filter(c => c.team_abbr && gameFilterTeams!.has(c.team_abbr.toUpperCase()));
+        filteredCandidates = filteredCandidates.filter(c => {
+          const teamAbbr = c.team_abbr || (() => {
+            const gt = playerToGameTeams.get(normName(c.player_name));
+            // If we know the game teams, check if either is in the filter
+            if (gt) return gameFilterTeams!.has(gt.home) || gameFilterTeams!.has(gt.away) ? gt.home : null;
+            return null;
+          })();
+          return teamAbbr && gameFilterTeams!.has(teamAbbr.toUpperCase());
+        });
+        console.log(`[AI-Builder] After game filter: ${filteredCandidates.length} candidates`);
       }
       if (f.statTypes?.length > 0) {
         const allowedStats = new Set(f.statTypes.map((s: string) => normStat(s)));
