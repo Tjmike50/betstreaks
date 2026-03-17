@@ -554,7 +554,13 @@ serve(async (req) => {
       if (homeAbbr) teamsPlayingToday.add(homeAbbr);
       if (awayAbbr) teamsPlayingToday.add(awayAbbr);
     }
-    const { data: gamesTodayRows } = await serviceClient.from("games_today").select("id, home_team_abbr, away_team_abbr").eq("game_date", todayStr);
+    // Query games_today with a date range to handle UTC vs local timezone mismatch
+    const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+    const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+    const { data: gamesTodayRows } = await serviceClient.from("games_today")
+      .select("id, home_team_abbr, away_team_abbr, game_date")
+      .gte("game_date", yesterdayStr)
+      .lte("game_date", tomorrowStr);
     for (const g of gamesTodayRows || []) {
       if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
       if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
@@ -578,10 +584,24 @@ serve(async (req) => {
     // Fetch live player props from multiple sportsbooks
     let livePropsCount = 0;
     const lineSnapshotRows: any[] = [];
-    const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string }[] = [];
+    const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string; game_home_abbr?: string; game_away_abbr?: string }[] = [];
+
+    // Map player names to their game's teams for team_abbr resolution
+    const playerToGameTeams = new Map<string, { home: string; away: string }>();
 
     if (includePlayerProps) {
-      for (const game of gamesData.slice(0, 5)) {
+      // Filter games to only selected ones if game filter is active
+      const gamesToFetchProps = gameFilterTeams && gameFilterTeams.size > 0
+        ? gamesData.filter((g: any) => {
+            const homeAbbr = resolveToAbbr(g.home_team || "");
+            const awayAbbr = resolveToAbbr(g.away_team || "");
+            return gameFilterTeams!.has(homeAbbr) || gameFilterTeams!.has(awayAbbr);
+          })
+        : gamesData;
+      console.log(`[AI-Builder] Fetching props from ${gamesToFetchProps.length} games${gameFilterTeams ? ` (filtered from ${gamesData.length})` : ""}`);
+      for (const game of gamesToFetchProps.slice(0, 5)) {
+        const gameHomeAbbr = resolveToAbbr(game.home_team || "");
+        const gameAwayAbbr = resolveToAbbr(game.away_team || "");
         try {
           const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
           const propsRes = await fetch(propsUrl);
@@ -605,9 +625,13 @@ serve(async (req) => {
                 for (const entry of Object.values(outcomesByPlayer)) {
                   if (entry.player && entry.point != null) {
                     livePropsCount++;
-                    const row = { player_name: entry.player, stat_type: statType, threshold: entry.point, over_odds: entry.over || null, under_odds: entry.under || null, sportsbook: bm.key, game_date: todayStr };
+                    const row = { player_name: entry.player, stat_type: statType, threshold: entry.point, over_odds: entry.over || null, under_odds: entry.under || null, sportsbook: bm.key, game_date: todayStr, game_home_abbr: gameHomeAbbr, game_away_abbr: gameAwayAbbr };
                     lineSnapshotRows.push(row);
                     allLiveProps.push(row);
+                    // Track player -> game teams mapping
+                    if (entry.player && !playerToGameTeams.has(normName(entry.player))) {
+                      playerToGameTeams.set(normName(entry.player), { home: gameHomeAbbr, away: gameAwayAbbr });
+                    }
                   }
                 }
               }
@@ -653,9 +677,10 @@ serve(async (req) => {
     }
     console.log(`[AI-Builder] Market normalization: ${bestLines.size} unique, ${mainLinesFound} main, ${altLinesDetected} alt, ${sanityRejected} rejected`);
 
-    // Save line snapshots (fire-and-forget)
+    // Save line snapshots (fire-and-forget) — strip game team fields not in DB schema
     if (lineSnapshotRows.length > 0) {
-      serviceClient.from("line_snapshots").insert(lineSnapshotRows)
+      const cleanRows = lineSnapshotRows.map(({ game_home_abbr, game_away_abbr, ...rest }) => rest);
+      serviceClient.from("line_snapshots").insert(cleanRows)
         .then(({ error }) => { if (error) console.error("[AI-Builder] Line snapshot insert error:", error); });
     }
 
@@ -731,9 +756,16 @@ serve(async (req) => {
         is_main_line: bl.is_main_line,
         implied_over: bl.implied_over,
         implied_under: bl.implied_under,
-        // Scoring enrichment
-        team_abbr: scoring?.team_abbr || null,
-        opponent_abbr: scoring?.opponent_abbr || null,
+        // Scoring enrichment — fallback to game-derived team if scoring is unavailable
+        team_abbr: scoring?.team_abbr || (() => {
+          const gt = playerToGameTeams.get(pNorm);
+          // We know both teams from the game — store home as placeholder; game filter uses playerToGameTeams directly
+          return gt ? gt.home : null;
+        })(),
+        opponent_abbr: scoring?.opponent_abbr || (() => {
+          const gt = playerToGameTeams.get(pNorm);
+          return gt ? gt.away : null;
+        })(),
         home_away: scoring?.home_away || null,
         confidence_score: scoring?.confidence_score ?? null,
         value_score: scoring?.value_score ?? null,
@@ -834,8 +866,18 @@ serve(async (req) => {
     if (filters && includePlayerProps) {
       const f = filters;
       // Game selector filter — restrict to teams from selected games
+      // Uses team_abbr from scoring data OR playerToGameTeams fallback from Odds API
       if (gameFilterTeams && gameFilterTeams.size > 0) {
-        filteredCandidates = filteredCandidates.filter(c => c.team_abbr && gameFilterTeams!.has(c.team_abbr.toUpperCase()));
+        filteredCandidates = filteredCandidates.filter(c => {
+          const teamAbbr = c.team_abbr || (() => {
+            const gt = playerToGameTeams.get(normName(c.player_name));
+            // If we know the game teams, check if either is in the filter
+            if (gt) return gameFilterTeams!.has(gt.home) || gameFilterTeams!.has(gt.away) ? gt.home : null;
+            return null;
+          })();
+          return teamAbbr && gameFilterTeams!.has(teamAbbr.toUpperCase());
+        });
+        console.log(`[AI-Builder] After game filter: ${filteredCandidates.length} candidates`);
       }
       if (f.statTypes?.length > 0) {
         const allowedStats = new Set(f.statTypes.map((s: string) => normStat(s)));
