@@ -1255,7 +1255,19 @@ function normStatScoring(s: string): string {
       const restCtx = computeRestContext(logs, today);
 
       for (const stat of statsToScore) {
-        const thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
+        // Use market thresholds if available for this player+stat, otherwise use defaults
+        const playerNorm = normNameScoring(logs[0]?.player_name || "");
+        const playerMarket = marketThresholdsByPlayer.get(playerNorm);
+        const marketThresholdsForStat = playerMarket?.get(stat);
+        
+        let thresholds: number[];
+        if (marketThresholdsForStat && marketThresholdsForStat.size > 0) {
+          // Merge market thresholds with defaults to ensure coverage
+          const combined = new Set([...marketThresholdsForStat, ...(DEFAULT_THRESHOLDS[stat] || [])]);
+          thresholds = [...combined].sort((a, b) => a - b);
+        } else {
+          thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
+        }
         const defCtx = getCachedDefCtx(opponent, stat);
 
         const tmRosters = teamRosters[team] || new Map();
