@@ -685,24 +685,71 @@ serve(async (req) => {
     }
 
     // ===== PHASE 2: FETCH SCORING DATA FOR ENRICHMENT =====
+    const SCORING_SPARSE_THRESHOLD = 10; // fewer than this = "sparse", worth auto-triggering
     let scoredProps: any[] = [];
+    let scoringSource: "today" | "auto-triggered" | "yesterday" | "none" = "none";
+
     if (includePlayerProps) {
       const { data: dbCandidates } = await serviceClient.from("player_prop_scores")
         .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(500);
       scoredProps = dbCandidates || [];
       debug.db_candidates_found = scoredProps.length;
 
-      if (scoredProps.length === 0) {
-        const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-        const { data: yestCandidates } = await serviceClient.from("player_prop_scores")
-          .select("*").eq("game_date", yesterday).order("confidence_score", { ascending: false }).limit(500);
-        if (yestCandidates && yestCandidates.length > 0) {
-          scoredProps = yestCandidates;
-          debug.fallback_used = true;
-          debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") + `Scoring data from ${yesterday}`;
+      if (scoredProps.length >= SCORING_SPARSE_THRESHOLD) {
+        scoringSource = "today";
+        console.log(`[AI-Builder] Scoring data available: ${scoredProps.length} props for ${todayStr}`);
+      } else {
+        // Auto-trigger scoring engine
+        console.log(`[AI-Builder] Scoring data sparse (${scoredProps.length} < ${SCORING_SPARSE_THRESHOLD}) — auto-triggering scoring engine`);
+        try {
+          const scoringUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/prop-scoring-engine`;
+          const scoringRes = await Promise.race([
+            fetch(scoringUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              },
+              body: JSON.stringify({}),
+            }),
+            new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("scoring-timeout")), 45000)),
+          ]);
+          if (scoringRes.ok) {
+            const scoringResult = await scoringRes.json();
+            console.log(`[AI-Builder] Scoring engine completed: ${scoringResult.scored_count ?? "?"} props scored`);
+            // Re-fetch scored props
+            const { data: freshScores } = await serviceClient.from("player_prop_scores")
+              .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(500);
+            if (freshScores && freshScores.length > scoredProps.length) {
+              scoredProps = freshScores;
+              debug.db_candidates_found = scoredProps.length;
+              scoringSource = "auto-triggered";
+              console.log(`[AI-Builder] After auto-trigger: ${scoredProps.length} scored props`);
+            }
+          } else {
+            console.warn(`[AI-Builder] Scoring engine returned ${scoringRes.status}`);
+            await scoringRes.text().catch(() => {}); // consume body
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(`[AI-Builder] Scoring engine auto-trigger failed (non-blocking): ${msg}`);
+        }
+
+        // If still sparse, try yesterday's data
+        if (scoredProps.length < SCORING_SPARSE_THRESHOLD) {
+          const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+          const { data: yestCandidates } = await serviceClient.from("player_prop_scores")
+            .select("*").eq("game_date", yesterday).order("confidence_score", { ascending: false }).limit(500);
+          if (yestCandidates && yestCandidates.length > scoredProps.length) {
+            scoredProps = yestCandidates;
+            debug.fallback_used = true;
+            debug.fallback_reason = (debug.fallback_reason ? debug.fallback_reason + " | " : "") + `Scoring data from ${yesterday}`;
+            if (scoringSource === "none") scoringSource = "yesterday";
+          }
         }
       }
     }
+    debug.scoring_source = scoringSource;
 
     // Build scoring lookup: normName|statKey -> best scoring row (for enrichment)
     const scoringLookup = new Map<string, any>();
@@ -1418,6 +1465,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
             game_level_candidates: debug.game_level_candidates,
             mode: "deterministic_fallback", fallback_used: true,
             scoring_data_available: scoredProps.length,
+            scoring_source: scoringSource,
           },
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
@@ -1720,6 +1768,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         mode: debug.mode,
         fallback_used: debug.fallback_used,
         scoring_data_available: scoredProps.length,
+        scoring_source: scoringSource,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
