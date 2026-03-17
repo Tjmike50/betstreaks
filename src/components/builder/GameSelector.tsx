@@ -75,22 +75,34 @@ export function GameSelector({ values, onChange }: Props) {
                   : "bg-secondary/50 text-muted-foreground hover:bg-secondary border-transparent"
               }`}
             >
-              <div className="flex items-center gap-1 flex-1 min-w-0">
-                {awayMeta && (
-                  <span
-                    className="w-3 h-3 rounded-full shrink-0"
-                    style={{ backgroundColor: `hsl(${awayMeta.color})` }}
-                  />
-                )}
-                <span className="font-bold truncate">{game.away_team_abbr}</span>
-                <span className="text-muted-foreground/50">@</span>
-                {homeMeta && (
-                  <span
-                    className="w-3 h-3 rounded-full shrink-0"
-                    style={{ backgroundColor: `hsl(${homeMeta.color})` }}
-                  />
-                )}
-                <span className="font-bold truncate">{game.home_team_abbr}</span>
+              <div className="flex flex-col flex-1 min-w-0 gap-0.5">
+                <div className="flex items-center gap-1">
+                  {awayMeta && (
+                    <span
+                      className="w-3 h-3 rounded-full shrink-0"
+                      style={{ backgroundColor: `hsl(${awayMeta.color})` }}
+                    />
+                  )}
+                  <span className="font-bold truncate">{game.away_team_abbr}</span>
+                  <span className="text-muted-foreground/50">@</span>
+                  {homeMeta && (
+                    <span
+                      className="w-3 h-3 rounded-full shrink-0"
+                      style={{ backgroundColor: `hsl(${homeMeta.color})` }}
+                    />
+                  )}
+                  <span className="font-bold truncate">{game.home_team_abbr}</span>
+                </div>
+                {(() => {
+                  const { label, isLive } = formatGameTime(game.game_time, game.status);
+                  if (!label) return null;
+                  return (
+                    <span className={`text-[10px] leading-tight ${isLive ? "text-green-500 font-semibold" : "text-muted-foreground/70"}`}>
+                      {isLive && <Circle className="inline h-1.5 w-1.5 fill-green-500 mr-0.5" />}
+                      {label}
+                    </span>
+                  );
+                })()}
               </div>
               {selected && <Check className="h-3 w-3 shrink-0" />}
             </button>

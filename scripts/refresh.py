@@ -763,6 +763,39 @@ def update_refresh_status(supabase: Client, refresh_id: int):
     print(f"Updated refresh_status id={refresh_id}")
 
 
+def trigger_scoring_engine(supabase: Client):
+    """Call the prop-scoring-engine edge function after data refresh."""
+    import urllib.request
+    import json as _json
+    
+    url = os.environ.get("SUPABASE_URL", "")
+    anon_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    
+    if not url or not anon_key:
+        print("WARNING: Cannot trigger scoring engine - missing SUPABASE_URL or key")
+        return
+    
+    endpoint = f"{url}/functions/v1/prop-scoring-engine"
+    print(f"Triggering prop-scoring-engine at {endpoint}...")
+    
+    try:
+        req = urllib.request.Request(
+            endpoint,
+            data=_json.dumps({}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {anon_key}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = _json.loads(resp.read().decode("utf-8"))
+            scored = body.get("scored_count", "?")
+            print(f"Scoring engine completed: {scored} props scored")
+    except Exception as e:
+        print(f"WARNING: Scoring engine trigger failed (non-fatal): {e}")
+
+
 def main():
     """Main entry point."""
     start_time = datetime.now()
