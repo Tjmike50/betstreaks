@@ -106,6 +106,7 @@ export function useAIBetBuilder() {
         const debug = data.debug || {};
         setMarketDepth({
           ...meta,
+          enrichment_coverage: meta.enrichment_coverage || null,
           market_quality: debug.market_quality || null,
         });
       }
