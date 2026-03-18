@@ -310,6 +310,80 @@ function normName(n: string): string {
     .trim();
 }
 
+// ===== PLAYER NAME ALIAS MAP =====
+// Bidirectional alias mapping for known name mismatches across data sources.
+// Keys and values are raw names (pre-normalization). The system builds a
+// normalized lookup at init so aliases work alongside normName().
+const PLAYER_ALIASES_RAW: [string, string][] = [
+  // Diacritics mismatches
+  ["Luka Doncic", "Luka Dončić"],
+  ["Kristaps Porzingis", "Kristaps Porziņģis"],
+  ["Moussa Diabate", "Moussa Diabaté"],
+  ["Nikola Jokic", "Nikola Jokić"],
+  ["Nikola Vucevic", "Nikola Vučević"],
+  ["Jonas Valanciunas", "Jonas Valančiūnas"],
+  ["Domantas Sabonis", "Domantas Sabonis"],
+  ["Bogdan Bogdanovic", "Bogdan Bogdanović"],
+  ["Bojan Bogdanovic", "Bojan Bogdanović"],
+  ["Goran Dragic", "Goran Dragić"],
+  ["Jusuf Nurkic", "Jusuf Nurkić"],
+  ["Alperen Sengun", "Alperen Şengün"],
+  ["Vasilije Micic", "Vasilije Micić"],
+  ["Luka Garza", "Luka Garza"],
+  // Nickname mismatches
+  ["Nicolas Claxton", "Nic Claxton"],
+  ["Robert Williams III", "Robert Williams"],
+  ["Marcus Morris Sr.", "Marcus Morris"],
+  ["Gary Trent Jr.", "Gary Trent"],
+  ["Tim Hardaway Jr.", "Tim Hardaway"],
+  ["Larry Nance Jr.", "Larry Nance"],
+  ["Kelly Oubre Jr.", "Kelly Oubre"],
+  ["Jaren Jackson Jr.", "Jaren Jackson"],
+  // Suffix format mismatches
+  ["Derrick Jones Jr.", "Derrick Jones Jr"],
+  ["Derrick Jones Jr.", "Derrick Jones"],
+  ["Jabari Smith Jr.", "Jabari Smith Jr"],
+  ["Jabari Smith Jr.", "Jabari Smith"],
+  ["Wendell Carter Jr.", "Wendell Carter Jr"],
+  ["Wendell Carter Jr.", "Wendell Carter"],
+  ["Michael Porter Jr.", "Michael Porter Jr"],
+  ["Michael Porter Jr.", "Michael Porter"],
+  ["Kevin Porter Jr.", "Kevin Porter Jr"],
+  ["Kevin Porter Jr.", "Kevin Porter"],
+  ["Kenyon Martin Jr.", "Kenyon Martin Jr"],
+  ["Kenyon Martin Jr.", "Kenyon Martin"],
+  ["Troy Brown Jr.", "Troy Brown Jr"],
+  ["Troy Brown Jr.", "Troy Brown"],
+  ["Otto Porter Jr.", "Otto Porter Jr"],
+  ["Otto Porter Jr.", "Otto Porter"],
+  ["Walker Kessler", "Walker Kessler"],
+  ["Trey Murphy III", "Trey Murphy"],
+  ["Herb Jones", "Herbert Jones"],
+];
+
+// Build bidirectional normalized alias lookup: normName -> Set<normName>
+const ALIAS_LOOKUP = new Map<string, Set<string>>();
+function _initAliases() {
+  for (const [a, b] of PLAYER_ALIASES_RAW) {
+    const na = normName(a);
+    const nb = normName(b);
+    if (na === nb) continue; // normName already handles this
+    if (!ALIAS_LOOKUP.has(na)) ALIAS_LOOKUP.set(na, new Set());
+    if (!ALIAS_LOOKUP.has(nb)) ALIAS_LOOKUP.set(nb, new Set());
+    ALIAS_LOOKUP.get(na)!.add(nb);
+    ALIAS_LOOKUP.get(nb)!.add(na);
+  }
+}
+_initAliases();
+
+/** Get all normalized name variants for a player (including self) */
+function getNameVariants(normalizedName: string): string[] {
+  const variants = [normalizedName];
+  const aliases = ALIAS_LOOKUP.get(normalizedName);
+  if (aliases) variants.push(...aliases);
+  return variants;
+}
+
 // Normalize stat type for matching
 function normStat(s: string): string {
   const lower = s.toLowerCase().replace(/[^a-z0-9-]/g, "");
