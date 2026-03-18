@@ -1151,9 +1151,35 @@ serve(async (req) => {
 
     // market_lines: optional array of {player_name, stat_type, threshold} from live market
     // When provided, we use market thresholds per player instead of defaults
+    // Build market thresholds from provided market_lines or auto-fetch from line_snapshots
+    let effectiveMarketLines = market_lines;
+    
+    const today = game_date || new Date().toISOString().split("T")[0];
+
+    // Auto-fetch all market lines from line_snapshots for full coverage
+    if (score_all_market_players && !effectiveMarketLines) {
+      const { data: lsRows } = await supabase
+        .from("line_snapshots")
+        .select("player_name, stat_type, threshold")
+        .eq("game_date", today);
+      if (lsRows && lsRows.length > 0) {
+        // Deduplicate
+        const seen = new Set<string>();
+        effectiveMarketLines = [];
+        for (const r of lsRows) {
+          const key = `${r.player_name}|${r.stat_type}|${r.threshold}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            effectiveMarketLines.push(r);
+          }
+        }
+        console.log(`Auto-loaded ${effectiveMarketLines.length} unique market lines from line_snapshots for full coverage`);
+      }
+    }
+
     const marketThresholdsByPlayer = new Map<string, Map<string, Set<number>>>();
-    if (market_lines && Array.isArray(market_lines)) {
-      for (const ml of market_lines) {
+    if (effectiveMarketLines && Array.isArray(effectiveMarketLines)) {
+      for (const ml of effectiveMarketLines) {
         const pName = normNameScoring(ml.player_name || "");
         const stat = normStatScoring(ml.stat_type || "");
         if (!pName || !stat) continue;
