@@ -1192,10 +1192,9 @@ serve(async (req) => {
           statMap.get(stat)!.add(Number(ml.threshold));
         }
       }
-      console.log(`Loaded ${market_lines.length} market lines for ${marketThresholdsByPlayer.size} players (with alias expansion)`);
+      console.log(`Loaded ${effectiveMarketLines.length} market lines for ${marketThresholdsByPlayer.size} players (with alias expansion)`);
     }
 
-    const today = game_date || new Date().toISOString().split("T")[0];
 
     // 1. Build team matchups
     const teamMatchups: Record<string, { opponent: string; homeAway: string }> = {};
