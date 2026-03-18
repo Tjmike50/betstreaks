@@ -1147,13 +1147,39 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     const body = await req.json().catch(() => ({}));
-    const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines } = body;
+    const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines, score_all_market_players } = body;
 
     // market_lines: optional array of {player_name, stat_type, threshold} from live market
     // When provided, we use market thresholds per player instead of defaults
+    // Build market thresholds from provided market_lines or auto-fetch from line_snapshots
+    let effectiveMarketLines = market_lines;
+    
+    const today = game_date || new Date().toISOString().split("T")[0];
+
+    // Auto-fetch all market lines from line_snapshots for full coverage
+    if (score_all_market_players && !effectiveMarketLines) {
+      const { data: lsRows } = await supabase
+        .from("line_snapshots")
+        .select("player_name, stat_type, threshold")
+        .eq("game_date", today);
+      if (lsRows && lsRows.length > 0) {
+        // Deduplicate
+        const seen = new Set<string>();
+        effectiveMarketLines = [];
+        for (const r of lsRows) {
+          const key = `${r.player_name}|${r.stat_type}|${r.threshold}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            effectiveMarketLines.push(r);
+          }
+        }
+        console.log(`Auto-loaded ${effectiveMarketLines.length} unique market lines from line_snapshots for full coverage`);
+      }
+    }
+
     const marketThresholdsByPlayer = new Map<string, Map<string, Set<number>>>();
-    if (market_lines && Array.isArray(market_lines)) {
-      for (const ml of market_lines) {
+    if (effectiveMarketLines && Array.isArray(effectiveMarketLines)) {
+      for (const ml of effectiveMarketLines) {
         const pName = normNameScoring(ml.player_name || "");
         const stat = normStatScoring(ml.stat_type || "");
         if (!pName || !stat) continue;
@@ -1166,10 +1192,9 @@ serve(async (req) => {
           statMap.get(stat)!.add(Number(ml.threshold));
         }
       }
-      console.log(`Loaded ${market_lines.length} market lines for ${marketThresholdsByPlayer.size} players (with alias expansion)`);
+      console.log(`Loaded ${effectiveMarketLines.length} market lines for ${marketThresholdsByPlayer.size} players (with alias expansion)`);
     }
 
-    const today = game_date || new Date().toISOString().split("T")[0];
 
     // 1. Build team matchups
     const teamMatchups: Record<string, { opponent: string; homeAway: string }> = {};
@@ -1333,29 +1358,38 @@ serve(async (req) => {
         
         let thresholds: number[];
         if (marketThresholdsForStat && marketThresholdsForStat.size > 0) {
-          // Merge market thresholds with defaults to ensure coverage
-          const combined = new Set([...marketThresholdsForStat, ...(DEFAULT_THRESHOLDS[stat] || [])]);
-          thresholds = [...combined].sort((a, b) => a - b);
+          // When score_all_market_players, only score market thresholds (skip defaults to save CPU)
+          // Otherwise merge market + defaults for full coverage
+          if (score_all_market_players) {
+            thresholds = [...marketThresholdsForStat].sort((a, b) => a - b);
+          } else {
+            const combined = new Set([...marketThresholdsForStat, ...(DEFAULT_THRESHOLDS[stat] || [])]);
+            thresholds = [...combined].sort((a, b) => a - b);
+          }
+        } else if (score_all_market_players) {
+          // In full market mode, skip players/stats without market lines
+          continue;
         } else {
           thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
         }
         const defCtx = getCachedDefCtx(opponent, stat);
 
         const tmRosters = teamRosters[team] || new Map();
-        // Compute teammate context once per stat (reuse for all thresholds)
-        const teammateCtx = computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
+        // In full-market mode, skip expensive teammate analysis to stay within CPU limits
+        const teammateCtx = score_all_market_players
+          ? { minutes_trend: null, minutes_trend_note: null, role_label: null, key_teammates_out: [], teammate_notes: [], with_without_splits: [] } as TeammateContext
+          : computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
 
-        // Identify key teammate IDs once per stat
-        const keyTmIds = teammateCtx.with_without_splits.map(s => {
+        const keyTmIds = score_all_market_players ? [] : teammateCtx.with_without_splits.map(s => {
           for (const [pid, pLogs] of Object.entries(playerLogs)) {
             if (pLogs[0]?.player_name === s.teammate) return Number(pid);
           }
           return -1;
         }).filter(id => id > 0);
 
-        const availCtx = computeAvailabilityContext(
-          playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || [], availabilityIsFresh
-        );
+        const availCtx = score_all_market_players
+          ? { player_status: "active", availability_notes: [], lineup_confidence: "high", key_teammate_statuses: [] } as AvailabilityContext
+          : computeAvailabilityContext(playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || [], availabilityIsFresh);
 
         for (const threshold of thresholds) {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
@@ -1376,9 +1410,11 @@ serve(async (req) => {
     allScored.sort((a, b) => b.confidence_score - a.confidence_score);
     const topProps = allScored.slice(0, top_n);
 
-    // 7. Cache scores — batch upsert in chunks to avoid CPU timeout
-    if (topProps.length > 0) {
-      const rows = topProps.map((p) => ({
+    // 7. Cache ALL scores (not just top_n) to ensure full enrichment coverage
+    // This eliminates data gaps where market players rank outside top_n
+    const propsToCache = allScored; // cache everything
+    if (propsToCache.length > 0) {
+      const rows = propsToCache.map((p) => ({
         game_date: today,
         player_id: p.player_id,
         player_name: p.player_name,
@@ -1423,7 +1459,7 @@ serve(async (req) => {
           .upsert(chunk, { onConflict: "game_date,player_id,stat_type,threshold" });
         if (error) console.error(`Cache upsert error (chunk ${i / CHUNK_SIZE}):`, error);
       }
-      console.log(`Cached ${rows.length} scored props in ${Math.ceil(rows.length / CHUNK_SIZE)} batches`);
+      console.log(`Cached ${rows.length} scored props (all candidates) in ${Math.ceil(rows.length / CHUNK_SIZE)} batches`);
     }
 
     return new Response(
