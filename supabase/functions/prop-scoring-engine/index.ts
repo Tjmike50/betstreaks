@@ -1358,9 +1358,17 @@ serve(async (req) => {
         
         let thresholds: number[];
         if (marketThresholdsForStat && marketThresholdsForStat.size > 0) {
-          // Merge market thresholds with defaults to ensure coverage
-          const combined = new Set([...marketThresholdsForStat, ...(DEFAULT_THRESHOLDS[stat] || [])]);
-          thresholds = [...combined].sort((a, b) => a - b);
+          // When score_all_market_players, only score market thresholds (skip defaults to save CPU)
+          // Otherwise merge market + defaults for full coverage
+          if (score_all_market_players) {
+            thresholds = [...marketThresholdsForStat].sort((a, b) => a - b);
+          } else {
+            const combined = new Set([...marketThresholdsForStat, ...(DEFAULT_THRESHOLDS[stat] || [])]);
+            thresholds = [...combined].sort((a, b) => a - b);
+          }
+        } else if (score_all_market_players) {
+          // In full market mode, skip players/stats without market lines
+          continue;
         } else {
           thresholds = thresholds_override?.[stat] || DEFAULT_THRESHOLDS[stat] || [];
         }
