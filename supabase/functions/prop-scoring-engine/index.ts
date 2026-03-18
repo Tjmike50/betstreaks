@@ -1147,12 +1147,16 @@ serve(async (req) => {
         const pName = normNameScoring(ml.player_name || "");
         const stat = normStatScoring(ml.stat_type || "");
         if (!pName || !stat) continue;
-        if (!marketThresholdsByPlayer.has(pName)) marketThresholdsByPlayer.set(pName, new Map());
-        const statMap = marketThresholdsByPlayer.get(pName)!;
-        if (!statMap.has(stat)) statMap.set(stat, new Set());
-        statMap.get(stat)!.add(Number(ml.threshold));
+        // Add to primary name and all alias variants
+        const variants = getScoringNameVariants(pName);
+        for (const variant of variants) {
+          if (!marketThresholdsByPlayer.has(variant)) marketThresholdsByPlayer.set(variant, new Map());
+          const statMap = marketThresholdsByPlayer.get(variant)!;
+          if (!statMap.has(stat)) statMap.set(stat, new Set());
+          statMap.get(stat)!.add(Number(ml.threshold));
+        }
       }
-      console.log(`Loaded ${market_lines.length} market lines for ${marketThresholdsByPlayer.size} players`);
+      console.log(`Loaded ${market_lines.length} market lines for ${marketThresholdsByPlayer.size} players (with alias expansion)`);
     }
 
     const today = game_date || new Date().toISOString().split("T")[0];
