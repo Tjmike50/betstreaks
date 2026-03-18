@@ -362,6 +362,13 @@ const PLAYER_ALIASES_RAW: [string, string][] = [
   ["Walker Kessler", "Walker Kessler"],
   ["Trey Murphy III", "Trey Murphy"],
   ["Herb Jones", "Herbert Jones"],
+  // New aliases from unscored player audit
+  ["Moe Wagner", "Moritz Wagner"],
+  ["R.J. Barrett", "RJ Barrett"],
+  ["A.J. Green", "AJ Green"],
+  ["Carlton Carrington", "Bub Carrington"],
+  ["Ron Holland", "Ron Holland II"],
+  ["Jaime Jaquez Jr.", "Jaime Jaquez"],
 ];
 
 // Build bidirectional normalized alias lookup: normName -> Set<normName>
