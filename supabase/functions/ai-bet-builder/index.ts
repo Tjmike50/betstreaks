@@ -304,7 +304,8 @@ function normName(n: string): string {
     .normalize("NFD")                    // decompose diacritics: ć → c + combining accent
     .replace(/[\u0300-\u036f]/g, "")     // strip combining marks: Jokić → Jokic
     .toLowerCase()
-    .replace(/\b(jr\.?|sr\.?|ii|iii|iv)\b/gi, "")  // strip suffixes: Jr. Jr Sr III
+    .replace(/\./g, "")                  // strip periods: R.J. → RJ, P.J. → PJ
+    .replace(/\b(jr|sr|ii|iii|iv)\b/gi, "")  // strip suffixes: Jr Sr III
     .replace(/[^a-z ]/g, "")             // strip remaining non-alpha
     .replace(/\s+/g, " ")
     .trim();
@@ -361,6 +362,13 @@ const PLAYER_ALIASES_RAW: [string, string][] = [
   ["Walker Kessler", "Walker Kessler"],
   ["Trey Murphy III", "Trey Murphy"],
   ["Herb Jones", "Herbert Jones"],
+  // New aliases from unscored player audit
+  ["Moe Wagner", "Moritz Wagner"],
+  ["R.J. Barrett", "RJ Barrett"],
+  ["A.J. Green", "AJ Green"],
+  ["Carlton Carrington", "Bub Carrington"],
+  ["Ron Holland", "Ron Holland II"],
+  ["Jaime Jaquez Jr.", "Jaime Jaquez"],
 ];
 
 // Build bidirectional normalized alias lookup: normName -> Set<normName>

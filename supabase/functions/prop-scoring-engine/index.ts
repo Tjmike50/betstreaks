@@ -1055,7 +1055,8 @@ function normNameScoring(n: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/\b(jr\.?|sr\.?|ii|iii|iv)\b/gi, "")
+    .replace(/\./g, "")                  // strip periods: R.J. → RJ, P.J. → PJ
+    .replace(/\b(jr|sr|ii|iii|iv)\b/gi, "")  // strip suffixes: Jr Sr III
     .replace(/[^a-z ]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -1096,6 +1097,13 @@ const PLAYER_ALIASES_RAW: [string, string][] = [
   ["Kenyon Martin Jr.", "Kenyon Martin"],
   ["Trey Murphy III", "Trey Murphy"],
   ["Herb Jones", "Herbert Jones"],
+  // New aliases from unscored player audit
+  ["Moe Wagner", "Moritz Wagner"],
+  ["R.J. Barrett", "RJ Barrett"],
+  ["A.J. Green", "AJ Green"],
+  ["Carlton Carrington", "Bub Carrington"],
+  ["Ron Holland", "Ron Holland II"],
+  ["Jaime Jaquez Jr.", "Jaime Jaquez"],
 ];
 
 const SCORING_ALIAS_LOOKUP = new Map<string, Set<string>>();
