@@ -1055,7 +1055,8 @@ function normNameScoring(n: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/\b(jr\.?|sr\.?|ii|iii|iv)\b/gi, "")
+    .replace(/\./g, "")                  // strip periods: R.J. → RJ, P.J. → PJ
+    .replace(/\b(jr|sr|ii|iii|iv)\b/gi, "")  // strip suffixes: Jr Sr III
     .replace(/[^a-z ]/g, "")
     .replace(/\s+/g, " ")
     .trim();
