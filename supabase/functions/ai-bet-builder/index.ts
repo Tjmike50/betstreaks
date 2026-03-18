@@ -304,7 +304,8 @@ function normName(n: string): string {
     .normalize("NFD")                    // decompose diacritics: ć → c + combining accent
     .replace(/[\u0300-\u036f]/g, "")     // strip combining marks: Jokić → Jokic
     .toLowerCase()
-    .replace(/\b(jr\.?|sr\.?|ii|iii|iv)\b/gi, "")  // strip suffixes: Jr. Jr Sr III
+    .replace(/\./g, "")                  // strip periods: R.J. → RJ, P.J. → PJ
+    .replace(/\b(jr|sr|ii|iii|iv)\b/gi, "")  // strip suffixes: Jr Sr III
     .replace(/[^a-z ]/g, "")             // strip remaining non-alpha
     .replace(/\s+/g, " ")
     .trim();
