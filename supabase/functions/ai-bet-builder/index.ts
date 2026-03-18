@@ -820,10 +820,16 @@ serve(async (req) => {
         scoringSource = "today";
         console.log(`[AI-Builder] Scoring data available: ${scoredProps.length} props for ${todayStr}`);
 
-        // Check coverage: do existing scores cover the market well?
+        // Check coverage: do existing scores cover the market well? (alias-aware)
         const scoredNames = new Set(scoredProps.map((p: any) => normName(p.player_name)));
+        // Expand scoredNames with aliases
+        const scoredNamesExpanded = new Set(scoredNames);
+        for (const sn of scoredNames) {
+          const aliases = ALIAS_LOOKUP.get(sn);
+          if (aliases) for (const a of aliases) scoredNamesExpanded.add(a);
+        }
         const marketNames = new Set(marketLines.map(ml => normName(ml.player_name)));
-        const uncoveredPlayers = [...marketNames].filter(n => !scoredNames.has(n));
+        const uncoveredPlayers = [...marketNames].filter(n => !scoredNamesExpanded.has(n));
         const coverageRatio = marketNames.size > 0 ? (marketNames.size - uncoveredPlayers.length) / marketNames.size : 1;
         
         if (coverageRatio < 0.6 && marketLines.length > 0) {
