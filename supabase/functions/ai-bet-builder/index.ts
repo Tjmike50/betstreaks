@@ -1025,7 +1025,7 @@ serve(async (req) => {
 
     debug.verified_prop_candidates = verifiedCandidates.length;
     console.log(`[AI-Builder] Verified market candidates: ${verifiedCandidates.length} (from ${bestLines.size} total lines, ${sanityRejected} rejected)`);
-    console.log(`[AI-Builder] Enrichment coverage: ${enrichmentFull} full, ${enrichmentPartial} partial, ${enrichmentNone} none | reasons: ${JSON.stringify(enrichmentMissReasons)}`);
+    console.log(`[AI-Builder] Enrichment coverage: ${enrichmentFull} full, ${enrichmentPartial} partial, ${enrichmentNone} none | alias_hits: ${aliasHits}, alias_rescued: [${[...aliasRescuedPlayers].join(", ")}] | reasons: ${JSON.stringify(enrichmentMissReasons)}`);
 
     // ===== PHASE 3b: APPLY MARKET QUALITY FILTERS =====
     const mqDebug: MarketQualityDebug = {
