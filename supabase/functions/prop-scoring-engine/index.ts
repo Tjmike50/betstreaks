@@ -1375,20 +1375,21 @@ serve(async (req) => {
         const defCtx = getCachedDefCtx(opponent, stat);
 
         const tmRosters = teamRosters[team] || new Map();
-        // Compute teammate context once per stat (reuse for all thresholds)
-        const teammateCtx = computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
+        // In full-market mode, skip expensive teammate analysis to stay within CPU limits
+        const teammateCtx = score_all_market_players
+          ? { minutes_trend: null, minutes_trend_note: null, role_label: null, key_teammates_out: [], teammate_notes: [], with_without_splits: [] } as TeammateContext
+          : computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
 
-        // Identify key teammate IDs once per stat
-        const keyTmIds = teammateCtx.with_without_splits.map(s => {
+        const keyTmIds = score_all_market_players ? [] : teammateCtx.with_without_splits.map(s => {
           for (const [pid, pLogs] of Object.entries(playerLogs)) {
             if (pLogs[0]?.player_name === s.teammate) return Number(pid);
           }
           return -1;
         }).filter(id => id > 0);
 
-        const availCtx = computeAvailabilityContext(
-          playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || [], availabilityIsFresh
-        );
+        const availCtx = score_all_market_players
+          ? { player_status: "active", availability_notes: [], lineup_confidence: "high", key_teammate_statuses: [] } as AvailabilityContext
+          : computeAvailabilityContext(playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || [], availabilityIsFresh);
 
         for (const threshold of thresholds) {
           const restHitCtx = computeRestHitRate(logs, stat, threshold, restCtx.rest_days);
