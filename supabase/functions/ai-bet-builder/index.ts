@@ -1978,6 +1978,8 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
           partial: enrichmentPartial,
           none: enrichmentNone,
           miss_reasons: enrichmentMissReasons,
+          alias_hits: aliasHits,
+          alias_rescued_players: [...aliasRescuedPlayers],
         },
       },
     }), {
