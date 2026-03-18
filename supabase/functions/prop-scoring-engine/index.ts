@@ -1076,6 +1076,8 @@ const PLAYER_ALIASES_RAW: [string, string][] = [
   ["Vasilije Micic", "Vasilije Micić"],
   ["Nicolas Claxton", "Nic Claxton"],
   ["Robert Williams III", "Robert Williams"],
+  ["Robert Williams III", "Rob Williams"],
+  ["PJ Washington", "P.J. Washington"],
   ["Marcus Morris Sr.", "Marcus Morris"],
   ["Gary Trent Jr.", "Gary Trent"],
   ["Tim Hardaway Jr.", "Tim Hardaway"],
