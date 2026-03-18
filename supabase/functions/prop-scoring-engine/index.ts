@@ -1147,7 +1147,7 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     const body = await req.json().catch(() => ({}));
-    const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines } = body;
+    const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines, score_all_market_players } = body;
 
     // market_lines: optional array of {player_name, stat_type, threshold} from live market
     // When provided, we use market thresholds per player instead of defaults
