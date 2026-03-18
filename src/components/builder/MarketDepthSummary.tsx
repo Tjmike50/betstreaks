@@ -258,6 +258,24 @@ export function MarketDepthSummary({ data, slips }: Props) {
           </div>
         )}
 
+        {/* Enrichment & alias stats */}
+        {data.enrichment_coverage && (
+          <div className="flex items-center gap-3 text-[10px] flex-wrap">
+            <span className="text-green-400">✓ {data.enrichment_coverage.full} enriched</span>
+            {data.enrichment_coverage.partial > 0 && (
+              <span className="text-yellow-400">◐ {data.enrichment_coverage.partial} partial</span>
+            )}
+            {data.enrichment_coverage.none > 0 && (
+              <span className="text-red-400">✗ {data.enrichment_coverage.none} missing</span>
+            )}
+            {(data.enrichment_coverage.alias_hits ?? 0) > 0 && (
+              <span className="text-blue-400" title={`Rescued: ${data.enrichment_coverage.alias_rescued_players?.join(", ") || "—"}`}>
+                🔗 {data.enrichment_coverage.alias_hits} alias hits
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Leg validation summary */}
         <div className="flex items-center gap-3 text-[10px]">
           <span className="flex items-center gap-1 text-green-400">

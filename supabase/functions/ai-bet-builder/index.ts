@@ -310,6 +310,80 @@ function normName(n: string): string {
     .trim();
 }
 
+// ===== PLAYER NAME ALIAS MAP =====
+// Bidirectional alias mapping for known name mismatches across data sources.
+// Keys and values are raw names (pre-normalization). The system builds a
+// normalized lookup at init so aliases work alongside normName().
+const PLAYER_ALIASES_RAW: [string, string][] = [
+  // Diacritics mismatches
+  ["Luka Doncic", "Luka Dončić"],
+  ["Kristaps Porzingis", "Kristaps Porziņģis"],
+  ["Moussa Diabate", "Moussa Diabaté"],
+  ["Nikola Jokic", "Nikola Jokić"],
+  ["Nikola Vucevic", "Nikola Vučević"],
+  ["Jonas Valanciunas", "Jonas Valančiūnas"],
+  ["Domantas Sabonis", "Domantas Sabonis"],
+  ["Bogdan Bogdanovic", "Bogdan Bogdanović"],
+  ["Bojan Bogdanovic", "Bojan Bogdanović"],
+  ["Goran Dragic", "Goran Dragić"],
+  ["Jusuf Nurkic", "Jusuf Nurkić"],
+  ["Alperen Sengun", "Alperen Şengün"],
+  ["Vasilije Micic", "Vasilije Micić"],
+  ["Luka Garza", "Luka Garza"],
+  // Nickname mismatches
+  ["Nicolas Claxton", "Nic Claxton"],
+  ["Robert Williams III", "Robert Williams"],
+  ["Marcus Morris Sr.", "Marcus Morris"],
+  ["Gary Trent Jr.", "Gary Trent"],
+  ["Tim Hardaway Jr.", "Tim Hardaway"],
+  ["Larry Nance Jr.", "Larry Nance"],
+  ["Kelly Oubre Jr.", "Kelly Oubre"],
+  ["Jaren Jackson Jr.", "Jaren Jackson"],
+  // Suffix format mismatches
+  ["Derrick Jones Jr.", "Derrick Jones Jr"],
+  ["Derrick Jones Jr.", "Derrick Jones"],
+  ["Jabari Smith Jr.", "Jabari Smith Jr"],
+  ["Jabari Smith Jr.", "Jabari Smith"],
+  ["Wendell Carter Jr.", "Wendell Carter Jr"],
+  ["Wendell Carter Jr.", "Wendell Carter"],
+  ["Michael Porter Jr.", "Michael Porter Jr"],
+  ["Michael Porter Jr.", "Michael Porter"],
+  ["Kevin Porter Jr.", "Kevin Porter Jr"],
+  ["Kevin Porter Jr.", "Kevin Porter"],
+  ["Kenyon Martin Jr.", "Kenyon Martin Jr"],
+  ["Kenyon Martin Jr.", "Kenyon Martin"],
+  ["Troy Brown Jr.", "Troy Brown Jr"],
+  ["Troy Brown Jr.", "Troy Brown"],
+  ["Otto Porter Jr.", "Otto Porter Jr"],
+  ["Otto Porter Jr.", "Otto Porter"],
+  ["Walker Kessler", "Walker Kessler"],
+  ["Trey Murphy III", "Trey Murphy"],
+  ["Herb Jones", "Herbert Jones"],
+];
+
+// Build bidirectional normalized alias lookup: normName -> Set<normName>
+const ALIAS_LOOKUP = new Map<string, Set<string>>();
+function _initAliases() {
+  for (const [a, b] of PLAYER_ALIASES_RAW) {
+    const na = normName(a);
+    const nb = normName(b);
+    if (na === nb) continue; // normName already handles this
+    if (!ALIAS_LOOKUP.has(na)) ALIAS_LOOKUP.set(na, new Set());
+    if (!ALIAS_LOOKUP.has(nb)) ALIAS_LOOKUP.set(nb, new Set());
+    ALIAS_LOOKUP.get(na)!.add(nb);
+    ALIAS_LOOKUP.get(nb)!.add(na);
+  }
+}
+_initAliases();
+
+/** Get all normalized name variants for a player (including self) */
+function getNameVariants(normalizedName: string): string[] {
+  const variants = [normalizedName];
+  const aliases = ALIAS_LOOKUP.get(normalizedName);
+  if (aliases) variants.push(...aliases);
+  return variants;
+}
+
 // Normalize stat type for matching
 function normStat(s: string): string {
   const lower = s.toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -746,10 +820,16 @@ serve(async (req) => {
         scoringSource = "today";
         console.log(`[AI-Builder] Scoring data available: ${scoredProps.length} props for ${todayStr}`);
 
-        // Check coverage: do existing scores cover the market well?
+        // Check coverage: do existing scores cover the market well? (alias-aware)
         const scoredNames = new Set(scoredProps.map((p: any) => normName(p.player_name)));
+        // Expand scoredNames with aliases
+        const scoredNamesExpanded = new Set(scoredNames);
+        for (const sn of scoredNames) {
+          const aliases = ALIAS_LOOKUP.get(sn);
+          if (aliases) for (const a of aliases) scoredNamesExpanded.add(a);
+        }
         const marketNames = new Set(marketLines.map(ml => normName(ml.player_name)));
-        const uncoveredPlayers = [...marketNames].filter(n => !scoredNames.has(n));
+        const uncoveredPlayers = [...marketNames].filter(n => !scoredNamesExpanded.has(n));
         const coverageRatio = marketNames.size > 0 ? (marketNames.size - uncoveredPlayers.length) / marketNames.size : 1;
         
         if (coverageRatio < 0.6 && marketLines.length > 0) {
@@ -802,33 +882,56 @@ serve(async (req) => {
       scoringByPlayerStat.get(pKey)!.push(p);
     }
 
-    // Helper: find best scoring match for a verified candidate
+    // Helper: find best scoring match for a verified candidate (with alias support)
+    let aliasHits = 0;
+    const aliasRescuedPlayers = new Set<string>();
+
     function findScoringMatch(playerName: string, statType: string, threshold: number): any | null {
       const pNorm = normName(playerName);
       const statKey = STAT_LABEL_TO_KEY[statType] || normStat(statType);
-      const exactKey = `${pNorm}|${statKey}|${threshold}`;
       
-      // 1. Exact threshold match
-      if (scoringLookup.has(exactKey)) return scoringLookup.get(exactKey);
+      // Try all name variants (self + aliases)
+      const nameVariants = getNameVariants(pNorm);
       
-      // 2. Closest threshold match (within 2.0 tolerance)
-      const allForStat = scoringByPlayerStat.get(`${pNorm}|${statKey}`);
-      if (allForStat && allForStat.length > 0) {
-        let closest: any = null;
-        let closestDist = Infinity;
-        for (const row of allForStat) {
-          const dist = Math.abs(Number(row.threshold) - threshold);
-          if (dist < closestDist) {
-            closestDist = dist;
-            closest = row;
+      for (let vi = 0; vi < nameVariants.length; vi++) {
+        const variant = nameVariants[vi];
+        const isAlias = vi > 0;
+        
+        // 1. Exact threshold match
+        const exactKey = `${variant}|${statKey}|${threshold}`;
+        if (scoringLookup.has(exactKey)) {
+          if (isAlias) { aliasHits++; aliasRescuedPlayers.add(playerName); }
+          return scoringLookup.get(exactKey);
+        }
+        
+        // 2. Closest threshold match (within 2.0 tolerance)
+        const allForStat = scoringByPlayerStat.get(`${variant}|${statKey}`);
+        if (allForStat && allForStat.length > 0) {
+          let closest: any = null;
+          let closestDist = Infinity;
+          for (const row of allForStat) {
+            const dist = Math.abs(Number(row.threshold) - threshold);
+            if (dist < closestDist) {
+              closestDist = dist;
+              closest = row;
+            }
+          }
+          if (closest && closestDist <= 2.0) {
+            if (isAlias) { aliasHits++; aliasRescuedPlayers.add(playerName); }
+            return closest;
           }
         }
-        if (closest && closestDist <= 2.0) return closest;
+        
+        // 3. Best-by-confidence fallback (any threshold for this player+stat)
+        const fuzzyKey = `${variant}|${statKey}`;
+        const fuzzyMatch = scoringLookup.get(fuzzyKey);
+        if (fuzzyMatch) {
+          if (isAlias) { aliasHits++; aliasRescuedPlayers.add(playerName); }
+          return fuzzyMatch;
+        }
       }
       
-      // 3. Best-by-confidence fallback (any threshold for this player+stat)
-      const fuzzyKey = `${pNorm}|${statKey}`;
-      return scoringLookup.get(fuzzyKey) || null;
+      return null;
     }
 
     // ===== ENRICHMENT COVERAGE TRACKING =====
@@ -928,7 +1031,7 @@ serve(async (req) => {
 
     debug.verified_prop_candidates = verifiedCandidates.length;
     console.log(`[AI-Builder] Verified market candidates: ${verifiedCandidates.length} (from ${bestLines.size} total lines, ${sanityRejected} rejected)`);
-    console.log(`[AI-Builder] Enrichment coverage: ${enrichmentFull} full, ${enrichmentPartial} partial, ${enrichmentNone} none | reasons: ${JSON.stringify(enrichmentMissReasons)}`);
+    console.log(`[AI-Builder] Enrichment coverage: ${enrichmentFull} full, ${enrichmentPartial} partial, ${enrichmentNone} none | alias_hits: ${aliasHits}, alias_rescued: [${[...aliasRescuedPlayers].join(", ")}] | reasons: ${JSON.stringify(enrichmentMissReasons)}`);
 
     // ===== PHASE 3b: APPLY MARKET QUALITY FILTERS =====
     const mqDebug: MarketQualityDebug = {
@@ -1881,6 +1984,8 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
           partial: enrichmentPartial,
           none: enrichmentNone,
           miss_reasons: enrichmentMissReasons,
+          alias_hits: aliasHits,
+          alias_rescued_players: [...aliasRescuedPlayers],
         },
       },
     }), {

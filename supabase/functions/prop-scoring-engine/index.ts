@@ -1061,6 +1061,62 @@ function normNameScoring(n: string): string {
     .trim();
 }
 
+// ===== PLAYER NAME ALIAS MAP (mirrors ai-bet-builder) =====
+const PLAYER_ALIASES_RAW: [string, string][] = [
+  ["Luka Doncic", "Luka Dončić"],
+  ["Kristaps Porzingis", "Kristaps Porziņģis"],
+  ["Moussa Diabate", "Moussa Diabaté"],
+  ["Nikola Jokic", "Nikola Jokić"],
+  ["Nikola Vucevic", "Nikola Vučević"],
+  ["Jonas Valanciunas", "Jonas Valančiūnas"],
+  ["Bogdan Bogdanovic", "Bogdan Bogdanović"],
+  ["Bojan Bogdanovic", "Bojan Bogdanović"],
+  ["Jusuf Nurkic", "Jusuf Nurkić"],
+  ["Alperen Sengun", "Alperen Şengün"],
+  ["Vasilije Micic", "Vasilije Micić"],
+  ["Nicolas Claxton", "Nic Claxton"],
+  ["Robert Williams III", "Robert Williams"],
+  ["Marcus Morris Sr.", "Marcus Morris"],
+  ["Gary Trent Jr.", "Gary Trent"],
+  ["Tim Hardaway Jr.", "Tim Hardaway"],
+  ["Larry Nance Jr.", "Larry Nance"],
+  ["Kelly Oubre Jr.", "Kelly Oubre"],
+  ["Jaren Jackson Jr.", "Jaren Jackson"],
+  ["Derrick Jones Jr.", "Derrick Jones Jr"],
+  ["Derrick Jones Jr.", "Derrick Jones"],
+  ["Jabari Smith Jr.", "Jabari Smith Jr"],
+  ["Jabari Smith Jr.", "Jabari Smith"],
+  ["Wendell Carter Jr.", "Wendell Carter Jr"],
+  ["Wendell Carter Jr.", "Wendell Carter"],
+  ["Michael Porter Jr.", "Michael Porter Jr"],
+  ["Michael Porter Jr.", "Michael Porter"],
+  ["Kenyon Martin Jr.", "Kenyon Martin Jr"],
+  ["Kenyon Martin Jr.", "Kenyon Martin"],
+  ["Trey Murphy III", "Trey Murphy"],
+  ["Herb Jones", "Herbert Jones"],
+];
+
+const SCORING_ALIAS_LOOKUP = new Map<string, Set<string>>();
+function _initScoringAliases() {
+  for (const [a, b] of PLAYER_ALIASES_RAW) {
+    const na = normNameScoring(a);
+    const nb = normNameScoring(b);
+    if (na === nb) continue;
+    if (!SCORING_ALIAS_LOOKUP.has(na)) SCORING_ALIAS_LOOKUP.set(na, new Set());
+    if (!SCORING_ALIAS_LOOKUP.has(nb)) SCORING_ALIAS_LOOKUP.set(nb, new Set());
+    SCORING_ALIAS_LOOKUP.get(na)!.add(nb);
+    SCORING_ALIAS_LOOKUP.get(nb)!.add(na);
+  }
+}
+_initScoringAliases();
+
+function getScoringNameVariants(normalizedName: string): string[] {
+  const variants = [normalizedName];
+  const aliases = SCORING_ALIAS_LOOKUP.get(normalizedName);
+  if (aliases) variants.push(...aliases);
+  return variants;
+}
+
 function normStatScoring(s: string): string {
   const lower = s.toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (lower === "points" || lower === "pts") return "pts";
@@ -1091,12 +1147,16 @@ serve(async (req) => {
         const pName = normNameScoring(ml.player_name || "");
         const stat = normStatScoring(ml.stat_type || "");
         if (!pName || !stat) continue;
-        if (!marketThresholdsByPlayer.has(pName)) marketThresholdsByPlayer.set(pName, new Map());
-        const statMap = marketThresholdsByPlayer.get(pName)!;
-        if (!statMap.has(stat)) statMap.set(stat, new Set());
-        statMap.get(stat)!.add(Number(ml.threshold));
+        // Add to primary name and all alias variants
+        const variants = getScoringNameVariants(pName);
+        for (const variant of variants) {
+          if (!marketThresholdsByPlayer.has(variant)) marketThresholdsByPlayer.set(variant, new Map());
+          const statMap = marketThresholdsByPlayer.get(variant)!;
+          if (!statMap.has(stat)) statMap.set(stat, new Set());
+          statMap.get(stat)!.add(Number(ml.threshold));
+        }
       }
-      console.log(`Loaded ${market_lines.length} market lines for ${marketThresholdsByPlayer.size} players`);
+      console.log(`Loaded ${market_lines.length} market lines for ${marketThresholdsByPlayer.size} players (with alias expansion)`);
     }
 
     const today = game_date || new Date().toISOString().split("T")[0];

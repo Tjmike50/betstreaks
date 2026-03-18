@@ -20,6 +20,14 @@ export interface MarketDepthData {
   fallback_used: boolean;
   scoring_data_available: number;
   scoring_source: "today" | "auto-triggered" | "yesterday" | "none";
+  enrichment_coverage?: {
+    full: number;
+    partial: number;
+    none: number;
+    miss_reasons: Record<string, number>;
+    alias_hits?: number;
+    alias_rescued_players?: string[];
+  };
   market_quality: {
     before_market_filters: number;
     removed_by_verified_only: number;
@@ -98,6 +106,7 @@ export function useAIBetBuilder() {
         const debug = data.debug || {};
         setMarketDepth({
           ...meta,
+          enrichment_coverage: meta.enrichment_coverage || null,
           market_quality: debug.market_quality || null,
         });
       }
