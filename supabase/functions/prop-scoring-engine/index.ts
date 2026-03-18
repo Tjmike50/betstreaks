@@ -1401,9 +1401,11 @@ serve(async (req) => {
     allScored.sort((a, b) => b.confidence_score - a.confidence_score);
     const topProps = allScored.slice(0, top_n);
 
-    // 7. Cache scores — batch upsert in chunks to avoid CPU timeout
-    if (topProps.length > 0) {
-      const rows = topProps.map((p) => ({
+    // 7. Cache ALL scores (not just top_n) to ensure full enrichment coverage
+    // This eliminates data gaps where market players rank outside top_n
+    const propsToCache = allScored; // cache everything
+    if (propsToCache.length > 0) {
+      const rows = propsToCache.map((p) => ({
         game_date: today,
         player_id: p.player_id,
         player_name: p.player_name,
@@ -1448,7 +1450,7 @@ serve(async (req) => {
           .upsert(chunk, { onConflict: "game_date,player_id,stat_type,threshold" });
         if (error) console.error(`Cache upsert error (chunk ${i / CHUNK_SIZE}):`, error);
       }
-      console.log(`Cached ${rows.length} scored props in ${Math.ceil(rows.length / CHUNK_SIZE)} batches`);
+      console.log(`Cached ${rows.length} scored props (all candidates) in ${Math.ceil(rows.length / CHUNK_SIZE)} batches`);
     }
 
     return new Response(
