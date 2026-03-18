@@ -876,33 +876,56 @@ serve(async (req) => {
       scoringByPlayerStat.get(pKey)!.push(p);
     }
 
-    // Helper: find best scoring match for a verified candidate
+    // Helper: find best scoring match for a verified candidate (with alias support)
+    let aliasHits = 0;
+    const aliasRescuedPlayers = new Set<string>();
+
     function findScoringMatch(playerName: string, statType: string, threshold: number): any | null {
       const pNorm = normName(playerName);
       const statKey = STAT_LABEL_TO_KEY[statType] || normStat(statType);
-      const exactKey = `${pNorm}|${statKey}|${threshold}`;
       
-      // 1. Exact threshold match
-      if (scoringLookup.has(exactKey)) return scoringLookup.get(exactKey);
+      // Try all name variants (self + aliases)
+      const nameVariants = getNameVariants(pNorm);
       
-      // 2. Closest threshold match (within 2.0 tolerance)
-      const allForStat = scoringByPlayerStat.get(`${pNorm}|${statKey}`);
-      if (allForStat && allForStat.length > 0) {
-        let closest: any = null;
-        let closestDist = Infinity;
-        for (const row of allForStat) {
-          const dist = Math.abs(Number(row.threshold) - threshold);
-          if (dist < closestDist) {
-            closestDist = dist;
-            closest = row;
+      for (let vi = 0; vi < nameVariants.length; vi++) {
+        const variant = nameVariants[vi];
+        const isAlias = vi > 0;
+        
+        // 1. Exact threshold match
+        const exactKey = `${variant}|${statKey}|${threshold}`;
+        if (scoringLookup.has(exactKey)) {
+          if (isAlias) { aliasHits++; aliasRescuedPlayers.add(playerName); }
+          return scoringLookup.get(exactKey);
+        }
+        
+        // 2. Closest threshold match (within 2.0 tolerance)
+        const allForStat = scoringByPlayerStat.get(`${variant}|${statKey}`);
+        if (allForStat && allForStat.length > 0) {
+          let closest: any = null;
+          let closestDist = Infinity;
+          for (const row of allForStat) {
+            const dist = Math.abs(Number(row.threshold) - threshold);
+            if (dist < closestDist) {
+              closestDist = dist;
+              closest = row;
+            }
+          }
+          if (closest && closestDist <= 2.0) {
+            if (isAlias) { aliasHits++; aliasRescuedPlayers.add(playerName); }
+            return closest;
           }
         }
-        if (closest && closestDist <= 2.0) return closest;
+        
+        // 3. Best-by-confidence fallback (any threshold for this player+stat)
+        const fuzzyKey = `${variant}|${statKey}`;
+        const fuzzyMatch = scoringLookup.get(fuzzyKey);
+        if (fuzzyMatch) {
+          if (isAlias) { aliasHits++; aliasRescuedPlayers.add(playerName); }
+          return fuzzyMatch;
+        }
       }
       
-      // 3. Best-by-confidence fallback (any threshold for this player+stat)
-      const fuzzyKey = `${pNorm}|${statKey}`;
-      return scoringLookup.get(fuzzyKey) || null;
+      return null;
     }
 
     // ===== ENRICHMENT COVERAGE TRACKING =====
