@@ -1174,10 +1174,22 @@ serve(async (req) => {
       }
       console.log(`Today's playing teams (${playingTeams.size}): ${[...playingTeams].join(", ")}`);
 
-      const { data: lsRows } = await supabase
-        .from("line_snapshots")
-        .select("player_name, stat_type, threshold")
-        .eq("game_date", today);
+      // Paginate to get all line_snapshots (default limit is 1000)
+      let allLsRows: any[] = [];
+      let lsOffset = 0;
+      const LS_PAGE = 1000;
+      while (true) {
+        const { data: lsPage } = await supabase
+          .from("line_snapshots")
+          .select("player_name, stat_type, threshold")
+          .eq("game_date", today)
+          .range(lsOffset, lsOffset + LS_PAGE - 1);
+        if (!lsPage || lsPage.length === 0) break;
+        allLsRows.push(...lsPage);
+        if (lsPage.length < LS_PAGE) break;
+        lsOffset += LS_PAGE;
+      }
+      const lsRows = allLsRows;
 
       if (lsRows && lsRows.length > 0) {
         // Build a player→team lookup from game logs to filter stale lines
