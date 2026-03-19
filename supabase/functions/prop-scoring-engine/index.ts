@@ -1284,6 +1284,51 @@ serve(async (req) => {
       playerLogs[log.player_id].push(log);
     }
 
+    // 3b. Filter stale market lines: remove lines for players on non-playing teams
+    if (score_all_market_players && effectiveMarketLines && (body as any)._playingTeams) {
+      const playingTeamsSet = new Set<string>((body as any)._playingTeams);
+      // Build player_name → team_abbr lookup from game logs
+      const playerTeamLookup = new Map<string, string>();
+      for (const logs of Object.values(playerLogs)) {
+        if (logs.length > 0 && logs[0].player_name && logs[0].team_abbr) {
+          playerTeamLookup.set(normNameScoring(logs[0].player_name), logs[0].team_abbr);
+          // Also add alias variants
+          const variants = getScoringNameVariants(normNameScoring(logs[0].player_name));
+          for (const v of variants) {
+            playerTeamLookup.set(v, logs[0].team_abbr);
+          }
+        }
+      }
+
+      const beforeCount = effectiveMarketLines.length;
+      effectiveMarketLines = effectiveMarketLines.filter((ml: any) => {
+        const norm = normNameScoring(ml.player_name || "");
+        const team = playerTeamLookup.get(norm);
+        // Keep if: team is playing today, or team is unknown (let scoring engine handle)
+        return !team || playingTeamsSet.has(team);
+      });
+      const staleRemoved = beforeCount - effectiveMarketLines.length;
+      if (staleRemoved > 0) {
+        console.log(`Filtered ${staleRemoved} stale market lines (non-playing teams), ${effectiveMarketLines.length} remaining`);
+      }
+
+      // Rebuild marketThresholdsByPlayer with filtered lines
+      marketThresholdsByPlayer.clear();
+      for (const ml of effectiveMarketLines) {
+        const pName = normNameScoring(ml.player_name || "");
+        const stat = normStatScoring(ml.stat_type || "");
+        if (!pName || !stat) continue;
+        const variants = getScoringNameVariants(pName);
+        for (const variant of variants) {
+          if (!marketThresholdsByPlayer.has(variant)) marketThresholdsByPlayer.set(variant, new Map());
+          const statMap = marketThresholdsByPlayer.get(variant)!;
+          if (!statMap.has(stat)) statMap.set(stat, new Set());
+          statMap.get(stat)!.add(Number(ml.threshold));
+        }
+      }
+      console.log(`Post-filter: ${marketThresholdsByPlayer.size} market players with thresholds`);
+    }
+
     // 4. Build team rosters for teammate analysis (once per team)
     const teamRosters: Record<string, Map<string, Set<number>>> = {};
     const allTeams = teamsPlaying.length > 0 ? teamsPlaying : [...new Set(allLogs.map(l => l.team_abbr).filter(Boolean) as string[])];
