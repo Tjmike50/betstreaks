@@ -1529,9 +1529,20 @@ serve(async (req) => {
 
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
 
-      // Skip players who are confirmed OUT
+      // Skip players who are confirmed OUT (explicit source only, not derived)
+      // Players with active market lines should still be scored even if derived-out
       const explicitStatus = availabilityMap.get(playerId);
-      if (explicitStatus?.status === "out") continue;
+      if (explicitStatus?.status === "out") {
+        const isExplicitSource = explicitStatus.source !== "derived";
+        const playerNorm = normNameScoring(logs[0]?.player_name || "");
+        const hasMarketLines = marketThresholdsByPlayer.has(playerNorm);
+        if (isExplicitSource && !hasMarketLines) continue;
+        if (isExplicitSource && hasMarketLines) {
+          console.log(`Player ${logs[0]?.player_name} is explicitly OUT but has market lines — scoring with reduced confidence`);
+        }
+        if (!isExplicitSource && !hasMarketLines) continue;
+        // Derived-out with market lines: don't skip, score with availability penalty
+      }
 
       const restCtx = computeRestContext(logs, today);
 
