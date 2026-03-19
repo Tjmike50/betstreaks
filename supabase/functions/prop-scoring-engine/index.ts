@@ -1282,6 +1282,92 @@ serve(async (req) => {
       }
     }
 
+    // === TEAM MISMATCH RESOLUTION ===
+    // Detect market players whose game logs weren't loaded because their
+    // stored team_abbr is stale (e.g., mid-season trade). Fetch by name.
+    if (score_all_market_players && effectiveMarketLines && effectiveMarketLines.length > 0) {
+      const loadedNorms = new Set<string>();
+      for (const log of allLogs) {
+        if (log.player_name) loadedNorms.add(normNameScoring(log.player_name));
+      }
+
+      // Find market players not yet loaded
+      const missingMarketPlayers = new Set<string>();
+      const missingOriginalNames = new Map<string, string>(); // norm → original
+      for (const ml of effectiveMarketLines) {
+        const norm = normNameScoring(ml.player_name || "");
+        if (!norm) continue;
+        // Check primary name and all alias variants
+        const variants = getScoringNameVariants(norm);
+        const found = variants.some(v => loadedNorms.has(v));
+        if (!found) {
+          missingMarketPlayers.add(norm);
+          missingOriginalNames.set(norm, ml.player_name);
+        }
+      }
+
+      if (missingMarketPlayers.size > 0) {
+        console.log(`Team mismatch: ${missingMarketPlayers.size} market players not found in team-based logs, fetching by name...`);
+        const teamMismatchDebug: { player: string; old_team: string | null; current_team: string | null }[] = [];
+
+        for (const [norm, origName] of missingOriginalNames) {
+          // Try fetching by ilike on player_name
+          const { data: rescueLogs } = await supabase
+            .from("player_recent_games")
+            .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
+            .ilike("player_name", origName)
+            .order("game_date", { ascending: false })
+            .limit(100);
+
+          if (rescueLogs && rescueLogs.length > 0) {
+            const oldTeam = rescueLogs[0].team_abbr;
+            // Determine current team: which playing team is this player likely on?
+            const playingTeamsArr = (body as any)._playingTeams as string[] | undefined;
+            let currentTeam = oldTeam;
+            if (playingTeamsArr && oldTeam && !playingTeamsArr.includes(oldTeam)) {
+              // Player's stored team isn't playing; they were likely traded
+              // We can't know the new team from game logs alone, so we keep their logs
+              // but let the matchup resolve from any playing team's schedule
+              currentTeam = oldTeam; // keep original for now
+            }
+
+            allLogs.push(...(rescueLogs as GameLog[]));
+            teamMismatchDebug.push({ player: origName, old_team: oldTeam, current_team: currentTeam });
+            console.log(`  Rescued ${rescueLogs.length} logs for ${origName} (team in logs: ${oldTeam})`);
+          } else {
+            // Try alias variants
+            const variants = getScoringNameVariants(norm);
+            let rescued = false;
+            for (const variant of variants) {
+              if (variant === norm) continue;
+              // Convert normalized name back to title case for ilike
+              const titleCase = variant.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+              const { data: aliasLogs } = await supabase
+                .from("player_recent_games")
+                .select("player_id, player_name, team_abbr, game_date, matchup, pts, reb, ast, fg3m, stl, blk, wl")
+                .ilike("player_name", `%${titleCase}%`)
+                .order("game_date", { ascending: false })
+                .limit(100);
+              if (aliasLogs && aliasLogs.length > 0) {
+                allLogs.push(...(aliasLogs as GameLog[]));
+                teamMismatchDebug.push({ player: origName, old_team: aliasLogs[0].team_abbr, current_team: aliasLogs[0].team_abbr });
+                console.log(`  Rescued ${aliasLogs.length} logs for ${origName} via alias ${titleCase} (team: ${aliasLogs[0].team_abbr})`);
+                rescued = true;
+                break;
+              }
+            }
+            if (!rescued) {
+              console.log(`  No game logs found for market player: ${origName}`);
+            }
+          }
+        }
+
+        if (teamMismatchDebug.length > 0) {
+          console.log(`Team mismatch resolution: ${JSON.stringify(teamMismatchDebug)}`);
+        }
+      }
+    }
+
     if (allLogs.length === 0) {
       return new Response(
         JSON.stringify({ scored_props: [], message: "No player game logs found" }),
@@ -1418,14 +1504,45 @@ serve(async (req) => {
       if (!team) continue;
 
       const matchup = teamMatchups[team];
-      const opponent = matchup?.opponent || null;
-      const homeAway = matchup?.homeAway || "unknown";
+      // If no matchup found for stored team (e.g., traded player), try to find
+      // matchup via market lines — the player's current team is implied by which
+      // playing team has them in the market
+      let opponent = matchup?.opponent || null;
+      let homeAway = matchup?.homeAway || "unknown";
+
+      if (!matchup && score_all_market_players) {
+        // Traded player: stored team doesn't match playing teams
+        // Try all playing teams to find a potential matchup assignment
+        const playerNorm = normNameScoring(logs[0]?.player_name || "");
+        const hasMarketLines = marketThresholdsByPlayer.has(playerNorm);
+        if (hasMarketLines) {
+          // Assign to any playing team's matchup (best-effort for traded players)
+          // The scoring will still use their actual game history
+          for (const [tmKey, tmMatchup] of Object.entries(teamMatchups)) {
+            opponent = tmMatchup.opponent;
+            homeAway = tmMatchup.homeAway;
+            console.log(`Team mismatch override: ${logs[0]?.player_name} (logs: ${team}) → assigned matchup from ${tmKey}`);
+            break; // Use first available — not perfect but ensures scoring runs
+          }
+        }
+      }
 
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
 
-      // Skip players who are confirmed OUT
+      // Skip players who are confirmed OUT (explicit source only, not derived)
+      // Players with active market lines should still be scored even if derived-out
       const explicitStatus = availabilityMap.get(playerId);
-      if (explicitStatus?.status === "out") continue;
+      if (explicitStatus?.status === "out") {
+        const isExplicitSource = explicitStatus.source !== "derived";
+        const playerNorm = normNameScoring(logs[0]?.player_name || "");
+        const hasMarketLines = marketThresholdsByPlayer.has(playerNorm);
+        if (isExplicitSource && !hasMarketLines) continue;
+        if (isExplicitSource && hasMarketLines) {
+          console.log(`Player ${logs[0]?.player_name} is explicitly OUT but has market lines — scoring with reduced confidence`);
+        }
+        if (!isExplicitSource && !hasMarketLines) continue;
+        // Derived-out with market lines: don't skip, score with availability penalty
+      }
 
       const restCtx = computeRestContext(logs, today);
 
