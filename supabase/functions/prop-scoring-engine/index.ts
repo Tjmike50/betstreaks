@@ -1157,13 +1157,43 @@ serve(async (req) => {
     const today = game_date || new Date().toISOString().split("T")[0];
 
     // Auto-fetch all market lines from line_snapshots for full coverage
+    // Filter out stale lines for teams not playing today
     if (score_all_market_players && !effectiveMarketLines) {
-      const { data: lsRows } = await supabase
-        .from("line_snapshots")
-        .select("player_name, stat_type, threshold")
-        .eq("game_date", today);
+      // First get today's playing teams to filter stale lines
+      const { data: todayGames } = await supabase
+        .from("games_today")
+        .select("home_team_abbr, away_team_abbr")
+        .eq("game_date", today)
+        .eq("sport", "NBA");
+      const playingTeams = new Set<string>();
+      if (todayGames) {
+        for (const g of todayGames) {
+          if (g.home_team_abbr) playingTeams.add(g.home_team_abbr);
+          if (g.away_team_abbr) playingTeams.add(g.away_team_abbr);
+        }
+      }
+      console.log(`Today's playing teams (${playingTeams.size}): ${[...playingTeams].join(", ")}`);
+
+      // Paginate to get all line_snapshots (default limit is 1000)
+      let allLsRows: any[] = [];
+      let lsOffset = 0;
+      const LS_PAGE = 1000;
+      while (true) {
+        const { data: lsPage } = await supabase
+          .from("line_snapshots")
+          .select("player_name, stat_type, threshold")
+          .eq("game_date", today)
+          .range(lsOffset, lsOffset + LS_PAGE - 1);
+        if (!lsPage || lsPage.length === 0) break;
+        allLsRows.push(...lsPage);
+        if (lsPage.length < LS_PAGE) break;
+        lsOffset += LS_PAGE;
+      }
+      const lsRows = allLsRows;
+
       if (lsRows && lsRows.length > 0) {
-        // Deduplicate
+        // Build a player→team lookup from game logs to filter stale lines
+        // We'll check after loading game logs; for now deduplicate all
         const seen = new Set<string>();
         effectiveMarketLines = [];
         for (const r of lsRows) {
@@ -1173,7 +1203,11 @@ serve(async (req) => {
             effectiveMarketLines.push(r);
           }
         }
-        console.log(`Auto-loaded ${effectiveMarketLines.length} unique market lines from line_snapshots for full coverage`);
+        console.log(`Auto-loaded ${effectiveMarketLines.length} unique market lines from line_snapshots (pre-filter)`);
+
+        // We'll filter stale lines after loading game logs (below) using playingTeams
+        // Store playingTeams for later use
+        (body as any)._playingTeams = [...playingTeams];
       }
     }
 
@@ -1260,6 +1294,51 @@ serve(async (req) => {
     for (const log of allLogs) {
       if (!playerLogs[log.player_id]) playerLogs[log.player_id] = [];
       playerLogs[log.player_id].push(log);
+    }
+
+    // 3b. Filter stale market lines: remove lines for players on non-playing teams
+    if (score_all_market_players && effectiveMarketLines && (body as any)._playingTeams) {
+      const playingTeamsSet = new Set<string>((body as any)._playingTeams);
+      // Build player_name → team_abbr lookup from game logs
+      const playerTeamLookup = new Map<string, string>();
+      for (const logs of Object.values(playerLogs)) {
+        if (logs.length > 0 && logs[0].player_name && logs[0].team_abbr) {
+          playerTeamLookup.set(normNameScoring(logs[0].player_name), logs[0].team_abbr);
+          // Also add alias variants
+          const variants = getScoringNameVariants(normNameScoring(logs[0].player_name));
+          for (const v of variants) {
+            playerTeamLookup.set(v, logs[0].team_abbr);
+          }
+        }
+      }
+
+      const beforeCount = effectiveMarketLines.length;
+      effectiveMarketLines = effectiveMarketLines.filter((ml: any) => {
+        const norm = normNameScoring(ml.player_name || "");
+        const team = playerTeamLookup.get(norm);
+        // Keep if: team is playing today, or team is unknown (let scoring engine handle)
+        return !team || playingTeamsSet.has(team);
+      });
+      const staleRemoved = beforeCount - effectiveMarketLines.length;
+      if (staleRemoved > 0) {
+        console.log(`Filtered ${staleRemoved} stale market lines (non-playing teams), ${effectiveMarketLines.length} remaining`);
+      }
+
+      // Rebuild marketThresholdsByPlayer with filtered lines
+      marketThresholdsByPlayer.clear();
+      for (const ml of effectiveMarketLines) {
+        const pName = normNameScoring(ml.player_name || "");
+        const stat = normStatScoring(ml.stat_type || "");
+        if (!pName || !stat) continue;
+        const variants = getScoringNameVariants(pName);
+        for (const variant of variants) {
+          if (!marketThresholdsByPlayer.has(variant)) marketThresholdsByPlayer.set(variant, new Map());
+          const statMap = marketThresholdsByPlayer.get(variant)!;
+          if (!statMap.has(stat)) statMap.set(stat, new Set());
+          statMap.get(stat)!.add(Number(ml.threshold));
+        }
+      }
+      console.log(`Post-filter: ${marketThresholdsByPlayer.size} market players with thresholds`);
     }
 
     // 4. Build team rosters for teammate analysis (once per team)
