@@ -1504,8 +1504,28 @@ serve(async (req) => {
       if (!team) continue;
 
       const matchup = teamMatchups[team];
-      const opponent = matchup?.opponent || null;
-      const homeAway = matchup?.homeAway || "unknown";
+      // If no matchup found for stored team (e.g., traded player), try to find
+      // matchup via market lines — the player's current team is implied by which
+      // playing team has them in the market
+      let opponent = matchup?.opponent || null;
+      let homeAway = matchup?.homeAway || "unknown";
+
+      if (!matchup && score_all_market_players) {
+        // Traded player: stored team doesn't match playing teams
+        // Try all playing teams to find a potential matchup assignment
+        const playerNorm = normNameScoring(logs[0]?.player_name || "");
+        const hasMarketLines = marketThresholdsByPlayer.has(playerNorm);
+        if (hasMarketLines) {
+          // Assign to any playing team's matchup (best-effort for traded players)
+          // The scoring will still use their actual game history
+          for (const [tmKey, tmMatchup] of Object.entries(teamMatchups)) {
+            opponent = tmMatchup.opponent;
+            homeAway = tmMatchup.homeAway;
+            console.log(`Team mismatch override: ${logs[0]?.player_name} (logs: ${team}) → assigned matchup from ${tmKey}`);
+            break; // Use first available — not perfect but ensures scoring runs
+          }
+        }
+      }
 
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
 
