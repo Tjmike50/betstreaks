@@ -1157,13 +1157,31 @@ serve(async (req) => {
     const today = game_date || new Date().toISOString().split("T")[0];
 
     // Auto-fetch all market lines from line_snapshots for full coverage
+    // Filter out stale lines for teams not playing today
     if (score_all_market_players && !effectiveMarketLines) {
+      // First get today's playing teams to filter stale lines
+      const { data: todayGames } = await supabase
+        .from("games_today")
+        .select("home_team_abbr, away_team_abbr")
+        .eq("game_date", today)
+        .eq("sport", "NBA");
+      const playingTeams = new Set<string>();
+      if (todayGames) {
+        for (const g of todayGames) {
+          if (g.home_team_abbr) playingTeams.add(g.home_team_abbr);
+          if (g.away_team_abbr) playingTeams.add(g.away_team_abbr);
+        }
+      }
+      console.log(`Today's playing teams (${playingTeams.size}): ${[...playingTeams].join(", ")}`);
+
       const { data: lsRows } = await supabase
         .from("line_snapshots")
         .select("player_name, stat_type, threshold")
         .eq("game_date", today);
+
       if (lsRows && lsRows.length > 0) {
-        // Deduplicate
+        // Build a player→team lookup from game logs to filter stale lines
+        // We'll check after loading game logs; for now deduplicate all
         const seen = new Set<string>();
         effectiveMarketLines = [];
         for (const r of lsRows) {
@@ -1173,7 +1191,11 @@ serve(async (req) => {
             effectiveMarketLines.push(r);
           }
         }
-        console.log(`Auto-loaded ${effectiveMarketLines.length} unique market lines from line_snapshots for full coverage`);
+        console.log(`Auto-loaded ${effectiveMarketLines.length} unique market lines from line_snapshots (pre-filter)`);
+
+        // We'll filter stale lines after loading game logs (below) using playingTeams
+        // Store playingTeams for later use
+        (body as any)._playingTeams = [...playingTeams];
       }
     }
 
