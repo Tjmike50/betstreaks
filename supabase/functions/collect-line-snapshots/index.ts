@@ -224,19 +224,26 @@ serve(async (req) => {
       { onConflict: "id" }
     );
 
-    // 6. Count total snapshots today and unique props
+    // 6. Count total snapshots for relevant dates
     const { count: totalToday } = await supabase
       .from("line_snapshots")
       .select("id", { count: "exact", head: true })
-      .eq("game_date", todayStr);
+      .in("game_date", [...allGameDates]);
+
+    // Count by date for visibility
+    const dateCounts: Record<string, number> = {};
+    for (const row of newRows) {
+      dateCounts[row.game_date] = (dateCounts[row.game_date] || 0) + 1;
+    }
 
     const result = {
       ok: insertErrors === 0,
-      game_date: todayStr,
+      game_dates: [...allGameDates].sort(),
       games_processed: gamesProcessed,
       new_snapshots: newRows.length,
+      new_by_date: dateCounts,
       skipped_dupes: skippedDupes,
-      total_today: totalToday || 0,
+      total_across_dates: totalToday || 0,
       refreshed_at: new Date().toISOString(),
     };
 
