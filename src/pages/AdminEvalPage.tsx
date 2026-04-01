@@ -686,11 +686,18 @@ export default function AdminEvalPage() {
                 {pipelineHistory.map((run: any) => {
                   const ranAt = new Date(run.ran_at);
                   const hasErrors = run.errors && run.errors.length > 0;
+                  const isFailed = !run.success || hasErrors;
+                  const isSlow = (run.total_duration_ms || 0) > 60000;
+                  const rowBg = isFailed
+                    ? "bg-destructive/10 border border-destructive/30"
+                    : isSlow
+                      ? "bg-yellow-500/10 border border-yellow-500/30"
+                      : "bg-card/50";
                   return (
-                    <div key={run.id} className="flex items-center gap-2 text-[11px] bg-card/50 rounded-lg px-2.5 py-1.5">
-                      {run.success
-                        ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                        : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />}
+                    <div key={run.id} className={`flex items-center gap-2 text-[11px] rounded-lg px-2.5 py-1.5 ${rowBg}`}>
+                      {isFailed
+                        ? <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                        : <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />}
                       <span className="font-medium min-w-[90px]">
                         {ranAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
                         {ranAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
