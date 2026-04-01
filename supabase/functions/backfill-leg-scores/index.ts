@@ -5,7 +5,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-Deno.serve(async (req) => {
+// Map display stat types to prop_scores stat types
+const STAT_TYPE_MAP: Record<string, string> = {
+  "points": "pts", "rebounds": "reb", "assists": "ast",
+  "3-pointers": "fg3m", "steals": "stl", "blocks": "blk",
+  "pts": "pts", "reb": "reb", "ast": "ast", "fg3m": "fg3m", "stl": "stl", "blk": "blk",
+};
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
