@@ -107,17 +107,29 @@ serve(async (req) => {
       }
     }
 
-    // 2. Fetch existing snapshots for today to enable deduplication
+    // Build game_id → game_date map from commence_time
+    const gameIdToDate = new Map<string, string>();
+    const allGameDates = new Set<string>();
+    for (const game of gamesData) {
+      const commence = new Date(game.commence_time);
+      // Use ET date for game_date (NBA games are scheduled in ET)
+      const etDate = commence.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+      gameIdToDate.set(game.id, etDate);
+      allGameDates.add(etDate);
+    }
+    console.log(`Game dates from commence_time: ${[...allGameDates].sort().join(", ")}`);
+
+    // 2. Fetch existing snapshots for relevant dates to enable deduplication
     const { data: existingSnaps } = await supabase
       .from("line_snapshots")
-      .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook")
-      .eq("game_date", todayStr)
+      .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook, game_date")
+      .in("game_date", [...allGameDates])
       .order("snapshot_at", { ascending: false });
 
-    // Build a map of latest snapshot per prop for dedup
+    // Build a map of latest snapshot per prop for dedup (include game_date in key)
     const latestByKey = new Map<string, { over_odds: string | null; under_odds: string | null; threshold: number }>();
     for (const s of existingSnaps || []) {
-      const key = `${s.player_name}|${s.stat_type}|${s.sportsbook}`;
+      const key = `${s.player_name}|${s.stat_type}|${s.sportsbook}|${s.game_date}`;
       if (!latestByKey.has(key)) {
         latestByKey.set(key, { over_odds: s.over_odds, under_odds: s.under_odds, threshold: s.threshold });
       }
@@ -129,6 +141,7 @@ serve(async (req) => {
     let gamesProcessed = 0;
 
     for (const game of gamesData.slice(0, 5)) {
+      const gameDate = gameIdToDate.get(game.id) || todayStr;
       try {
         const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel,betmgm,pointsbetus`;
         const propsRes = await fetch(propsUrl);
@@ -158,7 +171,7 @@ serve(async (req) => {
               if (!entry.player || entry.point == null) continue;
 
               // Dedup: skip if line + odds haven't changed since last snapshot
-              const dedupKey = `${entry.player}|${statType}|${bm.key}`;
+              const dedupKey = `${entry.player}|${statType}|${bm.key}|${gameDate}`;
               const prev = latestByKey.get(dedupKey);
               if (prev &&
                   prev.threshold === entry.point &&
@@ -175,7 +188,7 @@ serve(async (req) => {
                 over_odds: entry.over || null,
                 under_odds: entry.under || null,
                 sportsbook: bm.key,
-                game_date: todayStr,
+                game_date: gameDate,
               });
 
               // Update dedup map for within-batch dedup
