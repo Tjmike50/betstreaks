@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle, XCircle, ClipboardCheck, TrendingDown, BarChart3 } from "lucide-react";
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
+import { Loader2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle, XCircle, ClipboardCheck, TrendingDown, BarChart3, CalendarDays } from "lucide-react";
 
 interface MarketContext {
   books_count: number;
@@ -333,6 +334,107 @@ function mkKey(player: string, stat: string, threshold: number, date: string) {
   return `${player.toLowerCase()}|${stat.toLowerCase()}|${threshold}|${date}`;
 }
 
+function DailyBreakdownTable({ slips }: { slips: SlipWithLegs[] }) {
+  // Group by game_date
+  const dateMap: Record<string, SlipWithLegs[]> = {};
+  for (const s of slips) {
+    if (!dateMap[s.game_date]) dateMap[s.game_date] = [];
+    dateMap[s.game_date].push(s);
+  }
+
+  const rows = Object.entries(dateMap)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, daySlips]) => {
+      const gradedSlips = daySlips.filter(s => s.slip_hit != null);
+      const slipHits = gradedSlips.filter(s => s.slip_hit).length;
+      const allLegs = daySlips.flatMap(s => s.legs).filter(l => l.hit != null);
+      const legHits = allLegs.filter(l => l.hit).length;
+
+      const singleBook = allLegs.filter(l => l.market && l.market.books_count === 1);
+      const singleBookHits = singleBook.filter(l => l.hit).length;
+      const multiBook = allLegs.filter(l => l.market && l.market.books_count >= 3);
+      const multiBookHits = multiBook.filter(l => l.hit).length;
+      const stale = allLegs.filter(l => l.market?.scoring_stale);
+      const staleHits = stale.filter(l => l.hit).length;
+      const strong = allLegs.filter(l => l.market && l.market.books_count >= 3 && (l.confidence_score ?? 0) >= 50);
+      const strongHits = strong.filter(l => l.hit).length;
+      const weak = allLegs.filter(l => l.market && l.market.books_count <= 1 && (l.confidence_score ?? 0) < 40);
+      const weakHits = weak.filter(l => l.hit).length;
+
+      const pct = (h: number, t: number) => t > 0 ? `${Math.round((h / t) * 100)}%` : "—";
+
+      return {
+        date, totalSlips: daySlips.length,
+        slipRate: pct(slipHits, gradedSlips.length), gradedSlips: gradedSlips.length,
+        totalLegs: allLegs.length, legRate: pct(legHits, allLegs.length),
+        singleBook: singleBook.length > 0 ? pct(singleBookHits, singleBook.length) : "—",
+        multiBook: multiBook.length > 0 ? pct(multiBookHits, multiBook.length) : "—",
+        stale: stale.length > 0 ? pct(staleHits, stale.length) : "—",
+        strong: strong.length > 0 ? pct(strongHits, strong.length) : "—",
+        weak: weak.length > 0 ? pct(weakHits, weak.length) : "—",
+        singleBookN: singleBook.length, multiBookN: multiBook.length,
+        staleN: stale.length, strongN: strong.length, weakN: weak.length,
+      };
+    });
+
+  if (rows.length === 0) return null;
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-2">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 text-primary" />
+          Daily Breakdown
+        </h3>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[9px] px-1.5 h-8">Date</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Slips</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Slip HR</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Legs</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Leg HR</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">1-Bk</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">3+Bk</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Stale</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Strong</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Weak</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map(r => (
+                <TableRow key={r.date}>
+                  <TableCell className="text-[10px] px-1.5 py-1 font-mono">{r.date}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">{r.totalSlips}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center font-medium">{r.slipRate}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">{r.totalLegs}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center font-medium">{r.legRate}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                    <span title={`${r.singleBookN} legs`}>{r.singleBook}</span>
+                  </TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                    <span title={`${r.multiBookN} legs`}>{r.multiBook}</span>
+                  </TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                    <span title={`${r.staleN} legs`}>{r.stale}</span>
+                  </TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                    <span title={`${r.strongN} legs`}>{r.strong}</span>
+                  </TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                    <span title={`${r.weakN} legs`}>{r.weak}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function SlipValidationReview() {
   const [dateFilter, setDateFilter] = useState<"3d" | "7d" | "14d" | "30d">("7d");
 
@@ -583,6 +685,9 @@ export function SlipValidationReview() {
               </CardContent>
             </Card>
           )}
+
+          {/* Daily Breakdown Table */}
+          {slips.length > 0 && <DailyBreakdownTable slips={slips} />}
 
           {/* Slip list */}
           <div className="space-y-1.5 max-h-[600px] overflow-y-auto">
