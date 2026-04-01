@@ -189,9 +189,10 @@ serve(async (req) => {
           }
 
           const threshold = parseFloat(leg.line.replace(/[^0-9.]/g, "")) || 0;
-          const scoreKey = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${threshold}`;
+          const mappedStat = STAT_MAP[leg.stat_type]?.toLowerCase() || leg.stat_type.toLowerCase();
+          const scoreKey = `${leg.player_name.toLowerCase()}|${mappedStat}|${threshold}`;
           const scores = scoreMap[scoreKey];
-          const books = booksMap[scoreKey];
+          const books = booksMap[scoreKey] || booksMap[`${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${threshold}`];
 
           legOutcomes.push({
             leg_order: leg.leg_order,
