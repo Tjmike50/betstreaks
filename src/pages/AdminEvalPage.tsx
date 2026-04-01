@@ -498,6 +498,24 @@ export default function AdminEvalPage() {
     }
   };
 
+  const handleRunPipeline = async () => {
+    setRunningPipeline(true);
+    setPipelineResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("run-daily-pipeline", { body: {} });
+      if (error) throw error;
+      setPipelineResult(data);
+      toast({
+        title: data.success ? "Pipeline complete ✅" : "Pipeline partial ⚠️",
+        description: `Lines: ${data.results?.line_collection?.new_snapshots || 0} new | Avail: ${data.results?.availability_refresh?.records || 0} | Scored: ${data.results?.scoring?.scored_count || 0} | ${Math.round(data.total_duration_ms / 1000)}s`,
+      });
+    } catch (e) {
+      toast({ title: "Pipeline failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRunningPipeline(false);
+    }
+  };
+
   if (adminLoading) return <div className="flex items-center justify-center min-h-screen"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   if (!isAdmin) {
     return (
