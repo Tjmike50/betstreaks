@@ -30,6 +30,8 @@ interface LegOutcome {
   actual_value: number | null;
   hit: boolean | null;
   confidence_score: number | null;
+  value_score: number | null;
+  books_count: number | null;
   market?: MarketContext;
 }
 
