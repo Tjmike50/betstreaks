@@ -573,9 +573,46 @@ export default function AdminEvalPage() {
 
   const sortedSnapshots = [...snapshots].sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date));
 
+  // Derive pipeline alert state from history
+  const latestRun = pipelineHistory.length > 0 ? pipelineHistory[0] : null;
+  const latestFailed = latestRun && (!latestRun.success || (latestRun.errors && latestRun.errors.length > 0));
+  const lastSuccessRun = pipelineHistory.find((r: any) => r.success && (!r.errors || r.errors.length === 0));
+  const lastSuccessTime = lastSuccessRun ? new Date(lastSuccessRun.ran_at) : null;
+  const hoursSinceSuccess = lastSuccessTime ? (Date.now() - lastSuccessTime.getTime()) / (1000 * 60 * 60) : null;
+  const pipelineStale = hoursSinceSuccess === null || hoursSinceSuccess > 6;
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <div className="max-w-2xl mx-auto px-4 pt-6 space-y-6">
+        {/* Pipeline Failure Banner */}
+        {latestFailed && latestRun && (
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <span className="font-semibold text-destructive">Pipeline failed</span>
+              <span className="text-muted-foreground ml-1.5">
+                {new Date(latestRun.ran_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+              </span>
+              {latestRun.errors?.[0] && (
+                <p className="text-xs text-destructive/80 mt-0.5 truncate">{latestRun.errors[0]}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Stale Pipeline Warning */}
+        {!latestFailed && pipelineStale && (
+          <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-3 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <span className="font-semibold text-yellow-600">Pipeline may be stale</span>
+              <span className="text-xs text-muted-foreground ml-1.5">
+                — No successful run in the last 6 hours
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
