@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     // Collect unique game dates
     const gameDates = [...new Set(Object.values(dateMap))];
 
-    // Fetch prop scores
+    // Fetch prop scores - exact date match first
     const { data: propScores } = await supabase
       .from("player_prop_scores")
       .select("player_name, stat_type, threshold, game_date, confidence_score, value_score")
@@ -71,6 +71,45 @@ Deno.serve(async (req) => {
     for (const ps of propScores || []) {
       const key = `${ps.player_name.toLowerCase()}|${ps.stat_type.toLowerCase()}|${ps.threshold}|${ps.game_date}`;
       scoreMap[key] = { confidence_score: ps.confidence_score, value_score: ps.value_score };
+    }
+
+    // For legs without exact-date scores, fetch nearest available scores
+    const unmatchedLegs = legs.filter(leg => {
+      const gd = dateMap[leg.slip_outcome_id];
+      if (!gd) return false;
+      const key = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${leg.threshold}|${gd}`;
+      return !scoreMap[key];
+    });
+
+    if (unmatchedLegs.length > 0) {
+      // Collect unique player+stat+threshold combos
+      const combos = [...new Set(unmatchedLegs.map(l => 
+        `${l.player_name.toLowerCase()}|${l.stat_type.toLowerCase()}|${l.threshold}`
+      ))];
+
+      for (const combo of combos) {
+        const [pn, st, th] = combo.split("|");
+        const { data: nearest } = await supabase
+          .from("player_prop_scores")
+          .select("confidence_score, value_score, game_date")
+          .ilike("player_name", pn)
+          .ilike("stat_type", st)
+          .eq("threshold", parseFloat(th))
+          .order("game_date", { ascending: false })
+          .limit(1);
+
+        if (nearest && nearest.length > 0) {
+          // Apply to all matching legs
+          for (const leg of unmatchedLegs) {
+            const legCombo = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${leg.threshold}`;
+            if (legCombo === combo) {
+              const gd = dateMap[leg.slip_outcome_id];
+              const key = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${leg.threshold}|${gd}`;
+              scoreMap[key] = { confidence_score: nearest[0].confidence_score, value_score: nearest[0].value_score };
+            }
+          }
+        }
+      }
     }
 
     // Fetch line snapshots for books count
