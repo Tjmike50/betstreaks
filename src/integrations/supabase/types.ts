@@ -911,6 +911,7 @@ export type Database = {
       slip_leg_outcomes: {
         Row: {
           actual_value: number | null
+          books_count: number | null
           confidence_score: number | null
           created_at: string
           hit: boolean | null
@@ -922,9 +923,11 @@ export type Database = {
           stat_type: string
           team_abbr: string | null
           threshold: number
+          value_score: number | null
         }
         Insert: {
           actual_value?: number | null
+          books_count?: number | null
           confidence_score?: number | null
           created_at?: string
           hit?: boolean | null
@@ -936,9 +939,11 @@ export type Database = {
           stat_type: string
           team_abbr?: string | null
           threshold: number
+          value_score?: number | null
         }
         Update: {
           actual_value?: number | null
+          books_count?: number | null
           confidence_score?: number | null
           created_at?: string
           hit?: boolean | null
@@ -950,6 +955,7 @@ export type Database = {
           stat_type?: string
           team_abbr?: string | null
           threshold?: number
+          value_score?: number | null
         }
         Relationships: [
           {
