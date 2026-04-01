@@ -585,6 +585,9 @@ export function SlipValidationReview() {
             </Card>
           )}
 
+          {/* Daily Breakdown Table */}
+          {slips.length > 0 && <DailyBreakdownTable slips={slips} />}
+
           {/* Slip list */}
           <div className="space-y-1.5 max-h-[600px] overflow-y-auto">
             {slips.map(slip => (
