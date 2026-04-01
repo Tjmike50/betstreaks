@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar, Users, CheckCircle, AlertTriangle, Brain, Scale, Eye, Database, Clock, PlayCircle, Workflow } from "lucide-react";
 import { DataQualityCard } from "@/components/admin/DataQualityCard";
+import { SlipValidationReview } from "@/components/admin/SlipValidationReview";
 import { toast } from "@/hooks/use-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, Cell } from "recharts";
 
@@ -1108,6 +1109,9 @@ export default function AdminEvalPage() {
                 ))}
               </CardContent>
             </Card>
+
+            {/* Slip Validation Review */}
+            <SlipValidationReview />
 
             {/* ===== SCORING INSIGHTS SECTION ===== */}
             <div className="pt-2 border-t border-border/30">
