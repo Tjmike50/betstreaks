@@ -370,6 +370,20 @@ export default function AdminEvalPage() {
     enabled: isAdmin,
   });
 
+  // Pipeline run history query
+  const { data: pipelineHistory = [], refetch: refetchHistory } = useQuery({
+    queryKey: ["pipeline-history"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("pipeline_runs")
+        .select("*")
+        .order("ran_at", { ascending: false })
+        .limit(15);
+      return data || [];
+    },
+    enabled: isAdmin,
+  });
+
   // Learning loop status query
   const { data: loopStatus } = useQuery({
     queryKey: ["learning-loop-status"],

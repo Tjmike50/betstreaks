@@ -160,13 +160,28 @@ serve(async (req) => {
 
   console.log("Pipeline complete:", JSON.stringify(summary));
 
-  // Update refresh_status id=4 for pipeline runs
+  // Update refresh_status id=4 + write pipeline_runs history
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     await supabase.from("refresh_status").upsert(
       { id: 4, sport: "NBA_PIPELINE", last_run: new Date().toISOString() },
       { onConflict: "id" }
     );
+    await supabase.from("pipeline_runs").insert({
+      ran_at: new Date().toISOString(),
+      success: allSuccess,
+      total_duration_ms: Date.now() - pipelineStart,
+      line_status: results.line_collection?.status || null,
+      line_new_snapshots: results.line_collection?.new_snapshots as number || 0,
+      line_games_processed: results.line_collection?.games_processed as number || 0,
+      availability_status: results.availability_refresh?.status || null,
+      availability_records: results.availability_refresh?.records as number || 0,
+      scoring_status: results.scoring?.status || null,
+      scoring_scored_count: results.scoring?.scored_count as number || 0,
+      scoring_source: (results.scoring?.scoring_source as string) || null,
+      errors,
+      game_dates: activeDates,
+    });
   } catch (_) { /* non-critical */ }
 
   return new Response(JSON.stringify(summary), {
