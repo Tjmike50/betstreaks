@@ -74,6 +74,39 @@ serve(async (req) => {
       );
     }
 
+    // 1b. Upsert games_today from Odds API so schedule is always populated
+    const gamesTodayRows: any[] = [];
+    for (const game of gamesData) {
+      const commence = new Date(game.commence_time);
+      const gameDate = commence.toISOString().split("T")[0];
+      // Only upsert games that start today (UTC date)
+      const homeAbbr = NBA_TEAM_ABBRS[game.home_team] || null;
+      const awayAbbr = NBA_TEAM_ABBRS[game.away_team] || null;
+      const gameTime = commence.toLocaleTimeString("en-US", {
+        hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/New_York",
+      });
+      gamesTodayRows.push({
+        id: game.id,
+        sport: "NBA",
+        game_date: gameDate,
+        home_team_abbr: homeAbbr,
+        away_team_abbr: awayAbbr,
+        game_time: gameTime,
+        status: "Scheduled",
+        updated_at: new Date().toISOString(),
+      });
+    }
+    if (gamesTodayRows.length > 0) {
+      const { error: gtErr } = await supabase
+        .from("games_today")
+        .upsert(gamesTodayRows, { onConflict: "id" });
+      if (gtErr) {
+        console.error("games_today upsert error:", gtErr);
+      } else {
+        console.log(`Upserted ${gamesTodayRows.length} games_today rows`);
+      }
+    }
+
     // 2. Fetch existing snapshots for today to enable deduplication
     const { data: existingSnaps } = await supabase
       .from("line_snapshots")
