@@ -127,6 +127,31 @@ serve(async (req) => {
     const slipResults: { risk_label: string; slip_hit: boolean | null }[] = [];
 
     if (slips && slips.length > 0) {
+      // Pre-fetch scoring data for enrichment
+      const { data: propScores } = await supabase
+        .from("player_prop_scores")
+        .select("player_name, stat_type, threshold, confidence_score, value_score")
+        .eq("game_date", game_date);
+
+      const scoreMap: Record<string, { confidence_score: number | null; value_score: number | null }> = {};
+      for (const ps of propScores || []) {
+        const key = `${ps.player_name.toLowerCase()}|${ps.stat_type.toLowerCase()}|${ps.threshold}`;
+        scoreMap[key] = { confidence_score: ps.confidence_score, value_score: ps.value_score };
+      }
+
+      // Pre-fetch line snapshots for books_count
+      const { data: lineSnaps } = await supabase
+        .from("line_snapshots")
+        .select("player_name, stat_type, threshold, sportsbook")
+        .eq("game_date", game_date);
+
+      const booksMap: Record<string, Set<string>> = {};
+      for (const ls of lineSnaps || []) {
+        const key = `${ls.player_name.toLowerCase()}|${ls.stat_type.toLowerCase()}|${ls.threshold}`;
+        if (!booksMap[key]) booksMap[key] = new Set();
+        booksMap[key].add(ls.sportsbook);
+      }
+
       for (const slip of slips) {
         const { data: legs } = await supabase
           .from("ai_slip_legs")
@@ -163,16 +188,23 @@ serve(async (req) => {
             }
           }
 
+          const threshold = parseFloat(leg.line.replace(/[^0-9.]/g, "")) || 0;
+          const scoreKey = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${threshold}`;
+          const scores = scoreMap[scoreKey];
+          const books = booksMap[scoreKey];
+
           legOutcomes.push({
             leg_order: leg.leg_order,
             player_name: leg.player_name,
             team_abbr: leg.team_abbr,
             stat_type: leg.stat_type,
-            threshold: parseFloat(leg.line.replace(/[^0-9.]/g, "")) || 0,
+            threshold,
             pick: leg.pick,
             actual_value: actualValue,
             hit,
-            confidence_score: null,
+            confidence_score: scores?.confidence_score ?? null,
+            value_score: scores?.value_score ?? null,
+            books_count: books ? books.size : null,
           });
         }
 
