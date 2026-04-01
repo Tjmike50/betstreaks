@@ -1110,6 +1110,9 @@ export default function AdminEvalPage() {
               </CardContent>
             </Card>
 
+            {/* Slip Validation Review */}
+            <SlipValidationReview />
+
             {/* ===== SCORING INSIGHTS SECTION ===== */}
             <div className="pt-2 border-t border-border/30">
               <div className="flex items-center justify-between mb-3">
