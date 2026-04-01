@@ -637,6 +637,44 @@ export default function AdminEvalPage() {
           </CardContent>
         </Card>
 
+        {/* Pipeline Run History */}
+        {pipelineHistory.length > 0 && (
+          <Card>
+            <CardContent className="pt-4 space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" />
+                Pipeline Run History
+              </h3>
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {pipelineHistory.map((run: any) => {
+                  const ranAt = new Date(run.ran_at);
+                  const hasErrors = run.errors && run.errors.length > 0;
+                  return (
+                    <div key={run.id} className="flex items-center gap-2 text-[11px] bg-card/50 rounded-lg px-2.5 py-1.5">
+                      {run.success
+                        ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                        : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />}
+                      <span className="font-medium min-w-[90px]">
+                        {ranAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
+                        {ranAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {run.line_new_snapshots ?? 0}L · {run.availability_records ?? 0}A · {run.scoring_scored_count ?? 0}S
+                      </span>
+                      <span className="text-muted-foreground ml-auto">{Math.round((run.total_duration_ms || 0) / 1000)}s</span>
+                      {hasErrors && (
+                        <span className="text-destructive truncate max-w-[120px]" title={run.errors.join(", ")}>
+                          {run.errors[0]}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
 
         {loopStatus && (
           <Card className="border-primary/20 bg-primary/5">
