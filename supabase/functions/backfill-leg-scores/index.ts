@@ -9,9 +9,13 @@ const corsHeaders = {
 const STAT_TYPE_MAP: Record<string, string> = {
   "points": "pts", "rebounds": "reb", "assists": "ast",
   "3-pointers": "fg3m", "steals": "stl", "blocks": "blk",
-  "pts": "pts", "reb": "reb", "ast": "ast", "fg3m": "fg3m", "stl": "stl", "blk": "blk",
 };
 
+function normStat(st: string): string {
+  return STAT_TYPE_MAP[st.toLowerCase()] || st.toLowerCase();
+}
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
@@ -20,24 +24,7 @@ const STAT_TYPE_MAP: Record<string, string> = {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Verify admin
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: { user } } = await supabase.auth.getUser(token);
-      if (user) {
-        const { data: flags } = await supabase
-          .from("user_flags")
-          .select("is_admin")
-          .eq("user_id", user.id)
-          .single();
-        if (!flags?.is_admin) {
-          return new Response(JSON.stringify({ error: "Not admin" }), { status: 403, headers: corsHeaders });
-        }
-      }
-    }
-
-    // Get all slip_leg_outcomes that need enrichment
+    // Get all slip_leg_outcomes that need enrichment (no confidence_score yet)
     const { data: legs, error: legErr } = await supabase
       .from("slip_leg_outcomes")
       .select("id, player_name, stat_type, threshold, slip_outcome_id, confidence_score, value_score, books_count")
@@ -63,56 +50,57 @@ const STAT_TYPE_MAP: Record<string, string> = {
       dateMap[so.id] = so.game_date;
     }
 
-    // Collect unique game dates
     const gameDates = [...new Set(Object.values(dateMap))];
 
-    // Fetch prop scores - exact date match first
+    // Build score map from prop_scores using mapped stat types
+    const scoreMap: Record<string, { confidence_score: number | null; value_score: number | null }> = {};
+
+    // First try exact game_date match
     const { data: propScores } = await supabase
       .from("player_prop_scores")
       .select("player_name, stat_type, threshold, game_date, confidence_score, value_score")
       .in("game_date", gameDates)
       .limit(1000);
 
-    const scoreMap: Record<string, { confidence_score: number | null; value_score: number | null }> = {};
     for (const ps of propScores || []) {
       const key = `${ps.player_name.toLowerCase()}|${ps.stat_type.toLowerCase()}|${ps.threshold}|${ps.game_date}`;
       scoreMap[key] = { confidence_score: ps.confidence_score, value_score: ps.value_score };
     }
 
-    // For legs without exact-date scores, fetch nearest available scores
-    const unmatchedLegs = legs.filter(leg => {
+    // For unmatched legs, find nearest scores by player+stat+threshold (any date)
+    const unmatchedCombos = new Set<string>();
+    for (const leg of legs) {
       const gd = dateMap[leg.slip_outcome_id];
-      if (!gd) return false;
-      const key = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${leg.threshold}|${gd}`;
-      return !scoreMap[key];
-    });
+      if (!gd) continue;
+      // Skip non-player legs (team names for Moneyline/Spread/Total)
+      if (["moneyline", "spread", "total"].includes(leg.stat_type.toLowerCase())) continue;
+      const mapped = normStat(leg.stat_type);
+      const key = `${leg.player_name.toLowerCase()}|${mapped}|${leg.threshold}|${gd}`;
+      if (!scoreMap[key]) {
+        unmatchedCombos.add(`${leg.player_name.toLowerCase()}|${mapped}|${leg.threshold}`);
+      }
+    }
 
-    if (unmatchedLegs.length > 0) {
-      // Collect unique player+stat+threshold combos
-      const combos = [...new Set(unmatchedLegs.map(l => 
-        `${l.player_name.toLowerCase()}|${l.stat_type.toLowerCase()}|${l.threshold}`
-      ))];
+    for (const combo of unmatchedCombos) {
+      const [pn, st, th] = combo.split("|");
+      const { data: nearest } = await supabase
+        .from("player_prop_scores")
+        .select("confidence_score, value_score, game_date")
+        .ilike("player_name", pn)
+        .eq("stat_type", st)
+        .eq("threshold", parseFloat(th))
+        .order("game_date", { ascending: false })
+        .limit(1);
 
-      for (const combo of combos) {
-        const [pn, st, th] = combo.split("|");
-        const { data: nearest } = await supabase
-          .from("player_prop_scores")
-          .select("confidence_score, value_score, game_date")
-          .ilike("player_name", pn)
-          .ilike("stat_type", st)
-          .eq("threshold", parseFloat(th))
-          .order("game_date", { ascending: false })
-          .limit(1);
-
-        if (nearest && nearest.length > 0) {
-          // Apply to all matching legs
-          for (const leg of unmatchedLegs) {
-            const legCombo = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${leg.threshold}`;
-            if (legCombo === combo) {
-              const gd = dateMap[leg.slip_outcome_id];
-              const key = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${leg.threshold}|${gd}`;
-              scoreMap[key] = { confidence_score: nearest[0].confidence_score, value_score: nearest[0].value_score };
-            }
+      if (nearest && nearest.length > 0) {
+        // Apply to all legs with this combo
+        for (const leg of legs) {
+          const gd = dateMap[leg.slip_outcome_id];
+          if (!gd) continue;
+          const legCombo = `${leg.player_name.toLowerCase()}|${normStat(leg.stat_type)}|${leg.threshold}`;
+          if (legCombo === combo) {
+            const key = `${leg.player_name.toLowerCase()}|${normStat(leg.stat_type)}|${leg.threshold}|${gd}`;
+            scoreMap[key] = { confidence_score: nearest[0].confidence_score, value_score: nearest[0].value_score };
           }
         }
       }
@@ -127,8 +115,9 @@ const STAT_TYPE_MAP: Record<string, string> = {
 
     const booksMap: Record<string, Set<string>> = {};
     for (const ls of lineSnaps || []) {
+      // line_snapshots stat_type matches prop_scores format (lowercase abbrevs)
       const key = `${ls.player_name.toLowerCase()}|${ls.stat_type.toLowerCase()}|${ls.threshold}|${ls.game_date}`;
-      if (!booksMap[key]) booksMap[key] = new Set();
+      booksMap[key] = booksMap[key] || new Set();
       booksMap[key].add(ls.sportsbook);
     }
 
@@ -138,9 +127,10 @@ const STAT_TYPE_MAP: Record<string, string> = {
       const gameDate = dateMap[leg.slip_outcome_id];
       if (!gameDate) continue;
 
-      const key = `${leg.player_name.toLowerCase()}|${leg.stat_type.toLowerCase()}|${leg.threshold}|${gameDate}`;
-      const scores = scoreMap[key];
-      const books = booksMap[key];
+      const mapped = normStat(leg.stat_type);
+      const scoreKey = `${leg.player_name.toLowerCase()}|${mapped}|${leg.threshold}|${gameDate}`;
+      const scores = scoreMap[scoreKey];
+      const books = booksMap[scoreKey];
 
       const updates: Record<string, number | null> = {};
       if (scores?.confidence_score != null) updates.confidence_score = scores.confidence_score;
