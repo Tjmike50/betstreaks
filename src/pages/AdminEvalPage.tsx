@@ -370,6 +370,20 @@ export default function AdminEvalPage() {
     enabled: isAdmin,
   });
 
+  // Pipeline run history query
+  const { data: pipelineHistory = [], refetch: refetchHistory } = useQuery({
+    queryKey: ["pipeline-history"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("pipeline_runs")
+        .select("*")
+        .order("ran_at", { ascending: false })
+        .limit(15);
+      return data || [];
+    },
+    enabled: isAdmin,
+  });
+
   // Learning loop status query
   const { data: loopStatus } = useQuery({
     queryKey: ["learning-loop-status"],
@@ -509,6 +523,7 @@ export default function AdminEvalPage() {
         title: data.success ? "Pipeline complete ✅" : "Pipeline partial ⚠️",
         description: `Lines: ${data.results?.line_collection?.new_snapshots || 0} new | Avail: ${data.results?.availability_refresh?.records || 0} | Scored: ${data.results?.scoring?.scored_count || 0} | ${Math.round(data.total_duration_ms / 1000)}s`,
       });
+      refetchHistory();
     } catch (e) {
       toast({ title: "Pipeline failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
     } finally {
@@ -621,6 +636,44 @@ export default function AdminEvalPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Pipeline Run History */}
+        {pipelineHistory.length > 0 && (
+          <Card>
+            <CardContent className="pt-4 space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" />
+                Pipeline Run History
+              </h3>
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {pipelineHistory.map((run: any) => {
+                  const ranAt = new Date(run.ran_at);
+                  const hasErrors = run.errors && run.errors.length > 0;
+                  return (
+                    <div key={run.id} className="flex items-center gap-2 text-[11px] bg-card/50 rounded-lg px-2.5 py-1.5">
+                      {run.success
+                        ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                        : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0" />}
+                      <span className="font-medium min-w-[90px]">
+                        {ranAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
+                        {ranAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {run.line_new_snapshots ?? 0}L · {run.availability_records ?? 0}A · {run.scoring_scored_count ?? 0}S
+                      </span>
+                      <span className="text-muted-foreground ml-auto">{Math.round((run.total_duration_ms || 0) / 1000)}s</span>
+                      {hasErrors && (
+                        <span className="text-destructive truncate max-w-[120px]" title={run.errors.join(", ")}>
+                          {run.errors[0]}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
 
         {loopStatus && (

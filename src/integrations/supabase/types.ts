@@ -477,6 +477,57 @@ export type Database = {
         }
         Relationships: []
       }
+      pipeline_runs: {
+        Row: {
+          availability_records: number | null
+          availability_status: string | null
+          errors: string[] | null
+          game_dates: string[] | null
+          id: string
+          line_games_processed: number | null
+          line_new_snapshots: number | null
+          line_status: string | null
+          ran_at: string
+          scoring_scored_count: number | null
+          scoring_source: string | null
+          scoring_status: string | null
+          success: boolean
+          total_duration_ms: number
+        }
+        Insert: {
+          availability_records?: number | null
+          availability_status?: string | null
+          errors?: string[] | null
+          game_dates?: string[] | null
+          id?: string
+          line_games_processed?: number | null
+          line_new_snapshots?: number | null
+          line_status?: string | null
+          ran_at?: string
+          scoring_scored_count?: number | null
+          scoring_source?: string | null
+          scoring_status?: string | null
+          success?: boolean
+          total_duration_ms?: number
+        }
+        Update: {
+          availability_records?: number | null
+          availability_status?: string | null
+          errors?: string[] | null
+          game_dates?: string[] | null
+          id?: string
+          line_games_processed?: number | null
+          line_new_snapshots?: number | null
+          line_status?: string | null
+          ran_at?: string
+          scoring_scored_count?: number | null
+          scoring_source?: string | null
+          scoring_status?: string | null
+          success?: boolean
+          total_duration_ms?: number
+        }
+        Relationships: []
+      }
       player_availability: {
         Row: {
           confidence: string | null
