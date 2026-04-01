@@ -351,6 +351,24 @@ export default function AdminEvalPage() {
   const [refreshingSnap, setRefreshingSnap] = useState(false);
   const [analyzingFactors, setAnalyzingFactors] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
+  const [runningPipeline, setRunningPipeline] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<any>(null);
+
+  // Pipeline status query
+  const { data: pipelineStatus } = useQuery({
+    queryKey: ["pipeline-status"],
+    queryFn: async () => {
+      const { data: row } = await supabase
+        .from("refresh_status")
+        .select("last_run")
+        .eq("id", 4)
+        .maybeSingle();
+      const lastRun = row?.last_run ? new Date(row.last_run) : null;
+      const hoursSince = lastRun ? (Date.now() - lastRun.getTime()) / (1000 * 60 * 60) : null;
+      return { lastRun, hoursSince };
+    },
+    enabled: isAdmin,
+  });
 
   // Learning loop status query
   const { data: loopStatus } = useQuery({
