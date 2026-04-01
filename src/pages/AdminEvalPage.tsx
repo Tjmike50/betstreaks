@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar, Users, CheckCircle, AlertTriangle, Brain, Scale, Eye, Database, Clock, PlayCircle } from "lucide-react";
+import { BarChart3, TrendingUp, TrendingDown, Target, AlertCircle, Loader2, Shield, Zap, RefreshCw, Calendar, Users, CheckCircle, AlertTriangle, Brain, Scale, Eye, Database, Clock, PlayCircle, Workflow } from "lucide-react";
 import { DataQualityCard } from "@/components/admin/DataQualityCard";
 import { toast } from "@/hooks/use-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, Cell } from "recharts";
@@ -351,6 +351,24 @@ export default function AdminEvalPage() {
   const [refreshingSnap, setRefreshingSnap] = useState(false);
   const [analyzingFactors, setAnalyzingFactors] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
+  const [runningPipeline, setRunningPipeline] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<any>(null);
+
+  // Pipeline status query
+  const { data: pipelineStatus } = useQuery({
+    queryKey: ["pipeline-status"],
+    queryFn: async () => {
+      const { data: row } = await supabase
+        .from("refresh_status")
+        .select("last_run")
+        .eq("id", 4)
+        .maybeSingle();
+      const lastRun = row?.last_run ? new Date(row.last_run) : null;
+      const hoursSince = lastRun ? (Date.now() - lastRun.getTime()) / (1000 * 60 * 60) : null;
+      return { lastRun, hoursSince };
+    },
+    enabled: isAdmin,
+  });
 
   // Learning loop status query
   const { data: loopStatus } = useQuery({
@@ -480,6 +498,24 @@ export default function AdminEvalPage() {
     }
   };
 
+  const handleRunPipeline = async () => {
+    setRunningPipeline(true);
+    setPipelineResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("run-daily-pipeline", { body: {} });
+      if (error) throw error;
+      setPipelineResult(data);
+      toast({
+        title: data.success ? "Pipeline complete ✅" : "Pipeline partial ⚠️",
+        description: `Lines: ${data.results?.line_collection?.new_snapshots || 0} new | Avail: ${data.results?.availability_refresh?.records || 0} | Scored: ${data.results?.scoring?.scored_count || 0} | ${Math.round(data.total_duration_ms / 1000)}s`,
+      });
+    } catch (e) {
+      toast({ title: "Pipeline failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setRunningPipeline(false);
+    }
+  };
+
   if (adminLoading) return <div className="flex items-center justify-center min-h-screen"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   if (!isAdmin) {
     return (
@@ -540,7 +576,53 @@ export default function AdminEvalPage() {
           </Button>
         </div>
 
-        {/* Learning Loop Status */}
+        {/* Pipeline Orchestration */}
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Workflow className="h-4 w-4 text-primary" />
+                Daily Pipeline
+              </h3>
+              <Button size="sm" onClick={handleRunPipeline} disabled={runningPipeline} className="h-7 text-xs">
+                {runningPipeline ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <PlayCircle className="h-3 w-3 mr-1" />}
+                {runningPipeline ? "Running…" : "Run Pipeline"}
+              </Button>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-card/50 rounded-lg p-2">
+                <div className="text-[10px] text-muted-foreground">Last Run</div>
+                <div className="text-xs font-medium">
+                  {pipelineStatus?.lastRun
+                    ? pipelineStatus.lastRun.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })
+                    : "Never"}
+                </div>
+              </div>
+              <div className="bg-card/50 rounded-lg p-2">
+                <div className="text-[10px] text-muted-foreground">Schedule</div>
+                <div className="text-xs font-medium">11am · 3pm · 6pm ET</div>
+              </div>
+              <div className="bg-card/50 rounded-lg p-2">
+                <div className="text-[10px] text-muted-foreground">Status</div>
+                <div className="text-xs font-medium">
+                  {pipelineStatus?.hoursSince != null && pipelineStatus.hoursSince <= 4
+                    ? <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-600">Fresh</Badge>
+                    : <Badge variant="outline" className="text-[10px] border-yellow-500/50 text-yellow-600">Stale</Badge>}
+                </div>
+              </div>
+            </div>
+            {pipelineResult && (
+              <div className="text-[10px] bg-card/50 rounded-lg p-2 space-y-1">
+                <div className="flex justify-between"><span className="text-muted-foreground">Lines</span><span>{pipelineResult.results?.line_collection?.new_snapshots || 0} new / {pipelineResult.results?.line_collection?.skipped_dupes || 0} deduped</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Availability</span><span>{pipelineResult.results?.availability_refresh?.records || 0} players</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Scoring</span><span>{pipelineResult.results?.scoring?.scored_count || 0} props scored</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Duration</span><span>{Math.round((pipelineResult.total_duration_ms || 0) / 1000)}s</span></div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+
         {loopStatus && (
           <Card className="border-primary/20 bg-primary/5">
             <CardContent className="pt-4 space-y-3">
