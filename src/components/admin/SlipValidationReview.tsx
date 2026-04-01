@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
-import { Loader2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle, XCircle, ClipboardCheck, TrendingDown, BarChart3, CalendarDays } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle, XCircle, ClipboardCheck, TrendingDown, BarChart3, CalendarDays, Target, Gauge, Lightbulb } from "lucide-react";
 
 interface MarketContext {
   books_count: number;
@@ -56,12 +56,30 @@ interface DiagnosticPattern {
   rate: number;
 }
 
+// Semantic color helper for hit-rate cells
+function rateColor(pctStr: string): string {
+  if (pctStr === "—") return "";
+  const v = parseInt(pctStr);
+  if (isNaN(v)) return "";
+  if (v >= 55) return "text-green-600 dark:text-green-400";
+  if (v >= 45) return "text-yellow-600 dark:text-yellow-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function rateBg(pctStr: string): string {
+  if (pctStr === "—") return "";
+  const v = parseInt(pctStr);
+  if (isNaN(v)) return "";
+  if (v >= 55) return "bg-green-500/10";
+  if (v >= 45) return "bg-yellow-500/10";
+  return "bg-red-500/10";
+}
+
 function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
   const patterns: DiagnosticPattern[] = [];
   const allLegs = slips.flatMap(s => s.legs).filter(l => l.hit != null);
   if (allLegs.length === 0) return patterns;
 
-  // Stat type performance
   const statMap: Record<string, { hit: number; total: number }> = {};
   for (const l of allLegs) {
     if (!statMap[l.stat_type]) statMap[l.stat_type] = { hit: 0, total: 0 };
@@ -83,7 +101,6 @@ function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
     }
   }
 
-  // Low confidence legs failing
   const lowConf = allLegs.filter(l => l.confidence_score != null && l.confidence_score < 40);
   if (lowConf.length >= 3) {
     const lowHits = lowConf.filter(l => l.hit).length;
@@ -96,7 +113,6 @@ function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
     });
   }
 
-  // High confidence legs succeeding
   const highConf = allLegs.filter(l => l.confidence_score != null && l.confidence_score >= 65);
   if (highConf.length >= 3) {
     const highHits = highConf.filter(l => l.hit).length;
@@ -109,7 +125,6 @@ function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
     });
   }
 
-  // Market quality: single-book legs
   const singleBook = allLegs.filter(l => l.market && l.market.books_count === 1);
   if (singleBook.length >= 3) {
     const hits = singleBook.filter(l => l.hit).length;
@@ -122,7 +137,6 @@ function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
     });
   }
 
-  // Market quality: multi-book legs
   const multiBook = allLegs.filter(l => l.market && l.market.books_count >= 3);
   if (multiBook.length >= 3) {
     const hits = multiBook.filter(l => l.hit).length;
@@ -135,7 +149,6 @@ function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
     });
   }
 
-  // Stale scoring legs
   const staleLegs = allLegs.filter(l => l.market?.scoring_stale);
   if (staleLegs.length >= 3) {
     const hits = staleLegs.filter(l => l.hit).length;
@@ -148,7 +161,6 @@ function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
     });
   }
 
-  // First-failed-leg position analysis
   const failedSlips = slips.filter(s => s.slip_hit === false && s.first_failed_leg != null);
   if (failedSlips.length >= 3) {
     const earlyFails = failedSlips.filter(s => s.first_failed_leg! <= 1).length;
@@ -163,7 +175,6 @@ function computeDiagnostics(slips: SlipWithLegs[]): DiagnosticPattern[] {
     }
   }
 
-  // Risk label: safe underperforming
   const riskMap: Record<string, { hit: number; total: number }> = {};
   for (const s of slips.filter(s => s.slip_hit != null)) {
     if (!riskMap[s.risk_label]) riskMap[s.risk_label] = { hit: 0, total: 0 };
@@ -191,7 +202,6 @@ function LegMarketChips({ market }: { market?: MarketContext }) {
   if (!market) return null;
   return (
     <div className="flex flex-wrap gap-0.5 mt-1">
-      {/* Books count */}
       <Badge variant="outline" className={`text-[8px] px-1 py-0 ${
         market.books_count >= 3 ? "border-green-500/40 text-green-600" :
         market.books_count >= 2 ? "border-yellow-500/40 text-yellow-600" :
@@ -199,23 +209,17 @@ function LegMarketChips({ market }: { market?: MarketContext }) {
       }`}>
         {market.books_count}bk
       </Badge>
-
-      {/* Sportsbooks */}
       {market.sportsbooks.length > 0 && (
         <Badge variant="outline" className="text-[8px] px-1 py-0 text-muted-foreground">
           {market.sportsbooks.map(s => s === "draftkings" ? "DK" : s === "fanduel" ? "FD" : s === "betmgm" ? "MGM" : s === "pointsbet" ? "PB" : s.slice(0, 3).toUpperCase()).join("·")}
         </Badge>
       )}
-
-      {/* Main line indicator */}
       {market.is_main_line && (
         <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/40 text-primary">main</Badge>
       )}
       {!market.is_main_line && market.books_count > 0 && (
         <Badge variant="outline" className="text-[8px] px-1 py-0 border-yellow-500/40 text-yellow-600">alt</Badge>
       )}
-
-      {/* Value score */}
       {market.value_score != null && (
         <Badge variant="outline" className={`text-[8px] px-1 py-0 ${
           market.value_score >= 60 ? "border-green-500/40 text-green-600" :
@@ -225,13 +229,9 @@ function LegMarketChips({ market }: { market?: MarketContext }) {
           V:{Math.round(market.value_score)}
         </Badge>
       )}
-
-      {/* Scoring freshness */}
       {market.scoring_stale && (
         <Badge variant="outline" className="text-[8px] px-1 py-0 border-yellow-500/40 text-yellow-600">⏳ stale</Badge>
       )}
-
-      {/* Odds if available */}
       {market.best_over_odds && (
         <span className="text-[8px] text-muted-foreground font-mono">O:{market.best_over_odds}</span>
       )}
@@ -329,18 +329,19 @@ function SlipRow({ slip }: { slip: SlipWithLegs }) {
   );
 }
 
-// Build a lookup key for cross-referencing market data
 function mkKey(player: string, stat: string, threshold: number, date: string) {
   return `${player.toLowerCase()}|${stat.toLowerCase()}|${threshold}|${date}`;
 }
 
+/* ─── Daily Breakdown Table with color coding ─── */
 function DailyBreakdownTable({ slips }: { slips: SlipWithLegs[] }) {
-  // Group by game_date
   const dateMap: Record<string, SlipWithLegs[]> = {};
   for (const s of slips) {
     if (!dateMap[s.game_date]) dateMap[s.game_date] = [];
     dateMap[s.game_date].push(s);
   }
+
+  const pct = (h: number, t: number) => t > 0 ? `${Math.round((h / t) * 100)}%` : "—";
 
   const rows = Object.entries(dateMap)
     .sort(([a], [b]) => b.localeCompare(a))
@@ -351,27 +352,20 @@ function DailyBreakdownTable({ slips }: { slips: SlipWithLegs[] }) {
       const legHits = allLegs.filter(l => l.hit).length;
 
       const singleBook = allLegs.filter(l => l.market && l.market.books_count === 1);
-      const singleBookHits = singleBook.filter(l => l.hit).length;
       const multiBook = allLegs.filter(l => l.market && l.market.books_count >= 3);
-      const multiBookHits = multiBook.filter(l => l.hit).length;
       const stale = allLegs.filter(l => l.market?.scoring_stale);
-      const staleHits = stale.filter(l => l.hit).length;
       const strong = allLegs.filter(l => l.market && l.market.books_count >= 3 && (l.confidence_score ?? 0) >= 50);
-      const strongHits = strong.filter(l => l.hit).length;
       const weak = allLegs.filter(l => l.market && l.market.books_count <= 1 && (l.confidence_score ?? 0) < 40);
-      const weakHits = weak.filter(l => l.hit).length;
-
-      const pct = (h: number, t: number) => t > 0 ? `${Math.round((h / t) * 100)}%` : "—";
 
       return {
         date, totalSlips: daySlips.length,
         slipRate: pct(slipHits, gradedSlips.length), gradedSlips: gradedSlips.length,
         totalLegs: allLegs.length, legRate: pct(legHits, allLegs.length),
-        singleBook: singleBook.length > 0 ? pct(singleBookHits, singleBook.length) : "—",
-        multiBook: multiBook.length > 0 ? pct(multiBookHits, multiBook.length) : "—",
-        stale: stale.length > 0 ? pct(staleHits, stale.length) : "—",
-        strong: strong.length > 0 ? pct(strongHits, strong.length) : "—",
-        weak: weak.length > 0 ? pct(weakHits, weak.length) : "—",
+        singleBook: pct(singleBook.filter(l => l.hit).length, singleBook.length),
+        multiBook: pct(multiBook.filter(l => l.hit).length, multiBook.length),
+        stale: pct(stale.filter(l => l.hit).length, stale.length),
+        strong: pct(strong.filter(l => l.hit).length, strong.length),
+        weak: pct(weak.filter(l => l.hit).length, weak.length),
         singleBookN: singleBook.length, multiBookN: multiBook.length,
         staleN: stale.length, strongN: strong.length, weakN: weak.length,
       };
@@ -407,22 +401,22 @@ function DailyBreakdownTable({ slips }: { slips: SlipWithLegs[] }) {
                 <TableRow key={r.date}>
                   <TableCell className="text-[10px] px-1.5 py-1 font-mono">{r.date}</TableCell>
                   <TableCell className="text-[10px] px-1.5 py-1 text-center">{r.totalSlips}</TableCell>
-                  <TableCell className="text-[10px] px-1.5 py-1 text-center font-medium">{r.slipRate}</TableCell>
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center font-medium ${rateColor(r.slipRate)} ${rateBg(r.slipRate)}`}>{r.slipRate}</TableCell>
                   <TableCell className="text-[10px] px-1.5 py-1 text-center">{r.totalLegs}</TableCell>
-                  <TableCell className="text-[10px] px-1.5 py-1 text-center font-medium">{r.legRate}</TableCell>
-                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center font-medium ${rateColor(r.legRate)} ${rateBg(r.legRate)}`}>{r.legRate}</TableCell>
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center ${rateColor(r.singleBook)} ${rateBg(r.singleBook)}`}>
                     <span title={`${r.singleBookN} legs`}>{r.singleBook}</span>
                   </TableCell>
-                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center ${rateColor(r.multiBook)} ${rateBg(r.multiBook)}`}>
                     <span title={`${r.multiBookN} legs`}>{r.multiBook}</span>
                   </TableCell>
-                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center ${rateColor(r.stale)} ${rateBg(r.stale)}`}>
                     <span title={`${r.staleN} legs`}>{r.stale}</span>
                   </TableCell>
-                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center ${rateColor(r.strong)} ${rateBg(r.strong)}`}>
                     <span title={`${r.strongN} legs`}>{r.strong}</span>
                   </TableCell>
-                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center ${rateColor(r.weak)} ${rateBg(r.weak)}`}>
                     <span title={`${r.weakN} legs`}>{r.weak}</span>
                   </TableCell>
                 </TableRow>
@@ -430,6 +424,230 @@ function DailyBreakdownTable({ slips }: { slips: SlipWithLegs[] }) {
             </TableBody>
           </Table>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ─── Stat Type Breakdown ─── */
+function StatTypeBreakdown({ slips }: { slips: SlipWithLegs[] }) {
+  const allLegs = slips.flatMap(s => s.legs).filter(l => l.hit != null);
+  if (allLegs.length === 0) return null;
+
+  const statMap: Record<string, {
+    total: number; hits: number;
+    confSum: number; confCount: number;
+    valSum: number; valCount: number;
+    staleCount: number; booksSum: number; booksCount: number;
+  }> = {};
+
+  for (const l of allLegs) {
+    const st = l.stat_type;
+    if (!statMap[st]) statMap[st] = { total: 0, hits: 0, confSum: 0, confCount: 0, valSum: 0, valCount: 0, staleCount: 0, booksSum: 0, booksCount: 0 };
+    const m = statMap[st];
+    m.total++;
+    if (l.hit) m.hits++;
+    if (l.confidence_score != null) { m.confSum += l.confidence_score; m.confCount++; }
+    if (l.market?.value_score != null) { m.valSum += l.market.value_score; m.valCount++; }
+    if (l.market?.scoring_stale) m.staleCount++;
+    if (l.market) { m.booksSum += l.market.books_count; m.booksCount++; }
+  }
+
+  const rows = Object.entries(statMap)
+    .sort(([, a], [, b]) => b.total - a.total)
+    .map(([stat, m]) => ({
+      stat,
+      total: m.total,
+      hitRate: `${Math.round((m.hits / m.total) * 100)}%`,
+      avgConf: m.confCount > 0 ? Math.round(m.confSum / m.confCount) : null,
+      avgVal: m.valCount > 0 ? Math.round(m.valSum / m.valCount) : null,
+      avgBooks: m.booksCount > 0 ? (m.booksSum / m.booksCount).toFixed(1) : "—",
+      stale: m.staleCount,
+    }));
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-2">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Target className="h-4 w-4 text-primary" />
+          Stat Type Breakdown
+        </h3>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[9px] px-1.5 h-8">Stat Type</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Legs</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Hit Rate</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Avg Conf</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Avg Value</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Avg Books</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Stale</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map(r => (
+                <TableRow key={r.stat}>
+                  <TableCell className="text-[10px] px-1.5 py-1 font-medium">{r.stat}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">{r.total}</TableCell>
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center font-medium ${rateColor(r.hitRate)} ${rateBg(r.hitRate)}`}>{r.hitRate}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center font-mono">{r.avgConf ?? "—"}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center font-mono">{r.avgVal ?? "—"}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center font-mono">{r.avgBooks}</TableCell>
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center ${r.stale > 0 ? "text-yellow-600" : ""}`}>{r.stale}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ─── Confidence Calibration Summary ─── */
+function ConfidenceCalibration({ slips }: { slips: SlipWithLegs[] }) {
+  const allLegs = slips.flatMap(s => s.legs).filter(l => l.hit != null && l.confidence_score != null);
+  if (allLegs.length < 5) return null;
+
+  const buckets = [
+    { label: "0–39", min: 0, max: 39 },
+    { label: "40–49", min: 40, max: 49 },
+    { label: "50–59", min: 50, max: 59 },
+    { label: "60–69", min: 60, max: 69 },
+    { label: "70+", min: 70, max: 999 },
+  ];
+
+  const rows = buckets.map(b => {
+    const legs = allLegs.filter(l => l.confidence_score! >= b.min && l.confidence_score! <= b.max);
+    const hits = legs.filter(l => l.hit).length;
+    const total = legs.length;
+    const actualRate = total > 0 ? Math.round((hits / total) * 100) : null;
+    const expectedMid = (b.min + Math.min(b.max, 85)) / 2;
+    let calibration: "overconfident" | "underconfident" | "calibrated" | null = null;
+    if (actualRate != null && total >= 3) {
+      if (actualRate >= expectedMid + 10) calibration = "underconfident";
+      else if (actualRate <= expectedMid - 10) calibration = "overconfident";
+      else calibration = "calibrated";
+    }
+    return { ...b, total, hits, actualRate, calibration };
+  });
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-2">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Gauge className="h-4 w-4 text-primary" />
+          Confidence Calibration Summary
+        </h3>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[9px] px-1.5 h-8">Bucket</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Legs</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Hit Rate</TableHead>
+                <TableHead className="text-[9px] px-1.5 h-8 text-center">Calibration</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map(r => (
+                <TableRow key={r.label}>
+                  <TableCell className="text-[10px] px-1.5 py-1 font-mono">{r.label}</TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">{r.total}</TableCell>
+                  <TableCell className={`text-[10px] px-1.5 py-1 text-center font-medium ${r.actualRate != null ? rateColor(`${r.actualRate}%`) : ""} ${r.actualRate != null ? rateBg(`${r.actualRate}%`) : ""}`}>
+                    {r.actualRate != null ? `${r.actualRate}%` : "—"}
+                  </TableCell>
+                  <TableCell className="text-[10px] px-1.5 py-1 text-center">
+                    {r.calibration === "calibrated" && <Badge variant="outline" className="text-[8px] border-green-500/40 text-green-600">calibrated</Badge>}
+                    {r.calibration === "overconfident" && <Badge variant="outline" className="text-[8px] border-red-500/40 text-red-600">overconfident</Badge>}
+                    {r.calibration === "underconfident" && <Badge variant="outline" className="text-[8px] border-yellow-500/40 text-yellow-600">underconfident</Badge>}
+                    {r.calibration == null && <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ─── Recommended Tuning Actions ─── */
+function TuningActions({ slips }: { slips: SlipWithLegs[] }) {
+  const allLegs = slips.flatMap(s => s.legs).filter(l => l.hit != null);
+  if (allLegs.length < 5) return null;
+
+  interface Action { priority: "high" | "medium" | "low"; title: string; detail: string }
+  const actions: Action[] = [];
+
+  // 1. Stat types underperforming
+  const statMap: Record<string, { hit: number; total: number }> = {};
+  for (const l of allLegs) {
+    if (!statMap[l.stat_type]) statMap[l.stat_type] = { hit: 0, total: 0 };
+    statMap[l.stat_type].total++;
+    if (l.hit) statMap[l.stat_type].hit++;
+  }
+  for (const [stat, v] of Object.entries(statMap)) {
+    if (v.total >= 5) {
+      const rate = Math.round((v.hit / v.total) * 100);
+      if (rate < 40) actions.push({ priority: "high", title: `Reduce ${stat} weight`, detail: `${stat} hitting ${rate}% (${v.hit}/${v.total}). Consider de-weighting or adding filters.` });
+    }
+  }
+
+  // 2. Confidence buckets overstated
+  const highConf = allLegs.filter(l => l.confidence_score != null && l.confidence_score >= 60);
+  if (highConf.length >= 5) {
+    const rate = Math.round((highConf.filter(l => l.hit).length / highConf.length) * 100);
+    if (rate < 50) actions.push({ priority: "high", title: "Confidence scores overstated", detail: `60+ confidence legs hitting only ${rate}%. Re-calibrate scoring weights.` });
+  }
+
+  // 3. Safe slips underperforming
+  const safeSlips = slips.filter(s => s.risk_label === "safe" && s.slip_hit != null);
+  if (safeSlips.length >= 5) {
+    const rate = Math.round((safeSlips.filter(s => s.slip_hit).length / safeSlips.length) * 100);
+    if (rate < 40) actions.push({ priority: "high", title: '"Safe" slips unreliable', detail: `Safe slips hitting ${rate}%. Tighten safe criteria or raise confidence floor.` });
+  }
+
+  // 4. Single-book props weak
+  const singleBook = allLegs.filter(l => l.market && l.market.books_count === 1);
+  if (singleBook.length >= 5) {
+    const rate = Math.round((singleBook.filter(l => l.hit).length / singleBook.length) * 100);
+    if (rate < 40) actions.push({ priority: "medium", title: "Filter single-book props", detail: `1-book legs hitting ${rate}%. Consider requiring ≥2 books.` });
+  }
+
+  // 5. Stale scoring underperforming
+  const stale = allLegs.filter(l => l.market?.scoring_stale);
+  if (stale.length >= 5) {
+    const rate = Math.round((stale.filter(l => l.hit).length / stale.length) * 100);
+    const freshLegs = allLegs.filter(l => l.market && !l.market.scoring_stale);
+    const freshRate = freshLegs.length > 0 ? Math.round((freshLegs.filter(l => l.hit).length / freshLegs.length) * 100) : null;
+    if (freshRate != null && rate < freshRate - 10) actions.push({ priority: "medium", title: "Flag stale-scoring legs", detail: `Stale legs hit ${rate}% vs fresh ${freshRate}%. Add staleness penalty or require fresh data.` });
+  }
+
+  if (actions.length === 0) {
+    actions.push({ priority: "low", title: "No urgent actions", detail: "Current performance within acceptable ranges. Continue monitoring." });
+  }
+
+  const prioColor = { high: "border-red-500/40 text-red-600", medium: "border-yellow-500/40 text-yellow-600", low: "border-green-500/40 text-green-600" };
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Lightbulb className="h-4 w-4 text-primary" />
+          Recommended Tuning Actions
+        </h3>
+        {actions.map((a, i) => (
+          <div key={i} className="flex items-start gap-2 text-xs">
+            <Badge variant="outline" className={`text-[8px] px-1.5 py-0 mt-0.5 shrink-0 ${prioColor[a.priority]}`}>{a.priority}</Badge>
+            <div>
+              <span className="font-medium">{a.title}</span>
+              <p className="text-muted-foreground">{a.detail}</p>
+            </div>
+          </div>
+        ))}
       </CardContent>
     </Card>
   );
@@ -446,7 +664,6 @@ export function SlipValidationReview() {
   const { data: slips = [], isLoading } = useQuery({
     queryKey: ["validation-slips", sinceDateStr],
     queryFn: async () => {
-      // 1. Fetch slip outcomes
       const { data: slipRows } = await supabase
         .from("slip_outcomes")
         .select("*")
@@ -456,64 +673,42 @@ export function SlipValidationReview() {
 
       if (!slipRows || slipRows.length === 0) return [];
 
-      // 2. Fetch leg outcomes
       const slipIds = slipRows.map(s => s.id);
       const { data: legRows } = await supabase
         .from("slip_leg_outcomes")
         .select("*")
         .in("slip_outcome_id", slipIds);
 
-      // 3. Collect unique game dates for market enrichment
       const gameDates = [...new Set(slipRows.map(s => s.game_date))];
 
-      // 4. Fetch line_snapshots for books/odds context
       const { data: lineSnaps } = await supabase
         .from("line_snapshots")
         .select("player_name, stat_type, threshold, game_date, sportsbook, over_odds, under_odds")
         .in("game_date", gameDates)
         .limit(1000);
 
-      // 5. Fetch player_prop_scores for scoring context
       const { data: propScores } = await supabase
         .from("player_prop_scores")
         .select("player_name, stat_type, threshold, game_date, value_score, volatility_score, consistency_score, scored_at")
         .in("game_date", gameDates)
         .limit(1000);
 
-      // Build market lookup: key -> MarketContext
       const marketMap: Record<string, MarketContext> = {};
 
-      // Aggregate line snapshots by player+stat+threshold+date
       for (const snap of lineSnaps || []) {
         const key = mkKey(snap.player_name, snap.stat_type, snap.threshold, snap.game_date);
         if (!marketMap[key]) {
-          marketMap[key] = {
-            books_count: 0,
-            sportsbooks: [],
-            best_over_odds: null,
-            best_under_odds: null,
-            is_main_line: false,
-            value_score: null,
-            volatility_score: null,
-            consistency_score: null,
-            scored_at: null,
-            scoring_stale: false,
-          };
+          marketMap[key] = { books_count: 0, sportsbooks: [], best_over_odds: null, best_under_odds: null, is_main_line: false, value_score: null, volatility_score: null, consistency_score: null, scored_at: null, scoring_stale: false };
         }
         const m = marketMap[key];
         if (!m.sportsbooks.includes(snap.sportsbook)) {
           m.sportsbooks.push(snap.sportsbook);
           m.books_count = m.sportsbooks.length;
         }
-        if (snap.over_odds && (!m.best_over_odds || parseInt(snap.over_odds) > parseInt(m.best_over_odds))) {
-          m.best_over_odds = snap.over_odds;
-        }
-        if (snap.under_odds && (!m.best_under_odds || parseInt(snap.under_odds) > parseInt(m.best_under_odds))) {
-          m.best_under_odds = snap.under_odds;
-        }
+        if (snap.over_odds && (!m.best_over_odds || parseInt(snap.over_odds) > parseInt(m.best_over_odds))) m.best_over_odds = snap.over_odds;
+        if (snap.under_odds && (!m.best_under_odds || parseInt(snap.under_odds) > parseInt(m.best_under_odds))) m.best_under_odds = snap.under_odds;
       }
 
-      // Determine main lines: for each player+stat+date, the threshold with most books
       const mainLineMap: Record<string, { threshold: number; count: number }> = {};
       for (const snap of lineSnaps || []) {
         const groupKey = `${snap.player_name.toLowerCase()}|${snap.stat_type.toLowerCase()}|${snap.game_date}`;
@@ -530,7 +725,6 @@ export function SlipValidationReview() {
         ctx.is_main_line = mainLineMap[groupKey]?.threshold === threshold;
       }
 
-      // Merge scoring data
       for (const score of propScores || []) {
         const key = mkKey(score.player_name, score.stat_type, score.threshold, score.game_date);
         if (marketMap[key]) {
@@ -538,50 +732,31 @@ export function SlipValidationReview() {
           marketMap[key].volatility_score = score.volatility_score;
           marketMap[key].consistency_score = score.consistency_score;
           marketMap[key].scored_at = score.scored_at;
-          // Stale if scored more than 12 hours before game date
           if (score.scored_at) {
             const scoredTime = new Date(score.scored_at).getTime();
             const gameDay = new Date(score.game_date + "T12:00:00Z").getTime();
             marketMap[key].scoring_stale = (gameDay - scoredTime) > 12 * 60 * 60 * 1000;
           }
         } else {
-          // Create entry from scoring data only
           marketMap[key] = {
-            books_count: 0,
-            sportsbooks: [],
-            best_over_odds: null,
-            best_under_odds: null,
-            is_main_line: false,
-            value_score: score.value_score,
-            volatility_score: score.volatility_score,
-            consistency_score: score.consistency_score,
+            books_count: 0, sportsbooks: [], best_over_odds: null, best_under_odds: null, is_main_line: false,
+            value_score: score.value_score, volatility_score: score.volatility_score, consistency_score: score.consistency_score,
             scored_at: score.scored_at,
-            scoring_stale: score.scored_at
-              ? (new Date(score.game_date + "T12:00:00Z").getTime() - new Date(score.scored_at).getTime()) > 12 * 60 * 60 * 1000
-              : true,
+            scoring_stale: score.scored_at ? (new Date(score.game_date + "T12:00:00Z").getTime() - new Date(score.scored_at).getTime()) > 12 * 60 * 60 * 1000 : true,
           };
         }
       }
 
-      // Group legs by slip and enrich with market context
       const legsBySlip: Record<string, LegOutcome[]> = {};
       for (const leg of legRows || []) {
         if (!legsBySlip[leg.slip_outcome_id]) legsBySlip[leg.slip_outcome_id] = [];
-        // Find the slip's game_date
         const parentSlip = slipRows.find(s => s.id === leg.slip_outcome_id);
         const gameDate = parentSlip?.game_date || "";
         const key = mkKey(leg.player_name, leg.stat_type, leg.threshold, gameDate);
-
-        legsBySlip[leg.slip_outcome_id].push({
-          ...leg,
-          market: marketMap[key] || undefined,
-        });
+        legsBySlip[leg.slip_outcome_id].push({ ...leg, market: marketMap[key] || undefined });
       }
 
-      return slipRows.map(s => ({
-        ...s,
-        legs: legsBySlip[s.id] || [],
-      })) as SlipWithLegs[];
+      return slipRows.map(s => ({ ...s, legs: legsBySlip[s.id] || [] })) as SlipWithLegs[];
     },
   });
 
@@ -595,7 +770,6 @@ export function SlipValidationReview() {
   const legHits = allLegs.filter(l => l.hit).length;
   const legRate = allLegs.length > 0 ? Math.round((legHits / allLegs.length) * 100) : null;
 
-  // Market enrichment coverage stat
   const legsWithMarket = slips.flatMap(s => s.legs).filter(l => l.market && l.market.books_count > 0).length;
   const totalLegs = slips.flatMap(s => s.legs).length;
 
@@ -688,6 +862,15 @@ export function SlipValidationReview() {
 
           {/* Daily Breakdown Table */}
           {slips.length > 0 && <DailyBreakdownTable slips={slips} />}
+
+          {/* Stat Type Breakdown */}
+          {slips.length > 0 && <StatTypeBreakdown slips={slips} />}
+
+          {/* Confidence Calibration */}
+          {slips.length > 0 && <ConfidenceCalibration slips={slips} />}
+
+          {/* Tuning Actions */}
+          {slips.length > 0 && <TuningActions slips={slips} />}
 
           {/* Slip list */}
           <div className="space-y-1.5 max-h-[600px] overflow-y-auto">
