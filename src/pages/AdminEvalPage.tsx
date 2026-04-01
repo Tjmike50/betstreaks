@@ -523,6 +523,7 @@ export default function AdminEvalPage() {
         title: data.success ? "Pipeline complete ✅" : "Pipeline partial ⚠️",
         description: `Lines: ${data.results?.line_collection?.new_snapshots || 0} new | Avail: ${data.results?.availability_refresh?.records || 0} | Scored: ${data.results?.scoring?.scored_count || 0} | ${Math.round(data.total_duration_ms / 1000)}s`,
       });
+      refetchHistory();
     } catch (e) {
       toast({ title: "Pipeline failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
     } finally {
