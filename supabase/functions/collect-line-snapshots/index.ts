@@ -236,6 +236,55 @@ serve(async (req) => {
       dateCounts[row.game_date] = (dateCounts[row.game_date] || 0) + 1;
     }
 
+    // 7. Chain pipeline: trigger availability refresh → scoring engine
+    //    Non-blocking with 45s timeout per step. Only for today's date.
+    const pipelineResults: Record<string, any> = {};
+    const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+
+    if (allGameDates.has(todayET) && gamesProcessed > 0) {
+      const fnBase = SUPABASE_URL.replace(/\/$/, "") + "/functions/v1";
+      const svcHeaders = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+      };
+
+      // Step A: Refresh availability
+      try {
+        console.log("Pipeline: triggering refresh-availability...");
+        const availRes = await fetch(`${fnBase}/refresh-availability`, {
+          method: "POST",
+          headers: svcHeaders,
+          body: JSON.stringify({ game_date: todayET }),
+          signal: AbortSignal.timeout(45_000),
+        });
+        const availBody = await availRes.json();
+        pipelineResults.availability = { ok: availBody.ok, records: availBody.records, status_breakdown: availBody.status_breakdown };
+        console.log(`Pipeline: availability done — ${availBody.records} records`);
+      } catch (e) {
+        console.error("Pipeline: availability failed:", e);
+        pipelineResults.availability = { ok: false, error: String(e) };
+      }
+
+      // Step B: Trigger scoring engine with full market coverage
+      try {
+        console.log("Pipeline: triggering prop-scoring-engine...");
+        const scoreRes = await fetch(`${fnBase}/prop-scoring-engine`, {
+          method: "POST",
+          headers: svcHeaders,
+          body: JSON.stringify({ score_all_market_players: true }),
+          signal: AbortSignal.timeout(45_000),
+        });
+        const scoreBody = await scoreRes.json();
+        pipelineResults.scoring = { ok: true, players_analyzed: scoreBody.players_analyzed, scored_count: scoreBody.scored_count };
+        console.log(`Pipeline: scoring done — ${scoreBody.scored_count} props scored`);
+      } catch (e) {
+        console.error("Pipeline: scoring failed:", e);
+        pipelineResults.scoring = { ok: false, error: String(e) };
+      }
+    } else {
+      pipelineResults.skipped = "no games today or no games processed";
+    }
+
     const result = {
       ok: insertErrors === 0,
       game_dates: [...allGameDates].sort(),
@@ -244,10 +293,11 @@ serve(async (req) => {
       new_by_date: dateCounts,
       skipped_dupes: skippedDupes,
       total_across_dates: totalToday || 0,
+      pipeline: pipelineResults,
       refreshed_at: new Date().toISOString(),
     };
 
-    console.log("Snapshot collection complete:", JSON.stringify(result));
+    console.log("Snapshot collection + pipeline complete:", JSON.stringify(result));
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
