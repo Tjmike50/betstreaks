@@ -25,6 +25,11 @@ const FavoritesPage = () => {
     );
   }
 
+  // Gate: require premium
+  if (!isPremium) {
+    return <PremiumLockedScreen isLoggedIn={isAuthenticated} />;
+  }
+
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
       {/* Header */}
