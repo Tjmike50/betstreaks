@@ -31,9 +31,15 @@ serve(async (req) => {
 
     // Check user auth & premium for free limit
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required. Please log in." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     let isPremium = false;
 
-    if (user) {
+    {
       const { data: flags } = await supabase
         .from("user_flags")
         .select("is_premium")

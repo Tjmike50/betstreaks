@@ -7,19 +7,27 @@ import { Footer } from "@/components/Footer";
 import { useFavorites } from "@/hooks/useFavorites";
 import { useAuth } from "@/contexts/AuthContext";
 import { PremiumBadge } from "@/components/PremiumBadge";
+import { PremiumLockedScreen } from "@/components/PremiumLockedScreen";
+import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 
 const FavoritesPage = () => {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: isAuthLoading, email } = useAuth();
+  const { isPremium, isLoading: isPremiumLoading } = usePremiumStatus();
   const { favorites, isLoading } = useFavorites();
 
-  // Show loading state while auth initializes
-  if (isAuthLoading) {
+  // Show loading state while auth/premium initializes
+  if (isAuthLoading || isPremiumLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center pb-20">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
+  }
+
+  // Gate: require premium
+  if (!isPremium) {
+    return <PremiumLockedScreen isLoggedIn={isAuthenticated} />;
   }
 
   return (
