@@ -401,19 +401,25 @@ function BuilderLoadingState() {
 
 export default function AIBetBuilderPage() {
   const [prompt, setPrompt] = useState("");
+  const [hasInteracted, setHasInteracted] = useState(false);
   const [filters, setFilters] = useState<BuilderFilters>({
     ...DEFAULT_BUILDER_FILTERS,
   });
   const { slips, isLoading, error, errorType, buildSlips, marketDepth, isFallback } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const activeFilterCount = getActiveBuilderFilterCount(filters);
 
-  const handleSubmit = () => {
-    if (!prompt.trim()) return;
+  const handleSubmit = (overridePrompt?: string) => {
+    const p = (overridePrompt ?? prompt).trim();
+    if (!p) return;
+    setHasInteracted(true);
     const slipCount = isPremium ? filters.slipCount : 1;
-    buildSlips(prompt.trim(), slipCount, filters);
+    buildSlips(p, slipCount, filters);
   };
+
+  const handleButtonSubmit = () => handleSubmit();
 
   const isLimitError = errorType === "limit";
   const isCreditsError = errorType === "credits";
@@ -448,7 +454,7 @@ export default function AIBetBuilderPage() {
           {QUICK_PROMPTS.map((qp) => (
             <button
               key={qp}
-              onClick={() => setPrompt(qp)}
+              onClick={() => { setPrompt(qp); handleSubmit(qp); }}
               className="text-xs px-3 py-1.5 rounded-full bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors"
             >
               {qp}
@@ -473,7 +479,7 @@ export default function AIBetBuilderPage() {
               }
             }}
           />
-          <Button onClick={handleSubmit} disabled={isLoading || !prompt.trim()} className="w-full">
+          <Button onClick={handleButtonSubmit} disabled={isLoading || !prompt.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -535,7 +541,7 @@ export default function AIBetBuilderPage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium text-blue-400">Prop data not ready</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
@@ -551,7 +557,7 @@ export default function AIBetBuilderPage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium text-destructive">Connection failed</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
@@ -567,7 +573,7 @@ export default function AIBetBuilderPage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium text-destructive">Something went wrong</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
@@ -617,8 +623,39 @@ export default function AIBetBuilderPage() {
           </div>
         )}
 
-        {/* Empty state */}
-        {!isLoading && !error && slips.length === 0 && prompt && (
+        {/* Initial empty state — first visit guidance */}
+        {!isLoading && !error && slips.length === 0 && !hasInteracted && (
+          <Card className="border-border/30 bg-card/50">
+            <CardContent className="pt-6 pb-5 space-y-4">
+              <div className="text-center space-y-2">
+                <Brain className="h-10 w-10 mx-auto text-primary/40" />
+                <h3 className="text-base font-semibold">How it works</h3>
+              </div>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <div className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">1</span>
+                  <p>Tap a quick prompt above or type your own request</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">2</span>
+                  <p>Our engine scores players using real game logs, hit rates & matchup data</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">3</span>
+                  <p>Get data-driven slips with verified odds from live sportsbooks</p>
+                </div>
+              </div>
+              {!user && (
+                <Button variant="outline" className="w-full" onClick={() => navigate("/auth")}>
+                  Log in to get started
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Post-interaction empty state */}
+        {!isLoading && !error && slips.length === 0 && hasInteracted && (
           <div className="text-center py-8 text-muted-foreground">
             <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
             <p className="text-sm">Enter a prompt and tap Generate to build slips</p>
