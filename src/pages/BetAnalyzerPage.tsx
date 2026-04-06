@@ -313,7 +313,7 @@ export default function BetAnalyzerPage() {
         {!isLoading && analysis && <AnalysisResult analysis={analysis} legs={legs} />}
 
         <p className="text-[10px] text-muted-foreground text-center px-4">
-          AI analysis is data-driven and not a guarantee. Always gamble responsibly.
+          AI analysis is based on historical data and statistical trends. Past performance does not predict future results. Please gamble responsibly.
         </p>
       </div>
     </div>

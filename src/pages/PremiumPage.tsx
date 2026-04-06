@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,9 @@ const PRICE_IDS = {
   yearly: "price_1SyJcpF2kOU6awRk2uaH9xum",
 };
 
+const MAX_CONFIRM_RETRIES = 3;
+const CONFIRM_RETRY_DELAY = 2000;
+
 export default function PremiumPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -26,11 +29,49 @@ export default function PremiumPage() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isCheckoutLoading, setIsCheckoutLoading] = useState<"monthly" | "yearly" | null>(null);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmFailed, setConfirmFailed] = useState(false);
 
   // Track page view
   useEffect(() => {
     analytics.viewPremiumPage();
   }, []);
+
+  // Post-checkout confirmation with polling
+  const confirmPremiumStatus = useCallback(async () => {
+    setIsConfirming(true);
+    setConfirmFailed(false);
+
+    for (let attempt = 0; attempt < MAX_CONFIRM_RETRIES; attempt++) {
+      await refetch();
+      // Check if premium is now true by re-querying
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        const { data } = await supabase
+          .from("user_flags")
+          .select("is_premium")
+          .eq("user_id", currentUser.id)
+          .single();
+        if (data?.is_premium) {
+          setIsConfirming(false);
+          toast({
+            title: "Welcome to Premium! 🎉",
+            description: "Your subscription is now active. Enjoy all premium features!",
+          });
+          analytics.checkoutSuccess();
+          return;
+        }
+      }
+      if (attempt < MAX_CONFIRM_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, CONFIRM_RETRY_DELAY));
+      }
+    }
+
+    // All retries exhausted
+    setIsConfirming(false);
+    setConfirmFailed(true);
+    await refetch(); // one final refetch to update hook state
+  }, [refetch, toast]);
 
   // Check for success/canceled query params
   useEffect(() => {
@@ -38,15 +79,7 @@ export default function PremiumPage() {
     const canceled = searchParams.get("canceled");
 
     if (success === "1") {
-      toast({
-        title: "Welcome to Premium! 🎉",
-        description: "Your subscription is now active. Enjoy all premium features!",
-      });
-      // Track checkout success
-      analytics.checkoutSuccess();
-      // Refetch premium status after successful checkout
-      refetch();
-      // Clean up URL
+      confirmPremiumStatus();
       window.history.replaceState({}, "", "/premium");
     } else if (canceled === "1") {
       toast({
@@ -54,12 +87,10 @@ export default function PremiumPage() {
         title: "Checkout canceled",
         description: "Your subscription was not completed.",
       });
-      // Track checkout cancel
       analytics.checkoutCancel();
-      // Clean up URL
       window.history.replaceState({}, "", "/premium");
     }
-  }, [searchParams, toast, refetch]);
+  }, [searchParams, toast, confirmPremiumStatus]);
 
   // Check auth status
   useEffect(() => {
@@ -163,10 +194,35 @@ export default function PremiumPage() {
       </header>
 
       <main className="flex-1 px-4 py-6 pb-20">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        {isLoading || isConfirming ? (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            {isConfirming && (
+              <div className="text-center space-y-2">
+                <p className="text-sm font-medium text-foreground">Confirming your Premium access…</p>
+                <p className="text-xs text-muted-foreground">This usually takes just a few seconds.</p>
+              </div>
+            )}
           </div>
+        ) : confirmFailed && !isPremium ? (
+          <Card className="bg-card border-border">
+            <CardContent className="p-6 space-y-4">
+              <div className="text-center space-y-3">
+                <div className="w-16 h-16 mx-auto rounded-full bg-primary/20 flex items-center justify-center">
+                  <Check className="h-8 w-8 text-primary" />
+                </div>
+                <h2 className="text-xl font-bold text-foreground">
+                  Payment received!
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Your payment went through, but your Premium access may take a few more seconds to activate. Please refresh in a moment.
+                </p>
+              </div>
+              <Button onClick={() => window.location.reload()} className="w-full" size="lg">
+                Refresh Now
+              </Button>
+            </CardContent>
+          </Card>
         ) : isPremium ? (
           // Premium User View
           <Card className="bg-card border-border">
