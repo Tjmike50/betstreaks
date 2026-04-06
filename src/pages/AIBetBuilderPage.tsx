@@ -419,6 +419,8 @@ export default function AIBetBuilderPage() {
     buildSlips(p, slipCount, filters);
   };
 
+  const handleButtonSubmit = () => handleSubmit();
+
   const isLimitError = errorType === "limit";
   const isCreditsError = errorType === "credits";
   const isNoDataError = errorType === "no-data";
