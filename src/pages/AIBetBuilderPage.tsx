@@ -459,7 +459,6 @@ export default function AIBetBuilderPage() {
             >
               {qp}
             </button>
-            </button>
           ))}
         </div>
 
