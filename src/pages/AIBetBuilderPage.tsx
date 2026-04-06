@@ -401,18 +401,22 @@ function BuilderLoadingState() {
 
 export default function AIBetBuilderPage() {
   const [prompt, setPrompt] = useState("");
+  const [hasInteracted, setHasInteracted] = useState(false);
   const [filters, setFilters] = useState<BuilderFilters>({
     ...DEFAULT_BUILDER_FILTERS,
   });
   const { slips, isLoading, error, errorType, buildSlips, marketDepth, isFallback } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const activeFilterCount = getActiveBuilderFilterCount(filters);
 
-  const handleSubmit = () => {
-    if (!prompt.trim()) return;
+  const handleSubmit = (overridePrompt?: string) => {
+    const p = (overridePrompt ?? prompt).trim();
+    if (!p) return;
+    setHasInteracted(true);
     const slipCount = isPremium ? filters.slipCount : 1;
-    buildSlips(prompt.trim(), slipCount, filters);
+    buildSlips(p, slipCount, filters);
   };
 
   const isLimitError = errorType === "limit";

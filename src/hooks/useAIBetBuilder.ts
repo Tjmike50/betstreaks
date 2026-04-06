@@ -66,6 +66,12 @@ export function useAIBetBuilder() {
 
       if (fnError) {
         const msg = fnError.message || "";
+        if (msg.includes("401") || msg.includes("Authentication required")) {
+          setError("Please log in to use the AI Builder.");
+          setErrorType("limit");
+          toast({ title: "Login required", description: "Sign in to generate AI slips.", variant: "destructive" });
+          return;
+        }
         if (msg.includes("429") || msg.includes("free_limit_reached")) {
           setError("You've used your free AI slip for today. Upgrade to Premium for unlimited.");
           setErrorType("limit");
