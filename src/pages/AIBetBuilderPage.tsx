@@ -454,10 +454,11 @@ export default function AIBetBuilderPage() {
           {QUICK_PROMPTS.map((qp) => (
             <button
               key={qp}
-              onClick={() => setPrompt(qp)}
+              onClick={() => { setPrompt(qp); handleSubmit(qp); }}
               className="text-xs px-3 py-1.5 rounded-full bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors"
             >
               {qp}
+            </button>
             </button>
           ))}
         </div>
@@ -479,7 +480,7 @@ export default function AIBetBuilderPage() {
               }
             }}
           />
-          <Button onClick={handleSubmit} disabled={isLoading || !prompt.trim()} className="w-full">
+          <Button onClick={handleButtonSubmit} disabled={isLoading || !prompt.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -541,7 +542,7 @@ export default function AIBetBuilderPage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium text-blue-400">Prop data not ready</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
@@ -557,7 +558,7 @@ export default function AIBetBuilderPage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium text-destructive">Connection failed</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
@@ -573,7 +574,7 @@ export default function AIBetBuilderPage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium text-destructive">Something went wrong</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleSubmit}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
                 </Button>
