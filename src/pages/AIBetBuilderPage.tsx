@@ -627,7 +627,7 @@ export default function AIBetBuilderPage() {
 
         {/* Disclaimer */}
         <p className="text-[10px] text-muted-foreground text-center px-4">
-          AI picks are data-driven suggestions based on historical scoring analysis, not guarantees. Always gamble responsibly.
+          AI picks are data-driven suggestions based on historical performance trends. Past results do not predict future outcomes. Please gamble responsibly.
         </p>
       </div>
     </div>
