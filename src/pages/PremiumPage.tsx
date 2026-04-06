@@ -194,10 +194,35 @@ export default function PremiumPage() {
       </header>
 
       <main className="flex-1 px-4 py-6 pb-20">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        {isLoading || isConfirming ? (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            {isConfirming && (
+              <div className="text-center space-y-2">
+                <p className="text-sm font-medium text-foreground">Confirming your Premium access…</p>
+                <p className="text-xs text-muted-foreground">This usually takes just a few seconds.</p>
+              </div>
+            )}
           </div>
+        ) : confirmFailed && !isPremium ? (
+          <Card className="bg-card border-border">
+            <CardContent className="p-6 space-y-4">
+              <div className="text-center space-y-3">
+                <div className="w-16 h-16 mx-auto rounded-full bg-primary/20 flex items-center justify-center">
+                  <Check className="h-8 w-8 text-primary" />
+                </div>
+                <h2 className="text-xl font-bold text-foreground">
+                  Payment received!
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Your payment went through, but your Premium access may take a few more seconds to activate. Please refresh in a moment.
+                </p>
+              </div>
+              <Button onClick={() => window.location.reload()} className="w-full" size="lg">
+                Refresh Now
+              </Button>
+            </CardContent>
+          </Card>
         ) : isPremium ? (
           // Premium User View
           <Card className="bg-card border-border">
