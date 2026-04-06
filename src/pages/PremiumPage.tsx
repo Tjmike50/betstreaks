@@ -42,35 +42,41 @@ export default function PremiumPage() {
     setIsConfirming(true);
     setConfirmFailed(false);
 
-    for (let attempt = 0; attempt < MAX_CONFIRM_RETRIES; attempt++) {
-      await refetch();
-      // Check if premium is now true by re-querying
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser) {
-        const { data } = await supabase
-          .from("user_flags")
-          .select("is_premium")
-          .eq("user_id", currentUser.id)
-          .single();
-        if (data?.is_premium) {
-          setIsConfirming(false);
-          toast({
-            title: "Welcome to Premium! 🎉",
-            description: "Your subscription is now active. Enjoy all premium features!",
-          });
-          analytics.checkoutSuccess();
-          return;
+    try {
+      for (let attempt = 0; attempt < MAX_CONFIRM_RETRIES; attempt++) {
+        try {
+          await refetch();
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser) {
+            const { data } = await supabase
+              .from("user_flags")
+              .select("is_premium")
+              .eq("user_id", currentUser.id)
+              .single();
+            if (data?.is_premium) {
+              setIsConfirming(false);
+              toast({
+                title: "Welcome to Premium! 🎉",
+                description: "Your subscription is now active. Enjoy all premium features!",
+              });
+              analytics.checkoutSuccess();
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn("Premium confirmation check failed:", err);
+        }
+        if (attempt < MAX_CONFIRM_RETRIES - 1) {
+          await new Promise((r) => setTimeout(r, CONFIRM_RETRY_DELAY));
         }
       }
-      if (attempt < MAX_CONFIRM_RETRIES - 1) {
-        await new Promise((r) => setTimeout(r, CONFIRM_RETRY_DELAY));
-      }
+    } finally {
+      // Always exit confirming state
+      setIsConfirming(false);
     }
 
-    // All retries exhausted
-    setIsConfirming(false);
     setConfirmFailed(true);
-    await refetch(); // one final refetch to update hook state
+    await refetch().catch(() => {});
   }, [refetch, toast]);
 
   // Check for success/canceled query params
