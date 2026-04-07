@@ -217,6 +217,7 @@ function LegDataBar({ ctx }: { ctx: LegDataContext }) {
 
 function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const RiskIcon = getRiskIcon(slip.risk_label);
