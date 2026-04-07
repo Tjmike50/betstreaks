@@ -217,6 +217,7 @@ function LegDataBar({ ctx }: { ctx: LegDataContext }) {
 
 function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const RiskIcon = getRiskIcon(slip.risk_label);
@@ -241,7 +242,15 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
       }
     } else {
       setSaved(true);
-      toast({ title: "Slip saved!" });
+      toast({
+        title: "Saved!",
+        description: "View in Saved Slips",
+        action: (
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => navigate("/saved-slips")}>
+            View
+          </Button>
+        ),
+      });
     }
   };
 

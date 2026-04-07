@@ -27,7 +27,7 @@ export default function AuthPage() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate("/account");
+        navigate("/");
       }
     });
   }, [navigate]);
