@@ -241,7 +241,15 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
       }
     } else {
       setSaved(true);
-      toast({ title: "Slip saved!" });
+      toast({
+        title: "Saved!",
+        description: "View in Saved Slips",
+        action: (
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => navigate("/saved-slips")}>
+            View
+          </Button>
+        ),
+      });
     }
   };
 

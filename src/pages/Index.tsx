@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { FilterBar } from "@/components/FilterBar";
 import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
@@ -10,8 +10,11 @@ import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
 import { AdminRefreshButton } from "@/components/AdminRefreshButton";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
+import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LogIn } from "lucide-react";
 import type { StreakFilters, Streak } from "@/types/streak";
 
 const ONBOARDING_KEY = "onboarding_complete";
@@ -58,6 +61,7 @@ function saveFilters(filters: StreakFilters) {
 
 const Index = () => {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [filters, setFilters] = useState<StreakFilters>(loadFilters);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
@@ -118,7 +122,7 @@ const Index = () => {
               🔥 BetStreaks
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Active NBA player prop streaks
+              Track active NBA player &amp; team prop streaks, updated daily.
             </p>
             <p className="text-xs text-muted-foreground mt-2">
               Use streaks to identify consistency — always compare with sportsbook lines before betting.
@@ -127,6 +131,18 @@ const Index = () => {
           {/* Admin-only refresh button */}
           <AdminRefreshButton />
         </div>
+
+        {/* Logged-out CTA */}
+        {!isAuthenticated && (
+          <div className="mt-3 flex items-center gap-2">
+            <Button asChild size="sm" variant="outline" className="gap-1.5 text-xs">
+              <Link to="/auth">
+                <LogIn className="h-3.5 w-3.5" />
+                Log in to save picks &amp; unlock features
+              </Link>
+            </Button>
+          </div>
+        )}
       </header>
 
       {/* Early Access Banner */}
