@@ -55,7 +55,7 @@ serve(async (req) => {
 
       if (!isPremium) {
         const today = new Date().toISOString().split("T")[0];
-        const { data: usage } = await supabase
+        const { data: usage } = await supabaseAdmin
           .from("ai_usage")
           .select("request_count")
           .eq("user_id", user.id)
