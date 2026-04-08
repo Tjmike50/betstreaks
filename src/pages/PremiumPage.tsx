@@ -378,9 +378,14 @@ export default function PremiumPage() {
                 </div>
               </div>
 
-              <p className="text-xs text-muted-foreground text-center">
-                Cancel anytime. Secure payment via Stripe.
-              </p>
+              <div className="text-center space-y-1">
+                <p className="text-xs font-medium text-primary">
+                  Early access pricing — may increase soon
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Cancel anytime. Secure payment via Stripe.
+                </p>
+              </div>
             </CardContent>
           </Card>
         )}
