@@ -153,7 +153,7 @@ Respond with ONLY valid JSON matching this structure:
     // Track usage
     if (user && !isPremium) {
       const today = new Date().toISOString().split("T")[0];
-      supabase
+      supabaseAdmin
         .from("ai_usage")
         .upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" })
         .then(() => {});
