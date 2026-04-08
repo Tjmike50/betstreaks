@@ -614,7 +614,7 @@ serve(async (req) => {
       isPremium = flags?.is_premium ?? false;
       if (!isPremium) {
         const today = new Date().toISOString().split("T")[0];
-        const { data: usage } = await supabase.from("ai_usage").select("request_count").eq("user_id", user.id).eq("usage_date", today).single();
+        const { data: usage } = await serviceClient.from("ai_usage").select("request_count").eq("user_id", user.id).eq("usage_date", today).single();
         if (usage && usage.request_count >= 1) {
           return new Response(
             JSON.stringify({ error: "free_limit_reached", message: "Free users get 1 AI slip per day. Upgrade to Premium for unlimited." }),
@@ -1656,7 +1656,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         // Track usage
         if (user && !isPremium) {
           const today = new Date().toISOString().split("T")[0];
-          supabase.from("ai_usage").upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" }).then(() => {});
+          serviceClient.from("ai_usage").upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" }).then(() => {});
         }
 
         console.log(`[AI-Builder] Fallback: built ${savedFallbackSlips.length} slips from scored candidates`);
@@ -1973,7 +1973,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
     // Track usage
     if (user && !isPremium) {
       const today = new Date().toISOString().split("T")[0];
-      supabase.from("ai_usage").upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" }).then(() => {});
+      serviceClient.from("ai_usage").upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" }).then(() => {});
     }
 
     return new Response(JSON.stringify({

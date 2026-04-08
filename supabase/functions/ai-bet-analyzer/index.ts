@@ -18,10 +18,16 @@ serve(async (req) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const authHeader = req.headers.get("Authorization");
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
+    });
+
+    // Service role client for usage tracking (bypasses RLS)
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
     });
 
     const { legs } = await req.json();
@@ -49,7 +55,7 @@ serve(async (req) => {
 
       if (!isPremium) {
         const today = new Date().toISOString().split("T")[0];
-        const { data: usage } = await supabase
+        const { data: usage } = await supabaseAdmin
           .from("ai_usage")
           .select("request_count")
           .eq("user_id", user.id)
@@ -147,7 +153,7 @@ Respond with ONLY valid JSON matching this structure:
     // Track usage
     if (user && !isPremium) {
       const today = new Date().toISOString().split("T")[0];
-      supabase
+      supabaseAdmin
         .from("ai_usage")
         .upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" })
         .then(() => {});
