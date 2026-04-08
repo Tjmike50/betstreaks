@@ -20,12 +20,12 @@ import { MarketDepthSummary } from "@/components/builder/MarketDepthSummary";
 import { LegMarketBadges, getLegMarketBorderClass } from "@/components/builder/LegMarketBadges";
 
 const QUICK_PROMPTS = [
-  "Build me a +150 parlay",
-  "Give me 3 NBA slips around +200",
-  "Make me a safer 2-leg parlay",
-  "Build a player prop slip for tonight",
-  "Build me a combo parlay with ML + player props",
-  "5-leg aggressive parlay +500",
+  { label: "🔥 High hit rate plays", prompt: "Build me a parlay with the highest hit-rate props tonight" },
+  { label: "📈 Hot streaks right now", prompt: "Find players on hot streaks and build a slip" },
+  { label: "🎯 Safe slips", prompt: "Make me a safer 2-leg parlay with consistent players" },
+  { label: "💰 Undervalued props", prompt: "Find undervalued player props with good value scores" },
+  { label: "🏀 Tonight's best", prompt: "Build me a +200 NBA parlay for tonight" },
+  { label: "⚡ Aggressive +500", prompt: "5-leg aggressive parlay +500" },
 ];
 
 function getRiskColor(risk: string) {
@@ -439,36 +439,51 @@ export default function AIBetBuilderPage() {
   return (
     <div className="min-h-screen bg-background pb-20">
       <div className="max-w-lg mx-auto px-4 pt-6 space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-2">
+        {/* Hero Headline */}
+        <div className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 bg-primary/10 rounded-full px-4 py-1.5">
             <Brain className="h-5 w-5 text-primary" />
             <span className="text-sm font-semibold text-primary">AI Bet Builder</span>
           </div>
-          <h1 className="text-2xl font-bold">Build Your Slip</h1>
+          <h1 className="text-2xl font-bold leading-tight">
+            Find high-probability NBA betting trends using AI + real data
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Data-driven picks powered by historical scoring analysis
+            No guessing. Just stats, hit rates, and streaks.
           </p>
         </div>
 
-        {/* Data engine badge */}
-        <div className="flex items-center justify-center gap-4 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><BarChart3 className="h-3 w-3" /> Hit Rate Engine</span>
-          <span className="flex items-center gap-1"><TrendingUp className="h-3 w-3" /> Trend Analysis</span>
-          <span className="flex items-center gap-1"><Users className="h-3 w-3" /> Matchup Data</span>
+        {/* How It Works — compact 3-step */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="text-center space-y-1.5 p-3 rounded-lg bg-card border border-border/30">
+            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-xs font-bold text-primary">1</span>
+            <p className="text-[11px] text-muted-foreground leading-tight">Enter a prompt or tap a suggestion</p>
+          </div>
+          <div className="text-center space-y-1.5 p-3 rounded-lg bg-card border border-border/30">
+            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-xs font-bold text-primary">2</span>
+            <p className="text-[11px] text-muted-foreground leading-tight">AI analyzes real data, hit rates & matchups</p>
+          </div>
+          <div className="text-center space-y-1.5 p-3 rounded-lg bg-card border border-border/30">
+            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-xs font-bold text-primary">3</span>
+            <p className="text-[11px] text-muted-foreground leading-tight">Get data-driven slips instantly</p>
+          </div>
         </div>
 
-        {/* Quick Prompts */}
-        <div className="flex flex-wrap gap-2">
-          {QUICK_PROMPTS.map((qp) => (
-            <button
-              key={qp}
-              onClick={() => { setPrompt(qp); handleSubmit(qp); }}
-              className="text-xs px-3 py-1.5 rounded-full bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors"
-            >
-              {qp}
-            </button>
-          ))}
+        {/* Quick-Start Prompts — auto-run on click */}
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Quick start</p>
+          <div className="flex flex-wrap gap-2">
+            {QUICK_PROMPTS.map((qp) => (
+              <button
+                key={qp.prompt}
+                onClick={() => { setPrompt(qp.prompt); handleSubmit(qp.prompt); }}
+                disabled={isLoading}
+                className="text-xs px-3 py-1.5 rounded-full bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors disabled:opacity-50"
+              >
+                {qp.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Filters */}
@@ -514,16 +529,27 @@ export default function AIBetBuilderPage() {
 
         {/* Error States */}
         {isLimitError && (
-          <Card className="border-yellow-500/30 bg-yellow-500/5">
-            <CardContent className="pt-4 flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-yellow-400 shrink-0 mt-0.5" />
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-yellow-400">Daily limit reached</p>
-                <p className="text-xs text-muted-foreground">{error}</p>
-                <Button size="sm" variant="outline" onClick={() => navigate("/premium")}>
-                  Go Premium
-                </Button>
+          <Card className="border-primary/40 bg-primary/5">
+            <CardContent className="pt-5 pb-5 space-y-4">
+              <div className="text-center space-y-2">
+                <div className="w-12 h-12 mx-auto rounded-full bg-primary/20 flex items-center justify-center">
+                  <Sparkles className="h-6 w-6 text-primary" />
+                </div>
+                <p className="text-base font-bold">You just used your free AI slip.</p>
+                <p className="text-sm text-muted-foreground">Unlock unlimited slips and advanced data:</p>
               </div>
+              <div className="space-y-1.5 text-sm">
+                <p className="flex items-center gap-2"><span className="text-primary">✔</span> More slips per request</p>
+                <p className="flex items-center gap-2"><span className="text-primary">✔</span> Advanced hit-rate splits</p>
+                <p className="flex items-center gap-2"><span className="text-primary">✔</span> Premium streak alerts</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-primary">$50/year</p>
+                <p className="text-[11px] text-muted-foreground">Early access pricing</p>
+              </div>
+              <Button className="w-full" onClick={() => navigate("/premium")}>
+                Upgrade to Premium
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -634,28 +660,17 @@ export default function AIBetBuilderPage() {
 
         {/* Initial empty state — first visit guidance */}
         {!isLoading && !error && slips.length === 0 && !hasInteracted && (
-          <Card className="border-border/30 bg-card/50">
-            <CardContent className="pt-6 pb-5 space-y-4">
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="pt-6 pb-5 space-y-3">
               <div className="text-center space-y-2">
-                <Brain className="h-10 w-10 mx-auto text-primary/40" />
-                <h3 className="text-base font-semibold">How it works</h3>
-              </div>
-              <div className="space-y-3 text-sm text-muted-foreground">
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">1</span>
-                  <p>Tap a quick prompt above or type your own request</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">2</span>
-                  <p>Our engine scores players using real game logs, hit rates & matchup data</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">3</span>
-                  <p>Get data-driven slips with verified odds from live sportsbooks</p>
-                </div>
+                <Sparkles className="h-8 w-8 mx-auto text-primary/60" />
+                <h3 className="text-base font-semibold">Start with a quick prompt</h3>
+                <p className="text-sm text-muted-foreground">
+                  Try one of the suggestions above or type your own request
+                </p>
               </div>
               {!user && (
-                <Button variant="outline" className="w-full" onClick={() => navigate("/auth")}>
+                <Button className="w-full" onClick={() => navigate("/auth")}>
                   Log in to get started
                 </Button>
               )}
