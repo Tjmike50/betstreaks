@@ -48,12 +48,15 @@ serve(async (req) => {
       throw new Error("User not authenticated");
     }
 
-    console.log("Authenticated user:", user.id, user.email);
+    console.log("Authenticated user:", user.id);
 
     // Get request body
     const { priceId } = await req.json();
-    if (!priceId) {
-      throw new Error("priceId is required");
+    if (!priceId || typeof priceId !== "string") {
+      throw new Error("priceId is required and must be a string");
+    }
+    if (!priceId.startsWith("price_")) {
+      throw new Error("Invalid price ID format");
     }
 
     console.log("Creating checkout session for price:", priceId);
