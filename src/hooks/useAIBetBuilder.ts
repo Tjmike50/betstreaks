@@ -41,7 +41,7 @@ export interface MarketDepthData {
   } | null;
 }
 
-export type ErrorType = "credits" | "limit" | "no-data" | "network" | "generic";
+export type ErrorType = "credits" | "limit" | "auth" | "no-data" | "network" | "generic";
 
 export function useAIBetBuilder() {
   const [slips, setSlips] = useState<AISlip[]>([]);
@@ -65,26 +65,55 @@ export function useAIBetBuilder() {
       });
 
       if (fnError) {
-        const msg = fnError.message || "";
-        if (msg.includes("401") || msg.includes("Authentication required")) {
+        // FunctionsHttpError has a `context` property (the raw Response).
+        // Extract status code and response body for proper error classification.
+        const context = (fnError as any).context as Response | undefined;
+        const status = context?.status;
+        let bodyError: string | null = null;
+        let bodyMessage: string | null = null;
+        try {
+          if (context) {
+            const body = await context.json();
+            bodyError = body?.error || null;
+            bodyMessage = body?.message || null;
+          }
+        } catch {
+          // body already consumed or not JSON
+        }
+
+        // 401 — not authenticated
+        if (status === 401 || bodyError?.includes("Authentication")) {
           setError("Please log in to use the AI Builder.");
-          setErrorType("limit");
+          setErrorType("auth");
           toast({ title: "Login required", description: "Sign in to generate AI slips.", variant: "destructive" });
           return;
         }
-        if (msg.includes("429") || msg.includes("free_limit_reached")) {
-          setError("You've used your free AI slip for today. Upgrade to Premium for unlimited.");
+        // 429 — free limit reached
+        if (status === 429 || bodyError === "free_limit_reached") {
+          setError(bodyMessage || "You've used your free AI slip for today. Upgrade to Premium for unlimited.");
           setErrorType("limit");
-          toast({ title: "Daily limit reached", description: "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
+          toast({ title: "Daily limit reached", description: bodyMessage || "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
           return;
         }
-        if (msg.includes("402") || msg.includes("non-2xx")) {
+        // 402 — credits exhausted
+        if (status === 402) {
           setError("AI service credits exhausted. Please try again later or check your plan.");
           setErrorType("credits");
           toast({ title: "Credits exhausted", description: "The AI service is temporarily unavailable. Please try again later.", variant: "destructive" });
           return;
         }
-        throw fnError;
+        // No candidates
+        if (bodyError === "no_candidates" || bodyError?.includes?.("no candidates")) {
+          setError(bodyMessage || "Today's prop data isn't ready yet. Try again after games are loaded.");
+          setErrorType("no-data");
+          toast({ title: "No data available", description: "Prop data hasn't been loaded yet for today's games.", variant: "destructive" });
+          return;
+        }
+        // Generic fallback
+        setError(bodyMessage || fnError.message || "Something went wrong. Please try again.");
+        setErrorType("generic");
+        toast({ title: "Something went wrong", description: bodyMessage || "Please try again later.", variant: "destructive" });
+        return;
       }
 
       if (data?.error) {
