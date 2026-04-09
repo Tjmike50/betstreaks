@@ -430,6 +430,7 @@ export default function AIBetBuilderPage() {
 
   const handleButtonSubmit = () => handleSubmit();
 
+  const isAuthError = errorType === "auth";
   const isLimitError = errorType === "limit";
   const isCreditsError = errorType === "credits";
   const isNoDataError = errorType === "no-data";
