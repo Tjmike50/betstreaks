@@ -64,18 +64,31 @@ export function useAIBetBuilder() {
         body: { prompt, slipCount, filters: filters || null },
       });
 
-      // Supabase returns both data and fnError for non-2xx responses.
-      // Check data.error first since it has the actual error type from our edge function.
       if (fnError) {
-        // Check if the response body has structured error info (non-2xx with JSON body)
-        if (data?.error === "free_limit_reached") {
-          setError(data.message || "Daily limit reached.");
+        // For non-2xx responses, Supabase sets data=null and wraps the error.
+        // Try to extract the JSON body from the error's context (FunctionsHttpError).
+        let bodyError: string | null = null;
+        let bodyMessage: string | null = null;
+        try {
+          const context = (fnError as any).context;
+          if (context && typeof context.json === "function") {
+            const body = await context.json();
+            bodyError = body?.error || null;
+            bodyMessage = body?.message || null;
+          }
+        } catch {
+          // ignore parse failures
+        }
+
+        // Check structured error from response body first
+        if (bodyError === "free_limit_reached") {
+          setError(bodyMessage || "You've used your free AI slip for today. Upgrade to Premium for unlimited.");
           setErrorType("limit");
-          toast({ title: "Daily limit reached", description: data.message || "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
+          toast({ title: "Daily limit reached", description: bodyMessage || "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
           return;
         }
-        if (data?.error === "no_candidates" || data?.error?.includes?.("no candidates")) {
-          setError(data.message || "Today's prop data isn't ready yet. Try again after games are loaded.");
+        if (bodyError === "no_candidates" || bodyError?.includes?.("no candidates")) {
+          setError(bodyMessage || "Today's prop data isn't ready yet. Try again after games are loaded.");
           setErrorType("no-data");
           toast({ title: "No data available", description: "Prop data hasn't been loaded yet for today's games.", variant: "destructive" });
           return;
@@ -100,11 +113,10 @@ export function useAIBetBuilder() {
           toast({ title: "Credits exhausted", description: "The AI service is temporarily unavailable. Please try again later.", variant: "destructive" });
           return;
         }
-        // Generic non-2xx — treat as credits error if nothing else matched
         if (msg.includes("non-2xx")) {
-          setError("AI service credits exhausted. Please try again later or check your plan.");
-          setErrorType("credits");
-          toast({ title: "Credits exhausted", description: "The AI service is temporarily unavailable. Please try again later.", variant: "destructive" });
+          setError("Something went wrong. Please try again.");
+          setErrorType("generic");
+          toast({ title: "Something went wrong", description: "Please try again later.", variant: "destructive" });
           return;
         }
         throw fnError;
