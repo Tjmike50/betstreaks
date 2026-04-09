@@ -529,6 +529,20 @@ export default function AIBetBuilderPage() {
         </div>
 
         {/* Error States */}
+        {isAuthError && (
+          <Card className="border-border bg-card">
+            <CardContent className="pt-5 pb-5 space-y-4 text-center">
+              <div className="w-12 h-12 mx-auto rounded-full bg-muted flex items-center justify-center">
+                <Lock className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <p className="text-base font-bold text-foreground">Log in to use the AI Builder</p>
+              <p className="text-sm text-muted-foreground">Create an account or sign in to generate AI-powered betting slips.</p>
+              <Button className="w-full" onClick={() => navigate("/auth")}>
+                Log In / Sign Up
+              </Button>
+            </CardContent>
+          </Card>
+        )}
         {isLimitError && (
           <Card className="border-primary/40 bg-primary/5">
             <CardContent className="pt-5 pb-5 space-y-4">
