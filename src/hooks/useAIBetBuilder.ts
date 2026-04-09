@@ -84,7 +84,7 @@ export function useAIBetBuilder() {
         // 401 — not authenticated
         if (status === 401 || bodyError?.includes("Authentication")) {
           setError("Please log in to use the AI Builder.");
-          setErrorType("limit");
+          setErrorType("auth");
           toast({ title: "Login required", description: "Sign in to generate AI slips.", variant: "destructive" });
           return;
         }
