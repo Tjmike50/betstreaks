@@ -64,7 +64,23 @@ export function useAIBetBuilder() {
         body: { prompt, slipCount, filters: filters || null },
       });
 
+      // Supabase returns both data and fnError for non-2xx responses.
+      // Check data.error first since it has the actual error type from our edge function.
       if (fnError) {
+        // Check if the response body has structured error info (non-2xx with JSON body)
+        if (data?.error === "free_limit_reached") {
+          setError(data.message || "Daily limit reached.");
+          setErrorType("limit");
+          toast({ title: "Daily limit reached", description: data.message || "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
+          return;
+        }
+        if (data?.error === "no_candidates" || data?.error?.includes?.("no candidates")) {
+          setError(data.message || "Today's prop data isn't ready yet. Try again after games are loaded.");
+          setErrorType("no-data");
+          toast({ title: "No data available", description: "Prop data hasn't been loaded yet for today's games.", variant: "destructive" });
+          return;
+        }
+
         const msg = fnError.message || "";
         if (msg.includes("401") || msg.includes("Authentication required")) {
           setError("Please log in to use the AI Builder.");
@@ -78,7 +94,14 @@ export function useAIBetBuilder() {
           toast({ title: "Daily limit reached", description: "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
           return;
         }
-        if (msg.includes("402") || msg.includes("non-2xx")) {
+        if (msg.includes("402")) {
+          setError("AI service credits exhausted. Please try again later or check your plan.");
+          setErrorType("credits");
+          toast({ title: "Credits exhausted", description: "The AI service is temporarily unavailable. Please try again later.", variant: "destructive" });
+          return;
+        }
+        // Generic non-2xx — treat as credits error if nothing else matched
+        if (msg.includes("non-2xx")) {
           setError("AI service credits exhausted. Please try again later or check your plan.");
           setErrorType("credits");
           toast({ title: "Credits exhausted", description: "The AI service is temporarily unavailable. Please try again later.", variant: "destructive" });
