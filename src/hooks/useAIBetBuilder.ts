@@ -41,7 +41,7 @@ export interface MarketDepthData {
   } | null;
 }
 
-export type ErrorType = "credits" | "limit" | "no-data" | "network" | "generic";
+export type ErrorType = "credits" | "limit" | "auth" | "no-data" | "network" | "generic";
 
 export function useAIBetBuilder() {
   const [slips, setSlips] = useState<AISlip[]>([]);
