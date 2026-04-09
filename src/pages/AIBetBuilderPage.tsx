@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff, CreditCard, Database, TrendingUp, BarChart3, Activity, Users, UserMinus, Trophy, ArrowUpDown, Hash, RefreshCw, Info } from "lucide-react";
+import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff, CreditCard, Database, TrendingUp, BarChart3, Activity, Users, UserMinus, Trophy, ArrowUpDown, Hash, RefreshCw, Info, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
