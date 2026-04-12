@@ -559,7 +559,7 @@ export default function AIBetBuilderPage() {
                 <p className="flex items-center gap-2"><span className="text-primary">✔</span> Premium streak alerts</p>
               </div>
               <div className="text-center">
-                <p className="text-lg font-bold text-primary">$50/year</p>
+                <p className="text-lg font-bold text-primary">$60/year</p>
                 <p className="text-[11px] text-muted-foreground">Early access pricing</p>
               </div>
               <Button className="w-full" onClick={() => navigate("/premium")}>
