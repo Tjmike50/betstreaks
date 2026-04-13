@@ -132,7 +132,7 @@ export default function PremiumPage() {
 
     try {
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
-        body: { priceId: PRICE_IDS[plan] },
+        body: { priceId: PRICE_IDS[plan], allowPromoCodes: plan === "playoff" },
       });
 
       if (error) throw error;
@@ -323,7 +323,7 @@ export default function PremiumPage() {
                   <h2 className="text-xl font-bold text-foreground">
                     🔥 NBA Playoffs Pass
                   </h2>
-                  <p className="text-3xl font-extrabold text-foreground">$20</p>
+                  <p className="text-3xl font-extrabold text-foreground">$25</p>
                   <p className="text-sm text-muted-foreground">
                     Full access through the Finals
                   </p>
@@ -368,6 +368,9 @@ export default function PremiumPage() {
 
                 <p className="text-xs text-center text-muted-foreground">
                   Takes 10 seconds • Instant access
+                </p>
+                <p className="text-xs text-center text-muted-foreground">
+                  Promo codes accepted at checkout
                 </p>
               </CardContent>
             </Card>
