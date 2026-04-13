@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, Star, Bell } from "lucide-react";
+import { Flame, Brain, Crown } from "lucide-react";
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -9,25 +9,25 @@ interface OnboardingFlowProps {
 
 const slides = [
   {
-    title: "Track what keeps hitting",
-    body: "We track NBA player & team streaks that are actively hitting — updated daily.",
-    icon: TrendingUp,
+    title: "Playoff Streaks Are Live 🏀",
+    body: "Track what's hitting during the NBA Playoffs — updated daily with real game data.",
+    icon: Flame,
     color: "text-primary",
     bgColor: "bg-primary/20",
   },
   {
-    title: "Save your picks",
-    body: "Tap ⭐ to save streaks to your Watchlist. Get alerts when streaks extend or break.",
-    icon: Star,
-    color: "text-yellow-500",
-    bgColor: "bg-yellow-500/20",
+    title: "AI-Powered Playoff Slips",
+    body: "Our AI analyzes playoff matchups, hit rates, and streaks to build data-driven parlays instantly.",
+    icon: Brain,
+    color: "text-primary",
+    bgColor: "bg-primary/20",
   },
   {
-    title: "Stay ahead",
-    body: "Alerts show what changed today so you don't have to check everything.",
-    icon: Bell,
-    color: "text-cyan-400",
-    bgColor: "bg-cyan-400/20",
+    title: "Get the Playoff Pass",
+    body: "Full access through the Finals — $25. Promo codes accepted at checkout.",
+    icon: Crown,
+    color: "text-amber-400",
+    bgColor: "bg-amber-400/20",
   },
 ];
 
@@ -85,19 +85,16 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
                 key={index}
                 className="flex-[0_0_100%] min-w-0 h-full flex flex-col items-center justify-center px-8 text-center"
               >
-                {/* Icon */}
                 <div
-                  className={`w-24 h-24 rounded-full ${slide.bgColor} flex items-center justify-center mb-8 animate-scale-in`}
+                  className={`w-20 h-20 rounded-full ${slide.bgColor} flex items-center justify-center mb-6`}
                 >
-                  <Icon className={`w-12 h-12 ${slide.color}`} />
+                  <Icon className={`w-10 h-10 ${slide.color}`} />
                 </div>
 
-                {/* Title */}
-                <h1 className="text-2xl font-bold text-foreground mb-4">
+                <h1 className="text-2xl font-bold text-foreground mb-3">
                   {slide.title}
                 </h1>
 
-                {/* Body */}
                 <p className="text-base text-muted-foreground max-w-xs leading-relaxed">
                   {slide.body}
                 </p>
@@ -107,9 +104,8 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         </div>
       </div>
 
-      {/* Bottom section: dots + button */}
+      {/* Bottom section */}
       <div className="px-8 pb-24 pt-4 space-y-6">
-        {/* Dots indicator */}
         <div className="flex justify-center gap-2">
           {slides.map((_, index) => (
             <button
@@ -125,12 +121,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
           ))}
         </div>
 
-        {/* Action button */}
-        <Button
-          onClick={handleNext}
-          className="w-full"
-          size="lg"
-        >
+        <Button onClick={handleNext} className="w-full" size="lg">
           {isLastSlide ? "Get Started" : "Next"}
         </Button>
       </div>
