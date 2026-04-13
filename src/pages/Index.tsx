@@ -114,27 +114,20 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <header className="px-4 py-4 border-b border-border">
+      {/* Page Header */}
+      <header className="px-4 pt-4 pb-2">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">
-              🔥 BetStreaks
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Track active NBA player &amp; team prop streaks, updated daily.
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Use streaks to identify consistency — always compare with sportsbook lines before betting.
+            <h2 className="text-xl font-bold text-foreground">Playoff Streaks</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Track active NBA Playoff player &amp; team prop streaks, updated daily.
             </p>
           </div>
-          {/* Admin-only refresh button */}
           <AdminRefreshButton />
         </div>
 
-        {/* Logged-out CTA */}
         {!isAuthenticated && (
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2">
             <Button asChild size="sm" variant="outline" className="gap-1.5 text-xs">
               <Link to="/auth">
                 <LogIn className="h-3.5 w-3.5" />
