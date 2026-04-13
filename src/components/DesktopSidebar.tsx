@@ -37,16 +37,21 @@ const mainNav = [
 ];
 
 export function DesktopSidebar() {
-  const { state } = useSidebar();
+  const { state, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { isAdmin } = useAdmin();
   const { newAlertCount } = useAlerts();
   const { isPremium } = usePremiumStatus();
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+
+  const handleNavClick = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border/50">
