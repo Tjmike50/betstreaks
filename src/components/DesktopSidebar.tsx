@@ -119,6 +119,7 @@ export function DesktopSidebar() {
                       to="/admin/eval"
                       className="flex items-center gap-3"
                       activeClassName="bg-primary/10 text-primary font-medium"
+                      onClick={handleNavClick}
                     >
                       <Shield className="h-4 w-4 shrink-0" />
                       {!collapsed && <span>Admin</span>}
