@@ -132,7 +132,7 @@ export default function PremiumPage() {
 
     try {
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
-        body: { priceId: PRICE_IDS[plan] },
+        body: { priceId: PRICE_IDS[plan], allowPromoCodes: plan === "playoff" },
       });
 
       if (error) throw error;
