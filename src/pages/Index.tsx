@@ -7,6 +7,7 @@ import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
+import { PlayoffCTA } from "@/components/PlayoffCTA";
 import { AdminRefreshButton } from "@/components/AdminRefreshButton";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
@@ -138,8 +139,11 @@ const Index = () => {
         )}
       </header>
 
-      {/* Early Access Banner */}
+      {/* Playoff Promo Banner */}
       <EarlyAccessBanner />
+
+      {/* Playoff CTA */}
+      <PlayoffCTA />
 
       {/* Data Freshness Indicator */}
       <div className="px-4 pt-3">

@@ -6,7 +6,7 @@ import { useAlerts } from "@/hooks/useAlerts";
 const navItems = [
   { path: "/", label: "Home", icon: Flame },
   { path: "/today", label: "Today", icon: Calendar },
-  { path: "/ai-builder", label: "AI", icon: Brain },
+  { path: "/ai-builder", label: "AI", icon: Brain, isHero: true },
   { path: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
   { path: "/account", label: "Account", icon: User },
 ];
@@ -18,13 +18,40 @@ export function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-background/90 backdrop-blur-lg border-t border-border/50 pb-[env(safe-area-inset-bottom)]">
-      <div className="flex items-center justify-around h-14">
+      <div className="flex items-center justify-around h-16">
         {navItems.map((item) => {
           const isActive = item.path === "/"
             ? location.pathname === "/"
             : location.pathname.startsWith(item.path);
           const Icon = item.icon;
           const showBadge = item.showBadge && newAlertCount > 0 && !isActive;
+
+          if (item.isHero) {
+            return (
+              <button
+                key={item.path}
+                onClick={() => navigate(item.path)}
+                className="flex flex-col items-center justify-center flex-1 h-full relative -mt-3"
+              >
+                <div
+                  className={cn(
+                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all shadow-lg",
+                    isActive
+                      ? "gradient-primary shadow-primary/30"
+                      : "bg-primary/15 hover:bg-primary/25"
+                  )}
+                >
+                  <Icon className={cn("h-6 w-6", isActive ? "text-primary-foreground" : "text-primary")} />
+                </div>
+                <span className={cn(
+                  "text-[10px] font-semibold mt-0.5",
+                  isActive ? "text-primary" : "text-muted-foreground"
+                )}>
+                  {item.label}
+                </span>
+              </button>
+            );
+          }
 
           return (
             <button
