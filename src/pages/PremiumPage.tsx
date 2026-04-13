@@ -14,6 +14,7 @@ import { analytics } from "@/lib/analytics";
 const PRICE_IDS = {
   monthly: "price_1SyJVfF2kOU6awRkLbvUGeLl",
   yearly: "price_1SyJcpF2kOU6awRk2uaH9xum",
+  playoff: "price_TODO_REPLACE_WITH_REAL_PLAYOFF_PRICE_ID",
 };
 
 const MAX_CONFIRM_RETRIES = 3;
