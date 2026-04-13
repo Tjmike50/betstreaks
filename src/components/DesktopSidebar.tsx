@@ -136,7 +136,7 @@ export function DesktopSidebar() {
         <SidebarFooter className="p-3">
           {!collapsed ? (
             <button
-              onClick={() => navigate("/premium")}
+              onClick={() => { handleNavClick(); navigate("/premium"); }}
               className="glass-card p-3 w-full text-left hover:border-primary/50 transition-colors"
             >
               <div className="flex items-center gap-2 mb-1">
