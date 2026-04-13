@@ -847,6 +847,9 @@ def main():
     # Freshness check (warning only, doesn't abort)
     validate_data_freshness(player_games, "player")
     
+    # Filter to postseason-relevant teams only
+    player_games = filter_postseason_player_games(player_games)
+    
     upsert_data(supabase, "player_recent_games", player_games, ["player_id", "game_id"])
     
     print()
