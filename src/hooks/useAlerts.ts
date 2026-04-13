@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useWatchlist } from "./useWatchlist";
+import { isPostseasonTeam } from "@/lib/postseasonTeams";
 
 const LAST_SEEN_KEY = "alerts_last_seen_at";
 
@@ -70,7 +71,8 @@ export function useAlerts() {
         .limit(200);
 
       if (error) throw error;
-      return data as StreakEvent[];
+      // Filter to postseason-relevant teams only
+      return (data as StreakEvent[]).filter((e) => isPostseasonTeam(e.team_abbr));
     },
   });
 
