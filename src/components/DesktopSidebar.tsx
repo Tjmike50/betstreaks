@@ -21,6 +21,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const mainNav = [
   { title: "Home", url: "/", icon: Flame },
@@ -36,16 +37,21 @@ const mainNav = [
 ];
 
 export function DesktopSidebar() {
-  const { state } = useSidebar();
+  const { state, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { isAdmin } = useAdmin();
   const { newAlertCount } = useAlerts();
   const { isPremium } = usePremiumStatus();
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+
+  const handleNavClick = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border/50">
@@ -80,6 +86,7 @@ export function DesktopSidebar() {
                         end={item.url === "/"}
                         className="flex items-center gap-3"
                         activeClassName="bg-primary/10 text-primary font-medium"
+                        onClick={handleNavClick}
                       >
                         <item.icon className={`h-4 w-4 shrink-0 ${item.title === "AI Builder" ? "text-primary" : ""}`} />
                         {!collapsed && <span>{item.title}</span>}
@@ -112,6 +119,7 @@ export function DesktopSidebar() {
                       to="/admin/eval"
                       className="flex items-center gap-3"
                       activeClassName="bg-primary/10 text-primary font-medium"
+                      onClick={handleNavClick}
                     >
                       <Shield className="h-4 w-4 shrink-0" />
                       {!collapsed && <span>Admin</span>}
@@ -128,7 +136,7 @@ export function DesktopSidebar() {
         <SidebarFooter className="p-3">
           {!collapsed ? (
             <button
-              onClick={() => navigate("/premium")}
+              onClick={() => { handleNavClick(); navigate("/premium"); }}
               className="glass-card p-3 w-full text-left hover:border-primary/50 transition-colors"
             >
               <div className="flex items-center gap-2 mb-1">
@@ -140,7 +148,7 @@ export function DesktopSidebar() {
             </button>
           ) : (
             <button
-              onClick={() => navigate("/premium")}
+              onClick={() => { handleNavClick(); navigate("/premium"); }}
               className="flex items-center justify-center p-2 rounded-md hover:bg-primary/10 transition-colors"
             >
               <Crown className="h-4 w-4 text-amber-400" />
