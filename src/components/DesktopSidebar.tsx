@@ -86,6 +86,7 @@ export function DesktopSidebar() {
                         end={item.url === "/"}
                         className="flex items-center gap-3"
                         activeClassName="bg-primary/10 text-primary font-medium"
+                        onClick={handleNavClick}
                       >
                         <item.icon className={`h-4 w-4 shrink-0 ${item.title === "AI Builder" ? "text-primary" : ""}`} />
                         {!collapsed && <span>{item.title}</span>}
