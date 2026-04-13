@@ -20,6 +20,8 @@ from nba_api.stats.endpoints import (
 from nba_api.stats.static import teams
 from supabase import create_client, Client
 
+from postseason_teams import get_postseason_teams, POSTSEASON_MODE
+
 # Configuration - Player stat thresholds
 STAT_COLUMNS = {
     "PTS": "pts",
