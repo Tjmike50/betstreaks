@@ -51,7 +51,7 @@ serve(async (req) => {
     console.log("Authenticated user:", user.id);
 
     // Get request body
-    const { priceId } = await req.json();
+    const { priceId, allowPromoCodes } = await req.json();
     if (!priceId || typeof priceId !== "string") {
       throw new Error("priceId is required and must be a string");
     }
