@@ -28,7 +28,7 @@ export default function PremiumPage() {
   
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [isCheckoutLoading, setIsCheckoutLoading] = useState<"monthly" | "yearly" | null>(null);
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState<"monthly" | "yearly" | "playoff" | null>(null);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmFailed, setConfirmFailed] = useState(false);
@@ -115,7 +115,7 @@ export default function PremiumPage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleCheckout = async (plan: "monthly" | "yearly") => {
+  const handleCheckout = async (plan: "monthly" | "yearly" | "playoff") => {
     if (!user) {
       navigate("/auth");
       return;
@@ -309,86 +309,151 @@ export default function PremiumPage() {
           </Card>
         ) : (
           // Non-Premium User View - Subscription Options
-          <Card className="bg-card border-border">
-            <CardContent className="p-6 space-y-6">
-              <div className="text-center space-y-2">
-                <h2 className="text-xl font-bold text-foreground">
-                  BetStreaks Premium
-                </h2>
-                <p className="text-muted-foreground">
-                  Unlock all features and catch streaks early
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                {PREMIUM_FEATURES.map((feature, index) => (
-                  <div key={index} className="flex items-center gap-3">
-                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                      <Check className="h-3 w-3 text-primary" />
-                    </div>
-                    <span className="text-sm text-foreground">{feature}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Pricing Cards */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                {/* Monthly */}
-                <div className="border border-border rounded-lg p-4 space-y-3">
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-muted-foreground">Monthly</p>
-                    <p className="text-2xl font-bold text-foreground">$10</p>
-                    <p className="text-xs text-muted-foreground">per month</p>
-                  </div>
-                  <Button
-                    onClick={() => handleCheckout("monthly")}
-                    className="w-full"
-                    size="sm"
-                    disabled={isCheckoutLoading !== null}
-                  >
-                    {isCheckoutLoading === "monthly" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      "Subscribe"
-                    )}
-                  </Button>
-                </div>
-
-                {/* Yearly */}
-                <div className="border-2 border-primary rounded-lg p-4 space-y-3 relative">
-                  <Badge className="absolute -top-2 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs">
-                    Best Value
+          <div className="space-y-6">
+            {/* Playoff Pass - Highlighted */}
+            <Card className="border-2 border-primary relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
+              <CardContent className="p-6 space-y-5">
+                <div className="flex justify-center">
+                  <Badge className="bg-primary text-primary-foreground text-xs px-3 py-1">
+                    Most Popular
                   </Badge>
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-muted-foreground">Yearly</p>
-                    <p className="text-2xl font-bold text-foreground">$60</p>
-                    <p className="text-xs text-muted-foreground">per year</p>
-                  </div>
-                  <Button
-                    onClick={() => handleCheckout("yearly")}
-                    className="w-full"
-                    size="sm"
-                    disabled={isCheckoutLoading !== null}
-                  >
-                    {isCheckoutLoading === "yearly" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      "Subscribe"
-                    )}
-                  </Button>
                 </div>
-              </div>
+                <div className="text-center space-y-2">
+                  <h2 className="text-xl font-bold text-foreground">
+                    🔥 NBA Playoffs Pass
+                  </h2>
+                  <p className="text-3xl font-extrabold text-foreground">$20</p>
+                  <p className="text-sm text-muted-foreground">
+                    Full access through the Finals
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Renews monthly after playoffs • Cancel anytime
+                  </p>
+                </div>
 
-              <div className="text-center space-y-1">
-                <p className="text-xs font-medium text-primary">
-                  Early access pricing — may increase soon
+                <div className="space-y-2.5">
+                  {[
+                    "Unlimited AI-generated slips",
+                    "High hit-rate player trends",
+                    "Playoff matchup analysis",
+                    "Live streak alerts",
+                    "Advanced stats & splits",
+                  ].map((feature, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span className="text-sm text-foreground">{feature}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs font-medium text-center text-primary">
+                  Limited-time playoff pricing — ends after Finals
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  Cancel anytime. Secure payment via Stripe.
+
+                <Button
+                  onClick={() => handleCheckout("playoff")}
+                  className="w-full"
+                  size="lg"
+                  disabled={isCheckoutLoading !== null}
+                >
+                  {isCheckoutLoading === "playoff" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Unlock Playoff Access"
+                  )}
+                </Button>
+
+                <p className="text-xs text-center text-muted-foreground">
+                  Takes 10 seconds • Instant access
                 </p>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+
+            {/* Standard Plans */}
+            <Card className="bg-card border-border">
+              <CardContent className="p-6 space-y-6">
+                <div className="text-center space-y-2">
+                  <h2 className="text-xl font-bold text-foreground">
+                    BetStreaks Premium
+                  </h2>
+                  <p className="text-muted-foreground">
+                    Unlock all features and catch streaks early
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  {PREMIUM_FEATURES.map((feature, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
+                        <Check className="h-3 w-3 text-primary" />
+                      </div>
+                      <span className="text-sm text-foreground">{feature}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Pricing Cards */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  {/* Monthly */}
+                  <div className="border border-border rounded-lg p-4 space-y-3">
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-muted-foreground">Monthly</p>
+                      <p className="text-2xl font-bold text-foreground">$10</p>
+                      <p className="text-xs text-muted-foreground">per month</p>
+                    </div>
+                    <Button
+                      onClick={() => handleCheckout("monthly")}
+                      className="w-full"
+                      size="sm"
+                      disabled={isCheckoutLoading !== null}
+                    >
+                      {isCheckoutLoading === "monthly" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Subscribe"
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* Yearly */}
+                  <div className="border-2 border-primary rounded-lg p-4 space-y-3 relative">
+                    <Badge className="absolute -top-2 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs">
+                      Best Value
+                    </Badge>
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-muted-foreground">Yearly</p>
+                      <p className="text-2xl font-bold text-foreground">$60</p>
+                      <p className="text-xs text-muted-foreground">per year</p>
+                    </div>
+                    <Button
+                      onClick={() => handleCheckout("yearly")}
+                      className="w-full"
+                      size="sm"
+                      disabled={isCheckoutLoading !== null}
+                    >
+                      {isCheckoutLoading === "yearly" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Subscribe"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="text-center space-y-1">
+                  <p className="text-xs font-medium text-primary">
+                    Early access pricing — may increase soon
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Cancel anytime. Secure payment via Stripe.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
       </main>
 
