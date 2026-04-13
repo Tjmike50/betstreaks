@@ -1,10 +1,10 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Flame, Bell, User, Calendar, Heart, Brain } from "lucide-react";
+import { Flame, Bell, User, Calendar, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlerts } from "@/hooks/useAlerts";
 
 const navItems = [
-  { path: "/", label: "Streaks", icon: Flame },
+  { path: "/", label: "Home", icon: Flame },
   { path: "/today", label: "Today", icon: Calendar },
   { path: "/ai-builder", label: "AI", icon: Brain },
   { path: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
@@ -16,16 +16,13 @@ export function BottomNav() {
   const navigate = useNavigate();
   const { newAlertCount } = useAlerts();
 
-  // Don't show on player detail pages
-  if (location.pathname.startsWith("/player/")) {
-    return null;
-  }
-
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-background/90 backdrop-blur-lg border-t border-border/50 pb-[env(safe-area-inset-bottom)]">
       <div className="flex items-center justify-around h-14">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.path;
+          const isActive = item.path === "/"
+            ? location.pathname === "/"
+            : location.pathname.startsWith(item.path);
           const Icon = item.icon;
           const showBadge = item.showBadge && newAlertCount > 0 && !isActive;
 
@@ -48,7 +45,10 @@ export function BottomNav() {
                   </span>
                 )}
               </div>
-              <span className="text-xs font-medium">{item.label}</span>
+              <span className="text-[10px] font-medium">{item.label}</span>
+              {isActive && (
+                <span className="absolute bottom-1 w-1 h-1 rounded-full bg-primary" />
+              )}
             </button>
           );
         })}

@@ -4,6 +4,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { DesktopSidebar } from "@/components/DesktopSidebar";
+import { MobileHeader } from "@/components/MobileHeader";
+import { BottomNav } from "@/components/BottomNav";
 import Index from "./pages/Index";
 import TodayPage from "./pages/TodayPage";
 import PlayerPage from "./pages/PlayerPage";
@@ -24,7 +28,6 @@ import BetAnalyzerPage from "./pages/BetAnalyzerPage";
 import SavedSlipsPage from "./pages/SavedSlipsPage";
 import AdminEvalPage from "./pages/AdminEvalPage";
 import NotFound from "./pages/NotFound";
-import { BottomNav } from "./components/BottomNav";
 
 const queryClient = new QueryClient();
 
@@ -35,30 +38,39 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/today" element={<TodayPage />} />
-            <Route path="/best-bets" element={<BestBetsPage />} />
-            <Route path="/alerts" element={<AlertsPage />} />
-            <Route path="/streak" element={<StreakDetailPage />} />
-            <Route path="/watchlist" element={<WatchlistPage />} />
-            <Route path="/favorites" element={<FavoritesPage />} />
-            <Route path="/account" element={<AccountPage />} />
-            <Route path="/premium" element={<PremiumPage />} />
-            <Route path="/auth" element={<AuthPage />} />
-            <Route path="/terms" element={<TermsPage />} />
-            <Route path="/privacy" element={<PrivacyPage />} />
-            <Route path="/responsible-gambling" element={<ResponsibleGamblingPage />} />
-            <Route path="/feedback" element={<FeedbackPage />} />
-            <Route path="/ai-builder" element={<AIBetBuilderPage />} />
-            <Route path="/analyzer" element={<BetAnalyzerPage />} />
-            <Route path="/saved-slips" element={<SavedSlipsPage />} />
-            <Route path="/player/:playerId" element={<PlayerPage />} />
-            <Route path="/admin/eval" element={<AdminEvalPage />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-          <BottomNav />
+          <SidebarProvider defaultOpen={true}>
+            <div className="min-h-screen flex w-full">
+              <DesktopSidebar />
+              <div className="flex-1 flex flex-col min-h-screen min-w-0">
+                <MobileHeader />
+                <main className="flex-1">
+                  <Routes>
+                    <Route path="/" element={<Index />} />
+                    <Route path="/today" element={<TodayPage />} />
+                    <Route path="/best-bets" element={<BestBetsPage />} />
+                    <Route path="/alerts" element={<AlertsPage />} />
+                    <Route path="/streak" element={<StreakDetailPage />} />
+                    <Route path="/watchlist" element={<WatchlistPage />} />
+                    <Route path="/favorites" element={<FavoritesPage />} />
+                    <Route path="/account" element={<AccountPage />} />
+                    <Route path="/premium" element={<PremiumPage />} />
+                    <Route path="/auth" element={<AuthPage />} />
+                    <Route path="/terms" element={<TermsPage />} />
+                    <Route path="/privacy" element={<PrivacyPage />} />
+                    <Route path="/responsible-gambling" element={<ResponsibleGamblingPage />} />
+                    <Route path="/feedback" element={<FeedbackPage />} />
+                    <Route path="/ai-builder" element={<AIBetBuilderPage />} />
+                    <Route path="/analyzer" element={<BetAnalyzerPage />} />
+                    <Route path="/saved-slips" element={<SavedSlipsPage />} />
+                    <Route path="/player/:playerId" element={<PlayerPage />} />
+                    <Route path="/admin/eval" element={<AdminEvalPage />} />
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </main>
+              </div>
+            </div>
+            <BottomNav />
+          </SidebarProvider>
         </BrowserRouter>
       </TooltipProvider>
     </AuthProvider>
