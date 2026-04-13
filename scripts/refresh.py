@@ -20,6 +20,8 @@ from nba_api.stats.endpoints import (
 from nba_api.stats.static import teams
 from supabase import create_client, Client
 
+from postseason_teams import get_postseason_teams, POSTSEASON_MODE
+
 # Configuration - Player stat thresholds
 STAT_COLUMNS = {
     "PTS": "pts",
@@ -796,12 +798,29 @@ def trigger_scoring_engine(supabase: Client):
         print(f"WARNING: Scoring engine trigger failed (non-fatal): {e}")
 
 
+def filter_postseason_player_games(games: list[dict]) -> list[dict]:
+    """Filter player game logs to only postseason-relevant teams."""
+    teams_set = get_postseason_teams()
+    filtered = [g for g in games if g.get("team_abbr") in teams_set]
+    print(f"  Postseason filter ({POSTSEASON_MODE}): {len(games)} → {len(filtered)} player game records ({len(teams_set)} teams)")
+    return filtered
+
+
+def filter_postseason_team_games(games: list[dict]) -> list[dict]:
+    """Filter team game logs to only postseason-relevant teams."""
+    teams_set = get_postseason_teams()
+    filtered = [g for g in games if g.get("team_abbr") in teams_set]
+    print(f"  Postseason filter ({POSTSEASON_MODE}): {len(games)} → {len(filtered)} team game records ({len(teams_set)} teams)")
+    return filtered
+
+
 def main():
     """Main entry point."""
     start_time = datetime.now()
     print(f"=== NBA Data Refresh Started at {start_time.isoformat()} ===\n")
     print(f"Season: {get_season_string()}")
-    print(f"Season start: {get_season_start_date().strftime('%Y-%m-%d')}\n")
+    print(f"Season start: {get_season_start_date().strftime('%Y-%m-%d')}")
+    print(f"Postseason mode: {POSTSEASON_MODE} ({len(get_postseason_teams())} teams)\n")
     
     supabase = get_supabase_client()
     
@@ -828,6 +847,9 @@ def main():
     # Freshness check (warning only, doesn't abort)
     validate_data_freshness(player_games, "player")
     
+    # Filter to postseason-relevant teams only
+    player_games = filter_postseason_player_games(player_games)
+    
     upsert_data(supabase, "player_recent_games", player_games, ["player_id", "game_id"])
     
     print()
@@ -843,6 +865,9 @@ def main():
         print(f"WARNING: Only {len(team_games)} team games - unusually low")
     
     validate_data_freshness(team_games, "team")
+    
+    # Filter to postseason-relevant teams only
+    team_games = filter_postseason_team_games(team_games)
     
     upsert_data(supabase, "team_recent_games", team_games, ["team_id", "game_id"])
     

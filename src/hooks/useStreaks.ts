@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Streak, StreakFilters } from "@/types/streak";
 import { calculateBestBetsScore } from "@/types/streak";
 import { isNbaTeam } from "@/lib/nbaTeams";
+import { isPostseasonTeam } from "@/lib/postseasonTeams";
 
 // Minimum thresholds to hide spam (when advanced mode is OFF)
 const MIN_THRESHOLDS: Record<string, number> = {
@@ -83,7 +84,8 @@ export function useStreaks(filters: StreakFilters) {
       let streaks = data as Streak[];
 
       // Filter to NBA teams only (exclude G League)
-      streaks = streaks.filter((s) => isNbaTeam(s.team_abbr));
+      // Filter to NBA teams only (exclude G League), then postseason-relevant only
+      streaks = streaks.filter((s) => isNbaTeam(s.team_abbr) && isPostseasonTeam(s.team_abbr));
 
       // Apply threshold minimums unless advanced mode is on
       if (!filters.advanced) {
