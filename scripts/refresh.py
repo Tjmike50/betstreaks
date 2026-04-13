@@ -798,12 +798,29 @@ def trigger_scoring_engine(supabase: Client):
         print(f"WARNING: Scoring engine trigger failed (non-fatal): {e}")
 
 
+def filter_postseason_player_games(games: list[dict]) -> list[dict]:
+    """Filter player game logs to only postseason-relevant teams."""
+    teams_set = get_postseason_teams()
+    filtered = [g for g in games if g.get("team_abbr") in teams_set]
+    print(f"  Postseason filter ({POSTSEASON_MODE}): {len(games)} → {len(filtered)} player game records ({len(teams_set)} teams)")
+    return filtered
+
+
+def filter_postseason_team_games(games: list[dict]) -> list[dict]:
+    """Filter team game logs to only postseason-relevant teams."""
+    teams_set = get_postseason_teams()
+    filtered = [g for g in games if g.get("team_abbr") in teams_set]
+    print(f"  Postseason filter ({POSTSEASON_MODE}): {len(games)} → {len(filtered)} team game records ({len(teams_set)} teams)")
+    return filtered
+
+
 def main():
     """Main entry point."""
     start_time = datetime.now()
     print(f"=== NBA Data Refresh Started at {start_time.isoformat()} ===\n")
     print(f"Season: {get_season_string()}")
-    print(f"Season start: {get_season_start_date().strftime('%Y-%m-%d')}\n")
+    print(f"Season start: {get_season_start_date().strftime('%Y-%m-%d')}")
+    print(f"Postseason mode: {POSTSEASON_MODE} ({len(get_postseason_teams())} teams)\n")
     
     supabase = get_supabase_client()
     
