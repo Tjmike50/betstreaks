@@ -129,7 +129,7 @@ serve(async (req) => {
     const origin = req.headers.get("origin") || "https://betstreaks.lovable.app";
 
     // Create Stripe Checkout session
-    const session = await stripe.checkout.sessions.create({
+    const sessionParams: Record<string, unknown> = {
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "subscription",
@@ -139,7 +139,14 @@ serve(async (req) => {
       subscription_data: {
         metadata: { user_id: user.id },
       },
-    });
+    };
+
+    // Enable promotion codes when requested (e.g. Playoff Pass)
+    if (allowPromoCodes) {
+      sessionParams.allow_promotion_codes = true;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
 
     console.log("Created checkout session:", session.id);
 
