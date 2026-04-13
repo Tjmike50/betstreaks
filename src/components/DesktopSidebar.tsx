@@ -148,7 +148,7 @@ export function DesktopSidebar() {
             </button>
           ) : (
             <button
-              onClick={() => navigate("/premium")}
+              onClick={() => { handleNavClick(); navigate("/premium"); }}
               className="flex items-center justify-center p-2 rounded-md hover:bg-primary/10 transition-colors"
             >
               <Crown className="h-4 w-4 text-amber-400" />
