@@ -1,22 +1,19 @@
 
 
-## Add Google Analytics (gtag.js) to BetStreaks
+## Grant Premium to topguard71@gmail.com
 
-### What
-Add the Google Analytics 4 tag (G-TTQT66HVDJ) to `index.html`.
+### Found
+- **Email**: topguard71@gmail.com
+- **User ID**: `0ce73cbf-e772-4bc5-8ce5-8dd4d16b893d`
+- **Current status**: No `user_flags` record exists (not premium)
 
-### Changes
-**`index.html`** — Insert the gtag.js snippet into `<head>`, just before the closing `</head>` tag:
+### Action
+Insert a single row into `user_flags` using the Supabase insert tool:
 
-```html
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-TTQT66HVDJ"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-TTQT66HVDJ');
-</script>
+```sql
+INSERT INTO user_flags (user_id, is_premium, is_admin)
+VALUES ('0ce73cbf-e772-4bc5-8ce5-8dd4d16b893d', true, false);
 ```
 
-No other files need changes. This is a single-file, zero-risk addition.
+This grants immediate premium access. No code changes needed — the existing `usePremiumStatus` hook will pick it up on their next page load.
 
