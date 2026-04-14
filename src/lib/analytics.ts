@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 // Simple analytics tracking for conversion funnel
 // Events are stored in a Supabase table for privacy-friendly tracking
+// AND forwarded to an external Supabase project via the forward-event edge function
 
 export type AnalyticsEvent = 
   | "view_premium_page"
@@ -17,6 +18,20 @@ interface TrackEventOptions {
   metadata?: Record<string, unknown>;
 }
 
+async function forwardToExternal(
+  event: AnalyticsEvent,
+  userId: string | null,
+  metadata: Record<string, unknown> | null
+): Promise<void> {
+  try {
+    await supabase.functions.invoke("forward-event", {
+      body: { event_name: event, user_id: userId, metadata },
+    });
+  } catch {
+    // Silently fail — external forwarding should never impact UX
+  }
+}
+
 export async function trackEvent(
   event: AnalyticsEvent, 
   options: TrackEventOptions = {}
@@ -29,20 +44,23 @@ export async function trackEvent(
       userId = user?.id ?? null;
     }
 
-    // Insert event into analytics table
-    // Use type assertion since table was just created and types may not be synced
+    const meta = options.metadata ?? null;
+
+    // Insert into local analytics table
     const { error } = await (supabase as ReturnType<typeof supabase.from>)
       .from("analytics_events")
       .insert({
         event_name: event,
         user_id: userId,
-        metadata: options.metadata ?? null,
+        metadata: meta,
       });
 
     if (error) {
-      // Log but don't throw - analytics should never break the app
       console.warn("Analytics tracking failed:", error.message);
     }
+
+    // Also forward to external project (fire-and-forget)
+    forwardToExternal(event, userId ?? null, meta as Record<string, unknown> | null);
   } catch (err) {
     // Silently fail - analytics should never impact UX
     console.warn("Analytics tracking error:", err);
