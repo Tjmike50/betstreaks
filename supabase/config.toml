@@ -39,5 +39,8 @@ verify_jwt = false
 [functions.backfill-outcomes]
 verify_jwt = false
 
+[functions.forward-event]
+verify_jwt = false
+
 [functions.run-daily-pipeline]
 verify_jwt = false
