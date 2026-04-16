@@ -13,6 +13,7 @@ interface NormalizedOutcome {
   name: string;
   price: number;
   point?: number;
+  description?: string;
 }
 
 interface NormalizedOdds {
@@ -28,7 +29,7 @@ interface NormalizedOdds {
   fetchedAt: string;
 }
 
-// ===== PROVIDER ADAPTERS =====
+// ===== PROVIDER 1: The Odds API =====
 
 async function getOddsFromTheOddsApi(
   apiKey: string,
@@ -43,10 +44,8 @@ async function getOddsFromTheOddsApi(
 
   let url: string;
   if (eventId && market.startsWith("player_")) {
-    // Event-specific player props
     url = `${base}/sports/${sport}/events/${eventId}/odds?apiKey=${apiKey}&regions=us&markets=${market}&oddsFormat=american&bookmakers=${bookmakers}`;
   } else {
-    // Game-level odds
     url = `${base}/sports/${sport}/odds/?apiKey=${apiKey}&regions=us&markets=${market}&oddsFormat=american&bookmakers=${bookmakers}`;
   }
 
@@ -58,8 +57,6 @@ async function getOddsFromTheOddsApi(
 
   const raw = await res.json();
   const results: NormalizedOdds[] = [];
-
-  // Handle single-event response (has bookmakers directly) vs list
   const events = Array.isArray(raw) ? raw : [raw];
 
   for (const event of events) {
@@ -91,67 +88,159 @@ async function getOddsFromTheOddsApi(
   return results;
 }
 
+// ===== PROVIDER 2: Odds-API.io (V3) =====
+
+// Map our internal market keys to Odds-API.io market display names
+const ODDS_API_IO_MARKET_MAP: Record<string, string> = {
+  h2h: "ML",
+  spreads: "Spread",
+  totals: "Totals",
+  player_points: "Player Props",
+  player_rebounds: "Player Props",
+  player_assists: "Player Props",
+  player_threes: "Player Props",
+  player_blocks: "Player Props",
+  player_steals: "Player Props",
+};
+
+// Map bookmaker display names to slug keys
+function bmSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 async function getOddsFromOddsApiIo(
   apiKey: string,
   sport: string,
   market: string,
-  _eventId?: string,
+  eventId?: string,
   _bookmaker?: string,
 ): Promise<NormalizedOdds[]> {
-  // Odds-API.io uses a slightly different URL structure
-  // Map sport keys: basketball_nba -> nba
-  const sportMap: Record<string, string> = {
-    basketball_nba: "basketball/nba",
-  };
-  const mappedSport = sportMap[sport] || sport;
+  const baseUrl = "https://api.odds-api.io/v3";
   const now = new Date().toISOString();
-
-  // Odds-API.io endpoint format
-  const url = `https://api.odds-api.io/v1/odds?sport=${mappedSport}&market=${market}&apiKey=${apiKey}&format=american`;
-
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`odds-api-io ${res.status}: ${body}`);
-  }
-
-  const raw = await res.json();
   const results: NormalizedOdds[] = [];
 
-  // Normalize the response — adapt to actual Odds-API.io response shape
-  const events = raw.data || raw.events || (Array.isArray(raw) ? raw : []);
+  // Step 1: Get event IDs (unless one was provided)
+  let eventIds: number[] = [];
 
-  for (const event of events) {
-    const eventId = event.id || event.event_id || `${event.home_team}-${event.away_team}`;
-    const bookmakers = event.bookmakers || event.sportsbooks || [];
+  if (eventId) {
+    eventIds = [Number(eventId)];
+  } else {
+    const eventsUrl = `${baseUrl}/events?apiKey=${apiKey}&sport=basketball&league=usa-nba&status=pending`;
+    console.log(`[get-odds] Odds-API.io fetching events: ${eventsUrl.replace(apiKey, "***")}`);
+    const eventsRes = await fetch(eventsUrl);
+    if (!eventsRes.ok) {
+      const body = await eventsRes.text().catch(() => "");
+      throw new Error(`odds-api-io events ${eventsRes.status}: ${body}`);
+    }
+    const eventsData = await eventsRes.json();
+    const eventsList = Array.isArray(eventsData) ? eventsData : (eventsData.data || []);
+    eventIds = eventsList.map((e: any) => e.id).filter(Boolean);
+    console.log(`[get-odds] Odds-API.io found ${eventIds.length} pending events`);
+  }
 
-    for (const bm of bookmakers) {
-      const bmKey = bm.key || bm.name || "unknown";
-      const markets = bm.markets || [];
+  if (eventIds.length === 0) return results;
 
-      for (const mkt of markets) {
-        const mktKey = mkt.key || mkt.name || market;
-        const outcomes: NormalizedOutcome[] = (mkt.outcomes || []).map((o: any) => ({
-          name: o.name || o.label,
-          price: Number(o.price || o.odds),
-          ...(o.point != null ? { point: Number(o.point) } : {}),
-          ...(o.description ? { description: o.description } : {}),
-        }));
+  // Step 2: Fetch odds for each event (batch up to 10 concurrent)
+  const targetMarket = ODDS_API_IO_MARKET_MAP[market] || market;
+  const bookmakerFilter = "DraftKings,FanDuel,BetMGM";
 
-        results.push({
-          provider: "odds-api-io",
-          sportKey: sport,
-          eventId,
-          marketKey: mktKey,
-          bookmakerKey: bmKey,
-          homeTeam: event.home_team,
-          awayTeam: event.away_team,
-          commenceTime: event.commence_time || event.start_time || "",
-          outcomes,
-          fetchedAt: now,
-        });
+  const fetchOddsForEvent = async (eid: number) => {
+    const oddsUrl = `${baseUrl}/odds?apiKey=${apiKey}&eventId=${eid}&bookmakers=${encodeURIComponent(bookmakerFilter)}`;
+    const oddsRes = await fetch(oddsUrl);
+    if (!oddsRes.ok) {
+      console.warn(`[get-odds] Odds-API.io odds failed for event ${eid}: ${oddsRes.status}`);
+      return;
+    }
+    const eventData = await oddsRes.json();
+
+    const homeTeam = eventData.home || "";
+    const awayTeam = eventData.away || "";
+    const commenceTime = eventData.date || "";
+    const eventIdStr = String(eventData.id || eid);
+
+    // bookmakers is an object keyed by display name
+    const bookmakers = eventData.bookmakers || {};
+
+    for (const [bmName, markets] of Object.entries(bookmakers)) {
+      if (!Array.isArray(markets)) continue;
+
+      for (const mkt of markets as any[]) {
+        const mktName = mkt.name || "";
+        // Only process the market we're looking for
+        if (mktName !== targetMarket) continue;
+
+        const oddsEntries = mkt.odds || [];
+        const outcomes: NormalizedOutcome[] = [];
+
+        for (const odd of oddsEntries) {
+          if (targetMarket === "ML") {
+            // Moneyline: { home: "1.5", away: "2.3" }
+            if (odd.home != null) {
+              outcomes.push({ name: homeTeam, price: Number(odd.home) });
+            }
+            if (odd.away != null) {
+              outcomes.push({ name: awayTeam, price: Number(odd.away) });
+            }
+          } else if (targetMarket === "Spread") {
+            // Spread: { home: "-3.5", away: "3.5", hdp: -3.5 }
+            if (odd.home != null) {
+              outcomes.push({ name: homeTeam, price: Number(odd.home), point: Number(odd.hdp || 0) });
+            }
+            if (odd.away != null) {
+              outcomes.push({ name: awayTeam, price: Number(odd.away), point: -(Number(odd.hdp || 0)) });
+            }
+          } else if (targetMarket === "Totals") {
+            // Totals: { over: "1.9", under: "1.9", hdp: 220.5 }
+            if (odd.over != null) {
+              outcomes.push({ name: "Over", price: Number(odd.over), point: Number(odd.hdp || 0) });
+            }
+            if (odd.under != null) {
+              outcomes.push({ name: "Under", price: Number(odd.under), point: Number(odd.hdp || 0) });
+            }
+          } else if (targetMarket === "Player Props") {
+            // Player Props: { over: "-110", under: "-110", hdp: 24.5, label: "LeBron James" }
+            const playerName = odd.label || "Unknown";
+            if (odd.over != null) {
+              outcomes.push({
+                name: "Over",
+                price: Number(odd.over),
+                point: Number(odd.hdp || 0),
+                description: playerName,
+              });
+            }
+            if (odd.under != null) {
+              outcomes.push({
+                name: "Under",
+                price: Number(odd.under),
+                point: Number(odd.hdp || 0),
+                description: playerName,
+              });
+            }
+          }
+        }
+
+        if (outcomes.length > 0) {
+          results.push({
+            provider: "odds-api-io",
+            sportKey: sport,
+            eventId: eventIdStr,
+            marketKey: market, // Keep our internal key for consistency
+            bookmakerKey: bmSlug(bmName),
+            homeTeam,
+            awayTeam,
+            commenceTime,
+            outcomes,
+            fetchedAt: now,
+          });
+        }
       }
     }
+  };
+
+  // Fetch in batches of 10
+  for (let i = 0; i < eventIds.length; i += 10) {
+    const batch = eventIds.slice(i, i + 10);
+    await Promise.allSettled(batch.map(fetchOddsForEvent));
   }
 
   return results;
@@ -233,7 +322,6 @@ async function upsertCache(
     expires_at: expiresAt.toISOString(),
   }));
 
-  // Batch upsert in chunks of 100
   for (let i = 0; i < rows.length; i += 100) {
     const batch = rows.slice(i, i + 100);
     const { error } = await supabase
@@ -241,6 +329,14 @@ async function upsertCache(
       .upsert(batch, { onConflict: "sport_key,event_id,market_key,bookmaker_key" });
     if (error) console.error("Cache upsert error:", error);
   }
+}
+
+async function cleanupExpiredCache(supabase: any): Promise<void> {
+  const { error } = await supabase
+    .from("odds_cache")
+    .delete()
+    .lt("expires_at", new Date(Date.now() - 3600_000).toISOString());
+  if (error) console.error("Cache cleanup error:", error);
 }
 
 // ===== MAIN HANDLER =====
@@ -254,7 +350,8 @@ serve(async (req) => {
     const market = body.market || "h2h";
     const eventId = body.eventId || undefined;
     const bookmaker = body.bookmaker || undefined;
-    const ttl = body.ttl || (market.startsWith("player_") ? 120 : 300); // 2 min props, 5 min games
+    // Tightened TTLs: 90s for game-level, 45s for player props
+    const ttl = body.ttl || (market.startsWith("player_") ? 45 : 90);
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -314,8 +411,10 @@ serve(async (req) => {
 
     // Step 4: If we got fresh odds, cache them and return
     if (odds && odds.length > 0) {
-      // Cache in background
-      upsertCache(supabase, odds, ttl).catch((e) => console.error("[get-odds] Cache write error:", e));
+      // Cache + cleanup in background
+      upsertCache(supabase, odds, ttl)
+        .then(() => cleanupExpiredCache(supabase))
+        .catch((e) => console.error("[get-odds] Cache write/cleanup error:", e));
 
       return new Response(JSON.stringify({
         ok: true,
