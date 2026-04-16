@@ -1,89 +1,86 @@
 
 
-## Plan: Provider-Agnostic Odds System for BetStreaks
+## Plan: Fix Provider-Agnostic Odds System
 
-### What This Does
-Introduces a multi-provider odds architecture with caching, automatic failover, and a single backend endpoint for the frontend. The Odds API remains primary; Odds-API.io becomes the backup. A new `odds_cache` table stores normalized odds so repeated requests don't hit external APIs.
-
-### Current State
-- **No frontend code calls odds providers directly** — all odds fetching happens in two edge functions: `collect-line-snapshots` and `ai-bet-builder`
-- Both hardcode `api.the-odds-api.com/v4` URLs and the `ODDS_API_KEY` secret
-- No caching layer exists; every edge function invocation hits the Odds API
-
-### Architecture
-
-```text
-Frontend (hooks)
-  │
-  ▼
-get-odds Edge Function
-  │
-  ├─ Check odds_cache table (fresh? → return immediately)
-  │
-  ├─ Stale/missing → Primary adapter (The Odds API)
-  │     │ fail?
-  │     ▼
-  │   Backup adapter (Odds-API.io)
-  │     │ fail?
-  │     ▼
-  │   Return stale cache + is_stale flag
-  │
-  └─ Write fresh results → odds_cache
-```
+### Problem Summary
+The current `get-odds` implementation has a broken backup adapter (wrong endpoint, wrong response shape), potentially malformed URLs, overly generous TTLs, and no cache cleanup.
 
 ### Changes
 
-#### 1. Database Migration — `odds_cache` table
-Create table with columns: `id`, `sport_key`, `event_id`, `market_key`, `bookmaker_key`, `home_team`, `away_team`, `commence_time`, `odds_data` (jsonb), `provider`, `fetched_at`, `expires_at`, `created_at`, `updated_at`. Add indexes on `(sport_key, event_id, market_key, bookmaker_key)` and `expires_at`. Public SELECT RLS policy; service_role INSERT/UPDATE.
+#### 1. Fix `supabase/functions/get-odds/index.ts` — Complete rewrite of Odds-API.io adapter + TTL fix + cache cleanup
 
-#### 2. New Secret
-- `ODDS_API_IO_KEY` — API key for the backup provider (Odds-API.io)
+**A. Verify The Odds API URLs (lines 47, 50)**
+The URLs in the source file appear correct (`&regions=us`). The `®ions=us` the user saw was likely a rendering artifact. Will verify and ensure all query strings use proper `&` encoding.
 
-#### 3. New Edge Function: `get-odds`
-Single entry point for the frontend. Accepts `{ sport, eventId?, market, bookmaker?, ttl? }`.
+**B. Rewrite `getOddsFromOddsApiIo` (lines 94-158)**
+The current adapter is entirely wrong:
+- Uses nonexistent `/v1/odds?sport=...&market=...` endpoint
+- Assumes a response shape that doesn't match the real API
 
-Contains:
-- **Normalized types** (`NormalizedOdds`, `NormalizedOutcome`) — shared shape both adapters produce
-- **Primary adapter** — fetches from `api.the-odds-api.com/v4`, maps response to normalized format
-- **Backup adapter** — fetches from `api.odds-api.io`, maps response to same normalized format
-- **Cache logic** — check `odds_cache` first; if `expires_at > now()` return cached; otherwise fetch, upsert cache, return fresh
-- **Fallback chain** — primary → backup → stale cache → error
-- **Response metadata** — `provider`, `fetched_at`, `is_stale`, `fallback_used`
+Per the Odds-API.io OpenAPI spec:
+- **Step 1**: `GET /v3/events?apiKey=KEY&sport=basketball&league=usa-nba&status=pending` — returns an array of `SimpleEventDto` objects with `id`, `home`, `away`, `date`
+- **Step 2**: For each event (or specific eventId), `GET /v3/odds?apiKey=KEY&eventId=ID&bookmakers=DraftKings,FanDuel` — returns a single `EventResponse`
 
-Default TTLs: 5 minutes for game-list odds, 2 minutes for player props (configurable via `ttl` param).
+The `EventResponse` shape is:
+```text
+{
+  id: number,
+  home: string,
+  away: string,
+  date: string,
+  bookmakers: {
+    "DraftKings": [
+      { name: "ML", odds: [{ home: "1.5", away: "2.3" }], updatedAt: "..." },
+      { name: "Totals", odds: [{ over: "1.9", under: "1.9", hdp: 220.5 }], updatedAt: "..." },
+      { name: "Player Props", odds: [{ over: "-110", under: "-110", hdp: 24.5, label: "LeBron James" }] }
+    ]
+  }
+}
+```
 
-#### 4. Refactor `collect-line-snapshots`
-- Replace direct Odds API calls with internal calls to `get-odds` edge function (or import shared adapter code)
-- This ensures the pipeline also benefits from caching and failover
-- Falls back gracefully when both providers are down
+Key differences from The Odds API:
+- `bookmakers` is an **object** (keyed by name), not an array
+- Market names are display names ("ML", "Spread", "Totals", "Player Props"), not slugs
+- Odds fields are `home`/`away`/`over`/`under`/`hdp`/`label`, not `outcomes[]`
+- Bookmaker names use display format ("DraftKings" not "draftkings")
 
-#### 5. Refactor `ai-bet-builder`
-- Replace the ~60 lines of direct Odds API fetching (lines 634-741) with calls to the `get-odds` edge function
-- Remove `ODDS_API_BASE` constant and direct `fetch()` calls to the-odds-api.com
-- Parse the normalized response format instead of raw Odds API format
+The new adapter will:
+1. Map internal market keys to Odds-API.io equivalents
+2. If no `eventId` is provided, first fetch events from `/v3/events`
+3. Fetch odds via `/v3/odds` for each event
+4. Normalize the response into the shared `NormalizedOdds` format
 
-#### 6. Frontend Hook: `useOdds`
-Create `src/hooks/useOdds.ts` — a React Query hook that calls `get-odds` via `supabase.functions.invoke()`. Returns normalized odds with `isStale`, `fallbackUsed`, `provider` metadata. Used by any component that needs odds data.
+**C. Tighten TTL defaults (line 257)**
+- Change game-list default from 300s to 90s
+- Change player props default from 120s to 45s
 
-#### 7. Update `supabase/config.toml`
-Add `[functions.get-odds]` with `verify_jwt = false`.
+**D. Add cache cleanup** — After successful cache upsert, delete expired rows:
+```sql
+DELETE FROM odds_cache WHERE expires_at < now() - interval '1 hour'
+```
+This runs as a fire-and-forget cleanup after each fresh fetch, keeping the table lean.
 
-### Files Created/Modified
-| File | Action |
-|------|--------|
-| `supabase/migrations/xxx_create_odds_cache.sql` | New — table + indexes + RLS |
-| `supabase/functions/get-odds/index.ts` | New — cache + adapters + failover |
-| `supabase/functions/collect-line-snapshots/index.ts` | Modified — use get-odds internally |
-| `supabase/functions/ai-bet-builder/index.ts` | Modified — use get-odds internally |
-| `src/hooks/useOdds.ts` | New — frontend hook |
-| `src/types/odds.ts` | New — shared normalized types |
-| `supabase/config.toml` | Modified — add get-odds entry |
+#### 2. Update `src/hooks/useOdds.ts` — Match tightened TTLs
+- Change default `staleTime` and `refetchInterval` from 300s to 90s (lines 37-38)
 
-### Env Vars Needed
-- `ODDS_API_KEY` — already exists
-- `ODDS_API_IO_KEY` — **new**, user must provide
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — already exist
+#### 3. Update `src/types/odds.ts` — No changes needed
+The normalized types are correct as-is.
 
-### Extensibility
-Adding a new provider = writing one new adapter function that returns `NormalizedOdds[]`. No other code changes needed.
+#### 4. No changes to `collect-line-snapshots` or `ai-bet-builder`
+These already call `get-odds` internally and will automatically benefit from the fixed adapter and tighter TTLs.
+
+#### 5. Confirm no direct frontend provider calls
+Search confirmed: zero matches for `the-odds-api.com` or `odds-api.io` in `src/`. All frontend odds access goes through `supabase.functions.invoke("get-odds")`.
+
+### Files Changed
+
+| File | Lines Changed | What |
+|------|--------------|------|
+| `supabase/functions/get-odds/index.ts` | 94-158 (adapter rewrite), 257 (TTL), new cleanup function | Fix backup adapter, tighten TTLs, add cache cleanup |
+| `src/hooks/useOdds.ts` | 37-38 | Match tightened TTL defaults |
+
+### After Deployment
+- Deploy `get-odds` edge function
+- Test with `curl` against the edge function to verify both adapters return data
+- Test failover by temporarily removing `ODDS_API_KEY` and confirming backup kicks in
 
