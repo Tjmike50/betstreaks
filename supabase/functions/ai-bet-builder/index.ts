@@ -7,7 +7,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
+// Odds fetching now goes through the get-odds edge function for provider-agnostic access
 const AI_GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
 const STAT_LABELS: Record<string, string> = {
@@ -582,8 +582,7 @@ serve(async (req) => {
   };
 
   try {
-    const ODDS_API_KEY = Deno.env.get("ODDS_API_KEY");
-    if (!ODDS_API_KEY) throw new Error("ODDS_API_KEY not configured");
+    // Odds API keys are now managed by the get-odds edge function
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
@@ -631,16 +630,54 @@ serve(async (req) => {
     const includePlayerProps = !betType || betType === "player_props" || betType === "mixed";
     const includeGameLevel = !betType || betType === "moneyline" || betType === "spread" || betType === "totals" || betType === "mixed";
 
-    // ===== PHASE 1: FETCH LIVE ODDS (games + player props) =====
-    const BOOKMAKERS = "draftkings,fanduel,betmgm,pointsbetus";
-    const featuredUrl = `${ODDS_API_BASE}/sports/basketball_nba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
-    const featuredRes = await fetch(featuredUrl);
+    // ===== PHASE 1: FETCH LIVE ODDS VIA get-odds (provider-agnostic) =====
+    const fnBase = SUPABASE_URL.replace(/\/$/, "") + "/functions/v1";
+    const svcFetchHeaders = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+    };
+
+    // Fetch game-level odds
     let gamesData: any[] = [];
-    if (featuredRes.ok) {
-      gamesData = await featuredRes.json();
-    } else {
-      const errBody = await featuredRes.text().catch(() => "");
-      console.error(`[AI-Builder] Odds API error: ${featuredRes.status} — ${errBody}`);
+    let oddsProviderUsed = "none";
+    let oddsFallbackUsed = false;
+    try {
+      const gameOddsRes = await fetch(`${fnBase}/get-odds`, {
+        method: "POST",
+        headers: svcFetchHeaders,
+        body: JSON.stringify({ sport: "basketball_nba", market: "h2h,spreads,totals", ttl: 300 }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const gameOddsBody = await gameOddsRes.json();
+      oddsProviderUsed = gameOddsBody.meta?.provider || "unknown";
+      oddsFallbackUsed = gameOddsBody.meta?.fallbackUsed || false;
+
+      if (gameOddsBody.ok && gameOddsBody.data?.length > 0) {
+        // Reconstruct gamesData format from normalized odds
+        const eventMap = new Map<string, any>();
+        for (const entry of gameOddsBody.data) {
+          if (!eventMap.has(entry.eventId)) {
+            eventMap.set(entry.eventId, {
+              id: entry.eventId,
+              home_team: entry.homeTeam,
+              away_team: entry.awayTeam,
+              commence_time: entry.commenceTime,
+              bookmakers: [],
+            });
+          }
+          // Group by bookmaker for compatibility
+          const game = eventMap.get(entry.eventId);
+          let bm = game.bookmakers.find((b: any) => b.key === entry.bookmakerKey);
+          if (!bm) {
+            bm = { key: entry.bookmakerKey, markets: [] };
+            game.bookmakers.push(bm);
+          }
+          bm.markets.push({ key: entry.marketKey, outcomes: entry.outcomes });
+        }
+        gamesData = [...eventMap.values()];
+      }
+    } catch (e) {
+      console.error("[AI-Builder] get-odds game fetch error:", e);
     }
 
     // Build teams playing today
@@ -676,18 +713,15 @@ serve(async (req) => {
       console.log(`[AI-Builder] Game filter active — restricting to teams: ${[...gameFilterTeams].join(", ")}`);
     }
 
-    console.log(`[AI-Builder] Teams playing today: ${[...teamsPlayingToday].join(", ")} (${teamsPlayingToday.size} teams)`);
+    console.log(`[AI-Builder] Teams playing today: ${[...teamsPlayingToday].join(", ")} (${teamsPlayingToday.size} teams) [provider=${oddsProviderUsed}, fallback=${oddsFallbackUsed}]`);
 
-    // Fetch live player props from multiple sportsbooks
+    // Fetch live player props from get-odds
     let livePropsCount = 0;
     const lineSnapshotRows: any[] = [];
     const allLiveProps: { player_name: string; stat_type: string; threshold: number; over_odds: string | null; under_odds: string | null; sportsbook: string; game_home_abbr?: string; game_away_abbr?: string }[] = [];
-
-    // Map player names to their game's teams for team_abbr resolution
     const playerToGameTeams = new Map<string, { home: string; away: string }>();
 
     if (includePlayerProps) {
-      // Filter games to only selected ones if game filter is active
       const gamesToFetchProps = gameFilterTeams && gameFilterTeams.size > 0
         ? gamesData.filter((g: any) => {
             const homeAbbr = resolveToAbbr(g.home_team || "");
@@ -695,40 +729,48 @@ serve(async (req) => {
             return gameFilterTeams!.has(homeAbbr) || gameFilterTeams!.has(awayAbbr);
           })
         : gamesData;
-      console.log(`[AI-Builder] Fetching props from ${gamesToFetchProps.length} games${gameFilterTeams ? ` (filtered from ${gamesData.length})` : ""}`);
+      console.log(`[AI-Builder] Fetching props from ${gamesToFetchProps.length} games via get-odds`);
+
       for (const game of gamesToFetchProps.slice(0, 5)) {
         const gameHomeAbbr = resolveToAbbr(game.home_team || "");
         const gameAwayAbbr = resolveToAbbr(game.away_team || "");
         try {
-          const propsUrl = `${ODDS_API_BASE}/sports/basketball_nba/events/${game.id}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
-          const propsRes = await fetch(propsUrl);
-          if (propsRes.ok) {
-            const propsData = await propsRes.json();
-            for (const bm of propsData.bookmakers || []) {
-              for (const market of bm.markets || []) {
-                const statMap: Record<string, string> = {
-                  player_points: "Points", player_rebounds: "Rebounds",
-                  player_assists: "Assists", player_threes: "3-Pointers",
-                };
-                const statType = statMap[market.key];
-                if (!statType) continue;
-                const outcomesByPlayer: Record<string, { over?: string; under?: string; point?: number; player?: string }> = {};
-                for (const o of market.outcomes || []) {
-                  const key = `${o.description}_${o.point}`;
-                  if (!outcomesByPlayer[key]) outcomesByPlayer[key] = { player: o.description, point: o.point };
-                  if (o.name === "Over") outcomesByPlayer[key].over = String(o.price);
-                  if (o.name === "Under") outcomesByPlayer[key].under = String(o.price);
-                }
-                for (const entry of Object.values(outcomesByPlayer)) {
-                  if (entry.player && entry.point != null) {
-                    livePropsCount++;
-                    const row = { player_name: entry.player, stat_type: statType, threshold: entry.point, over_odds: entry.over || null, under_odds: entry.under || null, sportsbook: bm.key, game_date: todayStr, game_home_abbr: gameHomeAbbr, game_away_abbr: gameAwayAbbr };
-                    lineSnapshotRows.push(row);
-                    allLiveProps.push(row);
-                    // Track player -> game teams mapping
-                    if (entry.player && !playerToGameTeams.has(normName(entry.player))) {
-                      playerToGameTeams.set(normName(entry.player), { home: gameHomeAbbr, away: gameAwayAbbr });
-                    }
+          const propsRes = await fetch(`${fnBase}/get-odds`, {
+            method: "POST",
+            headers: svcFetchHeaders,
+            body: JSON.stringify({
+              sport: "basketball_nba",
+              market: "player_points,player_rebounds,player_assists,player_threes",
+              eventId: game.id,
+              ttl: 120,
+            }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          const propsBody = await propsRes.json();
+          if (propsBody.ok && propsBody.data?.length > 0) {
+            for (const entry of propsBody.data) {
+              const statMap: Record<string, string> = {
+                player_points: "Points", player_rebounds: "Rebounds",
+                player_assists: "Assists", player_threes: "3-Pointers",
+              };
+              const statType = statMap[entry.marketKey];
+              if (!statType) continue;
+              const outcomesByPlayer: Record<string, { over?: string; under?: string; point?: number; player?: string }> = {};
+              for (const o of entry.outcomes || []) {
+                const desc = (o as any).description || o.name;
+                const key = `${desc}_${o.point}`;
+                if (!outcomesByPlayer[key]) outcomesByPlayer[key] = { player: desc, point: o.point };
+                if (o.name === "Over") outcomesByPlayer[key].over = String(o.price);
+                if (o.name === "Under") outcomesByPlayer[key].under = String(o.price);
+              }
+              for (const prop of Object.values(outcomesByPlayer)) {
+                if (prop.player && prop.point != null) {
+                  livePropsCount++;
+                  const row = { player_name: prop.player, stat_type: statType, threshold: prop.point, over_odds: prop.over || null, under_odds: prop.under || null, sportsbook: entry.bookmakerKey, game_date: todayStr, game_home_abbr: gameHomeAbbr, game_away_abbr: gameAwayAbbr };
+                  lineSnapshotRows.push(row);
+                  allLiveProps.push(row);
+                  if (prop.player && !playerToGameTeams.has(normName(prop.player))) {
+                    playerToGameTeams.set(normName(prop.player), { home: gameHomeAbbr, away: gameAwayAbbr });
                   }
                 }
               }

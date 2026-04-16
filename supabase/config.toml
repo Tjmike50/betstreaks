@@ -39,6 +39,9 @@ verify_jwt = false
 [functions.backfill-outcomes]
 verify_jwt = false
 
+[functions.get-odds]
+verify_jwt = false
+
 [functions.forward-event]
 verify_jwt = false
 
