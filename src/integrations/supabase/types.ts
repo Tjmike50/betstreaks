@@ -477,6 +477,57 @@ export type Database = {
         }
         Relationships: []
       }
+      odds_cache: {
+        Row: {
+          away_team: string
+          bookmaker_key: string
+          commence_time: string | null
+          created_at: string
+          event_id: string
+          expires_at: string
+          fetched_at: string
+          home_team: string
+          id: string
+          market_key: string
+          odds_data: Json
+          provider: string
+          sport_key: string
+          updated_at: string
+        }
+        Insert: {
+          away_team: string
+          bookmaker_key?: string
+          commence_time?: string | null
+          created_at?: string
+          event_id: string
+          expires_at?: string
+          fetched_at?: string
+          home_team: string
+          id?: string
+          market_key: string
+          odds_data?: Json
+          provider?: string
+          sport_key: string
+          updated_at?: string
+        }
+        Update: {
+          away_team?: string
+          bookmaker_key?: string
+          commence_time?: string | null
+          created_at?: string
+          event_id?: string
+          expires_at?: string
+          fetched_at?: string
+          home_team?: string
+          id?: string
+          market_key?: string
+          odds_data?: Json
+          provider?: string
+          sport_key?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       pipeline_runs: {
         Row: {
           availability_records: number | null
