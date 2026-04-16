@@ -34,7 +34,7 @@ export function useOdds({
       return data as OddsResponse;
     },
     enabled,
-    staleTime: (ttl ?? 300) * 1000,
-    refetchInterval: (ttl ?? 300) * 1000,
+    staleTime: (ttl ?? 90) * 1000,
+    refetchInterval: (ttl ?? 90) * 1000,
   });
 }
