@@ -1,33 +1,20 @@
 
-The user wants to grant premium status to mykalaadams17@gmail.com. This requires:
-1. Looking up the user's UUID in auth.users (via a server-side query)
-2. Upserting a row into `user_flags` with `is_premium = true`
+User has a new Odds API key value (rotated). Need to update the `ODDS_API_KEY` runtime secret with the new value, then verify the failover chain works end-to-end.
 
-The `user_flags` table only has SELECT RLS for own rows — no public INSERT/UPDATE policy. I'll need to use the data insert tool which runs with elevated privileges.
+## Plan: Update Odds API Key & Verify
 
-This is a simple, single-step admin action. No code changes needed.
+### Step 1: Update the secret
+Replace the value of `ODDS_API_KEY` (already exists in the project) with your new key. I'll trigger the secret update prompt — paste the new key value when asked.
 
-## Plan: Grant Premium to mykalaadams17@gmail.com
+### Step 2: Verify end-to-end
+Once the new key is saved, I will:
+1. Call `get-odds` for `basketball_nba` / `h2h` → expect `provider: "the-odds-api"`, `fromCache: false`, non-empty `data`
+2. Call `get-odds` for `player_points` → confirm props work
+3. Call again immediately → confirm `fromCache: true` (cache hit)
+4. Read `odds_cache` table to confirm rows are landing
+5. Check `get-odds` edge function logs for any warnings
 
-### What
-Set `is_premium = true` in the `user_flags` table for the user with email `mykalaadams17@gmail.com`.
+### Step 3: Report
+Show actual response payloads (provider, count, sample outcome) so you see real data — not just metadata.
 
-### Steps
-1. Look up the user's UUID from `auth.users` by email
-2. Upsert a row into `public.user_flags` with `user_id = <that uuid>`, `is_premium = true`, preserving any existing `is_admin` value
-3. Confirm the change by reading back the row
-
-### SQL
-```sql
-INSERT INTO public.user_flags (user_id, is_premium, updated_at)
-SELECT id, true, now()
-FROM auth.users
-WHERE email = 'mykalaadams17@gmail.com'
-ON CONFLICT (user_id) DO UPDATE
-SET is_premium = true, updated_at = now();
-```
-
-### Notes
-- If the email doesn't exist in `auth.users`, the INSERT will affect 0 rows and I'll report back so you can confirm the account exists / was created
-- No code or schema changes — pure data update
-- The user will see premium features unlock on next page load (or after `refetch()` in `usePremiumStatus`)
+No code changes. Pure secret rotation + verification.
