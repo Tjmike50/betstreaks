@@ -65,8 +65,7 @@ export function useGamesToday() {
   };
 
   const debugInfo = {
-    startDate,
-    endDate,
+    date: todayStr,
     rawCount: data?.length ?? 0,
   };
 
