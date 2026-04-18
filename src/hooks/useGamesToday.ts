@@ -29,40 +29,26 @@ function getOffsetDateString(date: Date, offsetDays: number): string {
 }
 
 export function useGamesToday() {
-  const today = new Date();
-  const startDate = getOffsetDateString(today, -1); // yesterday
-  const endDate = getOffsetDateString(today, 1); // tomorrow
+  const todayStr = getLocalDateString(new Date());
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["games-today", startDate, endDate],
+    queryKey: ["games-today", todayStr],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("games_today")
         .select("*")
         .eq("sport", "NBA")
-        .gte("game_date", startDate)
-        .lte("game_date", endDate)
+        .eq("game_date", todayStr)
         .order("game_time", { ascending: true, nullsFirst: false })
         .order("id", { ascending: true });
 
       if (error) throw error;
-      
+
       // Filter out placeholder games with null team abbreviations (All-Star break, etc.)
-      // Also filter out completed games from yesterday
-      const todayStr = getLocalDateString(new Date());
-      const validGames = (data as GameToday[]).filter((game) => {
-        if (!game.home_team_abbr || !game.away_team_abbr) return false;
-        // Keep all of today's and tomorrow's games
-        if (game.game_date >= todayStr) return true;
-        // Yesterday's games: use time-based cutoff
-        const currentHour = new Date().getHours();
-        // After 6 AM, hide all yesterday's games regardless of status
-        if (currentHour >= 6) return false;
-        // Before 6 AM, only show genuinely in-progress games
-        const status = (game.status || "").toLowerCase();
-        return status.includes("qtr") || status.includes("half") || status.includes("ot");
-      });
-      
+      const validGames = (data as GameToday[]).filter(
+        (game) => game.home_team_abbr && game.away_team_abbr
+      );
+
       return validGames;
     },
     staleTime: 1000 * 60 * 2, // 2 minutes
@@ -79,8 +65,7 @@ export function useGamesToday() {
   };
 
   const debugInfo = {
-    startDate,
-    endDate,
+    date: todayStr,
     rawCount: data?.length ?? 0,
   };
 
