@@ -113,7 +113,7 @@ export default function TodayPage() {
               <div className="mt-4 p-3 bg-muted/50 rounded-lg text-xs font-mono text-left w-full max-w-sm">
                 <p className="font-semibold mb-1">Debug Info</p>
                 <p>Records: {games.length} (raw: {debugInfo.rawCount})</p>
-                <p>Date range: {debugInfo.startDate} to {debugInfo.endDate}</p>
+                <p>Date: {debugInfo.date}</p>
                 <p>Last updated: {lastUpdated?.toISOString() || "N/A"}</p>
               </div>
             )}
@@ -138,7 +138,7 @@ export default function TodayPage() {
               <div className="mt-4 p-3 bg-muted/50 rounded-lg text-xs font-mono">
                 <p className="font-semibold mb-1">Debug Info</p>
                 <p>Records: {games.length} (raw: {debugInfo.rawCount})</p>
-                <p>Date range: {debugInfo.startDate} to {debugInfo.endDate}</p>
+                <p>Date: {debugInfo.date}</p>
                 <p>Last updated: {lastUpdated?.toISOString() || "N/A"}</p>
               </div>
             )}
