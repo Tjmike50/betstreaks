@@ -566,8 +566,8 @@ Deno.serve(async (req) => {
     const avgConfidence =
       legs.reduce((sum, l) => sum + (l.confidence_score ?? 0), 0) / legs.length;
     const riskLabel = RISK_LABEL(avgConfidence);
-    const slipName = buildSlipName(sport, gameDate);
-    const reasoning = buildReasoning(legs, avgConfidence);
+    const deterministicSlipName = buildSlipName(sport, gameDate);
+    const deterministicReasoning = buildReasoning(legs, avgConfidence);
 
     // Enrich with DraftKings odds (fail-soft: missing snapshot → null)
     const { enriched, estimatedOdds } = await enrichLegsWithOdds(
@@ -578,6 +578,23 @@ Deno.serve(async (req) => {
     const oddsHitCount = enriched.filter((l) => l.odds != null).length;
     console.log(
       `[generate-daily-pick] Odds enrichment: ${oddsHitCount}/${enriched.length} legs matched · estimated_odds=${estimatedOdds ?? "null"}`,
+    );
+
+    // AI prose layer — fail-soft, falls back to deterministic strings
+    const proseStart = Date.now();
+    const prose = await generateProse(
+      sport,
+      enriched,
+      riskLabel,
+      avgConfidence,
+      estimatedOdds,
+      gameDate,
+    );
+    const proseSource: "ai" | "deterministic" = prose ? "ai" : "deterministic";
+    const slipName = prose?.slip_name ?? deterministicSlipName;
+    const reasoning = prose?.reasoning ?? deterministicReasoning;
+    console.log(
+      `[generate-daily-pick] Prose source: ${proseSource} (${Date.now() - proseStart}ms)`,
     );
 
     // Insert pick
