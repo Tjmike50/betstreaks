@@ -20,12 +20,12 @@ import { GameMatchupHeader } from "@/components/builder/GameMatchupHeader";
 import { MarketDepthSummary } from "@/components/builder/MarketDepthSummary";
 import { LegMarketBadges, getLegMarketBorderClass } from "@/components/builder/LegMarketBadges";
 
-const QUICK_PROMPTS = [
+const buildQuickPrompts = (sportLabel: string) => [
   { label: "🔥 High hit rate plays", prompt: "Build me a parlay with the highest hit-rate props tonight" },
   { label: "📈 Hot streaks right now", prompt: "Find players on hot streaks and build a slip" },
   { label: "🎯 Safe slips", prompt: "Make me a safer 2-leg parlay with consistent players" },
   { label: "💰 Undervalued props", prompt: "Find undervalued player props with good value scores" },
-  { label: "🏀 Tonight's best", prompt: "Build me a +200 NBA parlay for tonight" },
+  { label: "🏀 Tonight's best", prompt: `Build me a +200 ${sportLabel} parlay for tonight` },
   { label: "⚡ Aggressive +500", prompt: "5-leg aggressive parlay +500" },
 ];
 
@@ -413,7 +413,8 @@ function BuilderLoadingState() {
 }
 
 export default function AIBetBuilderPage() {
-  const { sport } = useSport();
+  const { sport, config: sportConfig } = useSport();
+  const QUICK_PROMPTS = buildQuickPrompts(sportConfig.shortName);
   const [prompt, setPrompt] = useState("");
   const [hasInteracted, setHasInteracted] = useState(false);
   const [filters, setFilters] = useState<BuilderFilters>({
@@ -458,7 +459,7 @@ export default function AIBetBuilderPage() {
             <span className="text-sm font-semibold text-primary">AI Bet Builder</span>
           </div>
           <h1 className="text-2xl font-bold leading-tight">
-            Find high-probability NBA betting trends using AI + real data
+            Find high-probability {sportConfig.shortName} betting trends using AI + real data
           </h1>
           <p className="text-sm text-muted-foreground">
             No guessing. Just stats, hit rates, and streaks.
@@ -506,7 +507,7 @@ export default function AIBetBuilderPage() {
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g., Build me a +200 NBA parlay for tonight..."
+            placeholder={`e.g., Build me a +200 ${sportConfig.shortName} parlay for tonight...`}
             className="min-h-[80px] resize-none"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
