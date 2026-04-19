@@ -158,14 +158,14 @@ serve(async (req) => {
     for (const game of gamesData) {
       const commence = new Date(game.commence_time);
       const gameDate = commence.toISOString().split("T")[0];
-      const homeAbbr = NBA_TEAM_ABBRS[game.home_team] || null;
-      const awayAbbr = NBA_TEAM_ABBRS[game.away_team] || null;
+      const homeAbbr = cfg.teamMap[game.home_team] || null;
+      const awayAbbr = cfg.teamMap[game.away_team] || null;
       const gameTime = commence.toLocaleTimeString("en-US", {
         hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/New_York",
       });
       gamesTodayRows.push({
         id: game.id,
-        sport: "NBA",
+        sport,
         game_date: gameDate,
         home_team_abbr: homeAbbr,
         away_team_abbr: awayAbbr,
@@ -221,7 +221,7 @@ serve(async (req) => {
           method: "POST",
           headers: svcHeaders,
           body: JSON.stringify({
-            sport: "basketball_nba",
+            sport: cfg.oddsApiSport,
             market: propMarkets,
             eventId: game.id,
             ttl: 120,
