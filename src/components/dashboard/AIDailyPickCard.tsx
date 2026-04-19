@@ -107,7 +107,7 @@ export function AIDailyPickCard() {
                   <span className="text-foreground truncate">
                     <span className="font-medium">{leg.player_name}</span>{" "}
                     <span className="text-muted-foreground">
-                      {leg.pick} {leg.line} {leg.stat_type}
+                      {leg.pick} {leg.line} {formatStat(leg.stat_type)}
                     </span>
                   </span>
                   {leg.odds && (
