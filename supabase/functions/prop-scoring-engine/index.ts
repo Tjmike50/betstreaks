@@ -1241,7 +1241,7 @@ serve(async (req) => {
         if (m.away_team) teamMatchups[m.away_team] = { opponent: m.home_team || "", homeAway: "away" };
       }
     } else {
-      const { data: games } = await supabase.from("games_today").select("*").eq("game_date", today);
+      const { data: games } = await supabase.from("games_today").select("*").eq("game_date", today).eq("sport", sport);
       if (games) {
         for (const g of games) {
           if (g.home_team_abbr) teamMatchups[g.home_team_abbr] = { opponent: g.away_team_abbr || "", homeAway: "home" };
