@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { AISlip } from "@/types/aiSlip";
 import type { BuilderFilters } from "@/types/builderFilters";
 import { toast } from "@/hooks/use-toast";
+import { useSport } from "@/contexts/SportContext";
 
 export interface MarketDepthData {
   verified_prop_candidates: number;
@@ -50,6 +51,7 @@ export function useAIBetBuilder() {
   const [errorType, setErrorType] = useState<ErrorType | null>(null);
   const [marketDepth, setMarketDepth] = useState<MarketDepthData | null>(null);
   const [isFallback, setIsFallback] = useState(false);
+  const { sport } = useSport();
 
   const buildSlips = async (prompt: string, slipCount = 1, filters?: BuilderFilters) => {
     setIsLoading(true);
@@ -59,9 +61,12 @@ export function useAIBetBuilder() {
     setMarketDepth(null);
     setIsFallback(false);
 
+    // Always send the active sport so the edge function tags rows + filters odds correctly.
+    const effectiveSport = filters?.sport ?? sport;
+
     try {
       const { data, error: fnError } = await supabase.functions.invoke("ai-bet-builder", {
-        body: { prompt, slipCount, filters: filters || null },
+        body: { prompt, slipCount, filters: filters || null, sport: effectiveSport },
       });
 
       if (fnError) {
