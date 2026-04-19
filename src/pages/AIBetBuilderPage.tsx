@@ -412,10 +412,12 @@ function BuilderLoadingState() {
 }
 
 export default function AIBetBuilderPage() {
+  const { sport } = useSport();
   const [prompt, setPrompt] = useState("");
   const [hasInteracted, setHasInteracted] = useState(false);
   const [filters, setFilters] = useState<BuilderFilters>({
     ...DEFAULT_BUILDER_FILTERS,
+    sport,
   });
   const { slips, isLoading, error, errorType, buildSlips, marketDepth, isFallback } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
@@ -423,12 +425,17 @@ export default function AIBetBuilderPage() {
   const navigate = useNavigate();
   const activeFilterCount = getActiveBuilderFilterCount(filters);
 
+  // Keep filters.sport in sync with the global sport switcher
+  useEffect(() => {
+    setFilters((f) => (f.sport === sport ? f : { ...f, sport }));
+  }, [sport]);
+
   const handleSubmit = (overridePrompt?: string) => {
     const p = (overridePrompt ?? prompt).trim();
     if (!p) return;
     setHasInteracted(true);
     const slipCount = isPremium ? filters.slipCount : 1;
-    buildSlips(p, slipCount, filters);
+    buildSlips(p, slipCount, { ...filters, sport });
   };
 
   const handleButtonSubmit = () => handleSubmit();
