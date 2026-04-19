@@ -301,7 +301,7 @@ serve(async (req) => {
 
     // 5. Update refresh_status
     await supabase.from("refresh_status").upsert(
-      { id: 3, sport: "NBA_LINES", last_run: new Date().toISOString() },
+      { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
       { onConflict: "id" }
     );
 
@@ -322,32 +322,32 @@ serve(async (req) => {
 
     if (allGameDates.has(todayET) && gamesProcessed > 0) {
       try {
-        console.log("Pipeline: triggering refresh-availability...");
+        console.log(`[${sport}] Pipeline: triggering refresh-availability...`);
         const availRes = await fetch(`${fnBase}/refresh-availability`, {
           method: "POST", headers: svcHeaders,
-          body: JSON.stringify({ game_date: todayET }),
+          body: JSON.stringify({ game_date: todayET, sport }),
           signal: AbortSignal.timeout(45_000),
         });
         const availBody = await availRes.json();
         pipelineResults.availability = { ok: availBody.ok, records: availBody.records };
-        console.log(`Pipeline: availability done — ${availBody.records} records`);
+        console.log(`[${sport}] Pipeline: availability done — ${availBody.records} records`);
       } catch (e) {
-        console.error("Pipeline: availability failed:", e);
+        console.error(`[${sport}] Pipeline: availability failed:`, e);
         pipelineResults.availability = { ok: false, error: String(e) };
       }
 
       try {
-        console.log("Pipeline: triggering prop-scoring-engine...");
+        console.log(`[${sport}] Pipeline: triggering prop-scoring-engine...`);
         const scoreRes = await fetch(`${fnBase}/prop-scoring-engine`, {
           method: "POST", headers: svcHeaders,
-          body: JSON.stringify({ score_all_market_players: true }),
+          body: JSON.stringify({ score_all_market_players: true, sport }),
           signal: AbortSignal.timeout(45_000),
         });
         const scoreBody = await scoreRes.json();
         pipelineResults.scoring = { ok: true, scored_count: scoreBody.scored_count };
-        console.log(`Pipeline: scoring done — ${scoreBody.scored_count} props scored`);
+        console.log(`[${sport}] Pipeline: scoring done — ${scoreBody.scored_count} props scored`);
       } catch (e) {
-        console.error("Pipeline: scoring failed:", e);
+        console.error(`[${sport}] Pipeline: scoring failed:`, e);
         pipelineResults.scoring = { ok: false, error: String(e) };
       }
     } else {
