@@ -31,6 +31,7 @@ import AdminEvalPage from "./pages/AdminEvalPage";
 import CheatsheetsHubPage from "./pages/CheatsheetsHubPage";
 import ResearchHubPage from "./pages/ResearchHubPage";
 import ResearchGamesPage from "./pages/research/ResearchGamesPage";
+import ResearchPlayersPage from "./pages/research/ResearchPlayersPage";
 import ValueCheatsheetPage from "./pages/cheatsheets/ValueCheatsheetPage";
 import StreakCheatsheetPage from "./pages/cheatsheets/StreakCheatsheetPage";
 import MatchupCheatsheetPage from "./pages/cheatsheets/MatchupCheatsheetPage";
