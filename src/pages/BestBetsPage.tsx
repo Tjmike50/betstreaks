@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { StreakCard } from "@/components/StreakCard";
 import { Footer } from "@/components/Footer";
 import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { useWatchlist } from "@/hooks/useWatchlist";
+import { useBestBets, type BestBetsFilters } from "@/hooks/useBestBets";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -14,20 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronUp, Trophy } from "lucide-react";
 import type { Streak } from "@/types/streak";
-import { calculateBestBetsScore } from "@/types/streak";
-import { isNbaTeam } from "@/lib/nbaTeams";
 
 const STORAGE_KEY = "betstreaks-bestbets-filters";
 
-interface BestBetsFilters {
-  minStreak: number;
-  minL10Pct: number;
-  maxDaysAgo: number;
-  showPlayers: boolean;
-  showTeams: boolean;
-}
+type LocalFilters = Omit<BestBetsFilters, "limit">;
 
-const DEFAULT_FILTERS: BestBetsFilters = {
+const DEFAULT_FILTERS: LocalFilters = {
   minStreak: 3,
   minL10Pct: 60,
   maxDaysAgo: 5,
@@ -35,7 +26,7 @@ const DEFAULT_FILTERS: BestBetsFilters = {
   showTeams: true,
 };
 
-function loadFilters(): BestBetsFilters {
+function loadFilters(): LocalFilters {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -47,7 +38,7 @@ function loadFilters(): BestBetsFilters {
   return DEFAULT_FILTERS;
 }
 
-function saveFilters(filters: BestBetsFilters) {
+function saveFilters(filters: LocalFilters) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(filters));
   } catch (e) {
@@ -55,15 +46,9 @@ function saveFilters(filters: BestBetsFilters) {
   }
 }
 
-function getDaysAgoDate(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().split("T")[0];
-}
-
 export default function BestBetsPage() {
   const navigate = useNavigate();
-  const [filters, setFilters] = useState<BestBetsFilters>(loadFilters);
+  const [filters, setFilters] = useState<LocalFilters>(loadFilters);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
   const { isStarred, toggleWatchlist } = useWatchlist();
@@ -72,6 +57,9 @@ export default function BestBetsPage() {
   useEffect(() => {
     saveFilters(filters);
   }, [filters]);
+
+  // Shared sport-aware best-bets query (limit 50 preserved from previous behavior)
+  const { data: streaks, isLoading, error } = useBestBets({ ...filters, limit: 50 });
 
   // Fetch all streaks and filter/sort client-side
   const { data: streaks, isLoading, error } = useQuery({
