@@ -13,22 +13,39 @@ interface StepResult {
   [key: string]: unknown;
 }
 
+type SportKey = "NBA" | "WNBA";
+
+// Mirrors src/lib/sports/registry.ts seasonState — flip when WNBA goes in-season.
+// Order matters: NBA runs first so its behavior remains deterministic.
+const PIPELINE_SPORTS: { sport: SportKey; seasonState: "preseason" | "regular" | "postseason" | "offseason" }[] = [
+  { sport: "NBA", seasonState: "postseason" },
+  { sport: "WNBA", seasonState: "offseason" },
+];
+
 /**
  * Daily BetStreaks refresh pipeline orchestrator.
  *
- * Runs three steps in sequence:
- *   A) collect-line-snapshots  (lines + games_today)
- *   B) refresh-availability    (player status for the slate)
- *   C) prop-scoring-engine     (full-market scoring)
+ * Phase 2 — multi-sport: loops over PIPELINE_SPORTS and runs the same three steps
+ * per sport. Each step accepts {sport} and short-circuits on offseason.
  *
- * Safe to invoke multiple times per day — each downstream function
- * handles its own deduplication / upsert logic.
+ *   A) collect-line-snapshots  (lines + games_today) per sport
+ *   B) refresh-availability    (player status for the slate) per sport
+ *   C) prop-scoring-engine     (full-market scoring) per sport
+ *
+ * NBA path is unchanged when sport==='NBA' (default everywhere downstream).
+ * WNBA short-circuits cleanly while seasonState='offseason'.
  */
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // Allow caller to override sport list (e.g. {"sports":["NBA"]}) for ad-hoc runs.
+  const overrideBody = await req.json().catch(() => ({}));
+  const overrideSports: SportKey[] | null = Array.isArray(overrideBody?.sports) && overrideBody.sports.length > 0
+    ? overrideBody.sports.filter((s: unknown): s is SportKey => s === "NBA" || s === "WNBA")
+    : null;
+
   const pipelineStart = Date.now();
-  const errors: string[] = [];
+  const allErrors: string[] = [];
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -38,149 +55,187 @@ serve(async (req) => {
     "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
   };
 
-  const results: Record<string, StepResult> = {};
+  const perSportResults: Record<string, Record<string, StepResult>> = {};
+  const allGameDates = new Set<string>();
 
-  // ── Step A: Collect line snapshots (also upserts games_today) ──
-  console.log("Pipeline Step A: collect-line-snapshots...");
-  const stepAStart = Date.now();
-  let gameDates: string[] = [];
+  const sportsToRun = overrideSports
+    ? PIPELINE_SPORTS.filter(s => overrideSports.includes(s.sport))
+    : PIPELINE_SPORTS;
 
-  try {
-    const res = await fetch(`${fnBase}/collect-line-snapshots`, {
-      method: "POST",
-      headers: svcHeaders,
-      body: JSON.stringify({}),
-      signal: AbortSignal.timeout(90_000),
-    });
-    const body = await res.json();
+  for (const { sport, seasonState } of sportsToRun) {
+    console.log(`\n=== Pipeline starting for ${sport} (seasonState=${seasonState}) ===`);
+    const results: Record<string, StepResult> = {};
+    perSportResults[sport] = results;
 
-    if (!res.ok || body.ok === false) {
-      throw new Error(body.error || `HTTP ${res.status}`);
+    if (seasonState === "offseason") {
+      console.log(`[${sport}] Skipping all steps — offseason.`);
+      results.line_collection = { status: "skipped", duration_ms: 0, reason: "offseason" };
+      results.availability_refresh = { status: "skipped", duration_ms: 0, reason: "offseason" };
+      results.scoring = { status: "skipped", duration_ms: 0, reason: "offseason" };
+      continue;
     }
 
-    gameDates = body.game_dates || [];
+    // ── Step A: Collect line snapshots (also upserts games_today) ──
+    console.log(`[${sport}] Step A: collect-line-snapshots...`);
+    const stepAStart = Date.now();
+    let gameDates: string[] = [];
 
-    results.line_collection = {
-      status: "success",
-      duration_ms: Date.now() - stepAStart,
-      game_dates: gameDates,
-      games_processed: body.games_processed,
-      new_snapshots: body.new_snapshots,
-      skipped_dupes: body.skipped_dupes,
-      total_across_dates: body.total_across_dates,
-      // Note: collect-line-snapshots already chains availability + scoring internally,
-      // but we run them explicitly below for visibility and independent error handling.
-    };
-    console.log(`Step A done: ${body.new_snapshots} new snapshots, ${body.games_processed} games`);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    errors.push(`line_collection: ${msg}`);
-    results.line_collection = { status: "failed", duration_ms: Date.now() - stepAStart, error: msg };
-    console.error("Step A failed:", msg);
+    try {
+      const res = await fetch(`${fnBase}/collect-line-snapshots`, {
+        method: "POST",
+        headers: svcHeaders,
+        body: JSON.stringify({ sport }),
+        signal: AbortSignal.timeout(90_000),
+      });
+      const body = await res.json();
 
-    // Line collection is critical — abort pipeline
-    return new Response(JSON.stringify({
-      success: false,
-      results,
-      total_duration_ms: Date.now() - pipelineStart,
-      errors,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
-  }
+      if (!res.ok || body.ok === false) {
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
 
-  // Determine today's ET date for downstream calls
-  const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  const activeDates = gameDates.length > 0 ? gameDates : [todayET];
+      gameDates = body.game_dates || [];
+      gameDates.forEach(d => allGameDates.add(d));
 
-  // ── Step B: Refresh availability ──
-  console.log("Pipeline Step B: refresh-availability...");
-  const stepBStart = Date.now();
+      results.line_collection = {
+        status: "success",
+        duration_ms: Date.now() - stepAStart,
+        game_dates: gameDates,
+        games_processed: body.games_processed,
+        new_snapshots: body.new_snapshots,
+        skipped_dupes: body.skipped_dupes,
+        total_across_dates: body.total_across_dates,
+      };
+      console.log(`[${sport}] Step A done: ${body.new_snapshots ?? 0} new snapshots, ${body.games_processed ?? 0} games`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      allErrors.push(`${sport}.line_collection: ${msg}`);
+      results.line_collection = { status: "failed", duration_ms: Date.now() - stepAStart, error: msg };
+      console.error(`[${sport}] Step A failed:`, msg);
+      // Line collection is critical for THIS sport — skip downstream for this sport only.
+      continue;
+    }
 
-  try {
-    const res = await fetch(`${fnBase}/refresh-availability`, {
-      method: "POST",
-      headers: svcHeaders,
-      body: JSON.stringify({ game_date: todayET }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    const body = await res.json();
+    const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
-    results.availability_refresh = {
-      status: "success",
-      duration_ms: Date.now() - stepBStart,
-      records: body.records,
-      status_breakdown: body.status_breakdown,
-    };
-    console.log(`Step B done: ${body.records} players`);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    errors.push(`availability_refresh: ${msg}`);
-    results.availability_refresh = { status: "failed", duration_ms: Date.now() - stepBStart, error: msg };
-    console.error("Step B failed (non-fatal):", msg);
-    // Availability is non-critical — continue to scoring
-  }
+    // ── Step B: Refresh availability ──
+    console.log(`[${sport}] Step B: refresh-availability...`);
+    const stepBStart = Date.now();
 
-  // ── Step C: Prop scoring engine ──
-  console.log("Pipeline Step C: prop-scoring-engine...");
-  const stepCStart = Date.now();
+    try {
+      const res = await fetch(`${fnBase}/refresh-availability`, {
+        method: "POST",
+        headers: svcHeaders,
+        body: JSON.stringify({ game_date: todayET, sport }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const body = await res.json();
 
-  try {
-    const res = await fetch(`${fnBase}/prop-scoring-engine`, {
-      method: "POST",
-      headers: svcHeaders,
-      body: JSON.stringify({ score_all_market_players: true }),
-      signal: AbortSignal.timeout(90_000),
-    });
-    const body = await res.json();
+      results.availability_refresh = {
+        status: "success",
+        duration_ms: Date.now() - stepBStart,
+        records: body.records,
+        status_breakdown: body.status_breakdown,
+      };
+      console.log(`[${sport}] Step B done: ${body.records ?? 0} players`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      allErrors.push(`${sport}.availability_refresh: ${msg}`);
+      results.availability_refresh = { status: "failed", duration_ms: Date.now() - stepBStart, error: msg };
+      console.error(`[${sport}] Step B failed (non-fatal):`, msg);
+    }
 
-    results.scoring = {
-      status: "success",
-      duration_ms: Date.now() - stepCStart,
-      players_analyzed: body.players_analyzed,
-      scored_count: body.scored_count,
-      scoring_source: body.scoring_source || "market-first",
-    };
-    console.log(`Step C done: ${body.scored_count} props scored`);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    errors.push(`scoring: ${msg}`);
-    results.scoring = { status: "failed", duration_ms: Date.now() - stepCStart, error: msg };
-    console.error("Step C failed:", msg);
+    // ── Step C: Prop scoring engine ──
+    console.log(`[${sport}] Step C: prop-scoring-engine...`);
+    const stepCStart = Date.now();
+
+    try {
+      const res = await fetch(`${fnBase}/prop-scoring-engine`, {
+        method: "POST",
+        headers: svcHeaders,
+        body: JSON.stringify({ score_all_market_players: true, sport }),
+        signal: AbortSignal.timeout(90_000),
+      });
+      const body = await res.json();
+
+      results.scoring = {
+        status: "success",
+        duration_ms: Date.now() - stepCStart,
+        players_analyzed: body.players_analyzed,
+        scored_count: body.scored_count,
+        scoring_source: body.scoring_source || "market-first",
+      };
+      console.log(`[${sport}] Step C done: ${body.scored_count ?? 0} props scored`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      allErrors.push(`${sport}.scoring: ${msg}`);
+      results.scoring = { status: "failed", duration_ms: Date.now() - stepCStart, error: msg };
+      console.error(`[${sport}] Step C failed:`, msg);
+    }
+
+    console.log(`=== Pipeline complete for ${sport} ===`);
   }
 
   // ── Final summary ──
-  const allSuccess = Object.values(results).every((r) => r.status === "success");
+  // "success" = every NON-skipped step succeeded across every sport.
+  const allRanSteps = Object.values(perSportResults).flatMap(r => Object.values(r)).filter(r => r.status !== "skipped");
+  const allSuccess = allRanSteps.length > 0 && allRanSteps.every(r => r.status === "success");
+
   const summary = {
     success: allSuccess,
-    game_dates: activeDates,
-    results,
+    sports: Object.keys(perSportResults),
+    game_dates: [...allGameDates].sort(),
+    results: perSportResults,
     total_duration_ms: Date.now() - pipelineStart,
-    errors,
+    errors: allErrors,
     ran_at: new Date().toISOString(),
   };
 
   console.log("Pipeline complete:", JSON.stringify(summary));
 
-  // Update refresh_status id=4 + write pipeline_runs history
+  // Update refresh_status id=4 + write pipeline_runs history.
+  // The history row aggregates across sports for backward compatibility with
+  // /admin dashboards that read this table; per-sport detail lives in `results`.
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     await supabase.from("refresh_status").upsert(
-      { id: 4, sport: "NBA_PIPELINE", last_run: new Date().toISOString() },
+      { id: 4, sport: "PIPELINE", last_run: new Date().toISOString() },
       { onConflict: "id" }
     );
+
+    const aggregate = (key: keyof StepResult) =>
+      Object.values(perSportResults).reduce((acc, r) => {
+        for (const step of Object.values(r)) {
+          const v = step[key as string];
+          if (typeof v === "number") acc += v;
+        }
+        return acc;
+      }, 0);
+
+    const firstStatus = (step: string): string | null => {
+      // Prefer NBA status for backward compatibility, fall back to first non-null.
+      const nba = perSportResults.NBA?.[step]?.status;
+      if (nba) return nba;
+      for (const r of Object.values(perSportResults)) {
+        if (r[step]?.status) return r[step].status;
+      }
+      return null;
+    };
+
     await supabase.from("pipeline_runs").insert({
       ran_at: new Date().toISOString(),
       success: allSuccess,
       total_duration_ms: Date.now() - pipelineStart,
-      line_status: results.line_collection?.status || null,
-      line_new_snapshots: results.line_collection?.new_snapshots as number || 0,
-      line_games_processed: results.line_collection?.games_processed as number || 0,
-      availability_status: results.availability_refresh?.status || null,
-      availability_records: results.availability_refresh?.records as number || 0,
-      scoring_status: results.scoring?.status || null,
-      scoring_scored_count: results.scoring?.scored_count as number || 0,
-      scoring_source: (results.scoring?.scoring_source as string) || null,
-      errors,
-      game_dates: activeDates,
+      line_status: firstStatus("line_collection"),
+      line_new_snapshots: aggregate("new_snapshots"),
+      line_games_processed: aggregate("games_processed"),
+      availability_status: firstStatus("availability_refresh"),
+      availability_records: aggregate("records"),
+      scoring_status: firstStatus("scoring"),
+      scoring_scored_count: aggregate("scored_count"),
+      scoring_source:
+        (perSportResults.NBA?.scoring?.scoring_source as string | undefined) || null,
+      errors: allErrors,
+      game_dates: [...allGameDates].sort(),
     });
   } catch (_) { /* non-critical */ }
 
