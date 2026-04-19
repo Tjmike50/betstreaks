@@ -62,6 +62,11 @@ export default {
           blue: "hsl(var(--streak-blue))",
           gold: "hsl(var(--streak-gold))",
         },
+        success: "hsl(var(--success))",
+        warning: "hsl(var(--warning))",
+        danger: "hsl(var(--danger))",
+        info: "hsl(var(--info))",
+        "accent-orange": "hsl(var(--accent-orange))",
       },
       borderRadius: {
         lg: "var(--radius)",
