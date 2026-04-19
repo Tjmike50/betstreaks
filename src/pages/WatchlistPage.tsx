@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { Star, Trash2, Cloud, LogIn, BellRing, Loader2 } from "lucide-react";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSport } from "@/contexts/SportContext";
 import { PremiumBadge } from "@/components/PremiumBadge";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
 import type { Streak } from "@/types/streak";
@@ -45,6 +46,7 @@ export default function WatchlistPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoading: isAuthLoading, email } = useAuth();
+  const { sport } = useSport();
   const userId = user?.id ?? null;
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
@@ -58,24 +60,24 @@ export default function WatchlistPage() {
     removeOfflineKey
   } = useWatchlist();
 
-  // Optimized: Fetch watchlist items and all NBA streaks in parallel, then match client-side
+  // Optimized: Fetch watchlist items and all streaks for the active sport in parallel, then match client-side
   const { data: watchlistData, isLoading, error } = useQuery({
-    queryKey: ["watchlist-optimized", userId],
+    queryKey: ["watchlist-optimized", userId, sport],
     queryFn: async (): Promise<WatchlistData> => {
       if (!userId) return { activeItems: [], inactiveItems: [] };
 
-      // Fetch watchlist items and all NBA streaks in parallel
+      // Fetch watchlist items and all streaks for this sport in parallel
       const [watchlistResult, streaksResult] = await Promise.all([
         supabase
           .from("watchlist_items")
           .select("*")
           .eq("user_id", userId)
-          .eq("sport", "NBA")
+          .eq("sport", sport)
           .order("created_at", { ascending: false }),
         supabase
           .from("streaks")
           .select("*")
-          .eq("sport", "NBA")
+          .eq("sport", sport)
       ]);
 
       if (watchlistResult.error) throw watchlistResult.error;
@@ -115,15 +117,15 @@ export default function WatchlistPage() {
 
   // Optimized: Fetch offline watchlist streaks with batch query
   const { data: offlineData } = useQuery({
-    queryKey: ["offline-watchlist-optimized", offlineKeys],
+    queryKey: ["offline-watchlist-optimized", sport, offlineKeys],
     queryFn: async (): Promise<WatchlistData> => {
       if (userId || offlineKeys.length === 0) return { activeItems: [], inactiveItems: [] };
 
-      // Fetch all NBA streaks in one query
+      // Fetch all streaks for this sport in one query
       const { data: allStreaks } = await supabase
         .from("streaks")
         .select("*")
-        .eq("sport", "NBA");
+        .eq("sport", sport);
 
       const streakMap = new Map<string, Streak>();
       for (const streak of (allStreaks || []) as Streak[]) {
@@ -139,7 +141,7 @@ export default function WatchlistPage() {
         const item: WatchlistItem = {
           id: key,
           user_id: "",
-          sport: "NBA",
+          sport,
           entity_type,
           player_id: Number(player_id),
           team_abbr: null,

@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useSport } from "@/contexts/SportContext";
 import { STALE_THRESHOLD_HOURS, CURRENT_SEASON, isDataStale, getHoursSinceUpdate } from "@/lib/dataFreshness";
+import type { SportKey } from "@/lib/sports/registry";
 
 interface RefreshStatus {
   id: number;
@@ -17,6 +19,7 @@ interface RefreshStatusResult {
   error: Error | null;
   refetch: () => void;
   season: string;
+  sport: SportKey;
 }
 
 function formatRelativeTime(date: Date): string {
@@ -26,13 +29,9 @@ function formatRelativeTime(date: Date): string {
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
-  } else if (diffHours < 24) {
-    return `${diffHours}h ago`;
-  } else {
-    return `${diffDays}d ago`;
-  }
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
 }
 
 function formatDateTime(date: Date): string {
@@ -45,33 +44,35 @@ function formatDateTime(date: Date): string {
   });
 }
 
-export function useRefreshStatus(): RefreshStatusResult {
+export function useRefreshStatus(sportOverride?: SportKey): RefreshStatusResult {
   const queryClient = useQueryClient();
+  const { sport: activeSport } = useSport();
+  const sport = sportOverride ?? activeSport;
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["refresh-status", "NBA"],
+    queryKey: ["refresh-status", sport],
     queryFn: async (): Promise<RefreshStatus | null> => {
+      // Match the most recent refresh row for this sport.
       const { data, error } = await supabase
         .from("refresh_status")
         .select("*")
-        .eq("id", 1)
-        .eq("sport", "NBA")
+        .eq("sport", sport)
+        .order("last_run", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) throw error;
       return data;
     },
-    staleTime: 5 * 60 * 1000, // Consider fresh for 5 minutes
-    gcTime: 30 * 60 * 1000, // Keep in cache for 30 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 
   const lastRun = data?.last_run ? new Date(data.last_run) : null;
-  
   const hoursSinceUpdate = getHoursSinceUpdate(lastRun);
   const isStale = isDataStale(lastRun, STALE_THRESHOLD_HOURS);
-  
-  let formattedTime = "Update status unavailable";
 
+  let formattedTime = "Update status unavailable";
   if (lastRun) {
     if (isStale) {
       formattedTime = `${formatDateTime(lastRun)} (${formatRelativeTime(lastRun)})`;
@@ -82,7 +83,6 @@ export function useRefreshStatus(): RefreshStatusResult {
 
   const handleRefetch = () => {
     refetch();
-    // Also invalidate streaks queries to refresh data
     queryClient.invalidateQueries({ queryKey: ["streaks"] });
     queryClient.invalidateQueries({ queryKey: ["streak-events"] });
     queryClient.invalidateQueries({ queryKey: ["watchlist-optimized"] });
@@ -97,5 +97,6 @@ export function useRefreshStatus(): RefreshStatusResult {
     error: error as Error | null,
     refetch: handleRefetch,
     season: CURRENT_SEASON,
+    sport,
   };
 }

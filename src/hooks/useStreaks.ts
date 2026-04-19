@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Streak, StreakFilters } from "@/types/streak";
 import { calculateBestBetsScore } from "@/types/streak";
-import { isNbaTeam } from "@/lib/nbaTeams";
-import { isPostseasonTeam } from "@/lib/postseasonTeams";
+import { useSport } from "@/contexts/SportContext";
+import { isLeagueTeam, isInScopeTeam } from "@/lib/sports/leagueTeams";
+import type { SportKey } from "@/lib/sports/registry";
 
 // Minimum thresholds to hide spam (when advanced mode is OFF)
 const MIN_THRESHOLDS: Record<string, number> = {
@@ -28,7 +29,6 @@ function deduplicateStreaks(streaks: Streak[]): Streak[] {
       continue;
     }
 
-    // Compare: highest streak_len, then highest threshold, then highest season_win_pct
     if (
       streak.streak_len > existing.streak_len ||
       (streak.streak_len === existing.streak_len &&
@@ -44,22 +44,25 @@ function deduplicateStreaks(streaks: Streak[]): Streak[] {
   return Array.from(bestByPlayerStat.values());
 }
 
-// Filter out low thresholds based on stat type
 function filterByMinThreshold(streaks: Streak[]): Streak[] {
   return streaks.filter((streak) => {
     const minThreshold = MIN_THRESHOLDS[streak.stat];
-    if (minThreshold === undefined) return true; // Unknown stat, keep it
+    if (minThreshold === undefined) return true;
     return streak.threshold >= minThreshold;
   });
 }
 
-export function useStreaks(filters: StreakFilters) {
+export function useStreaks(filters: StreakFilters, sportOverride?: SportKey) {
+  const { sport: activeSport } = useSport();
+  const sport = sportOverride ?? activeSport;
+
   return useQuery({
-    queryKey: ["streaks", filters],
+    queryKey: ["streaks", sport, filters],
     queryFn: async () => {
       let query = supabase
         .from("streaks")
         .select("*")
+        .eq("sport", sport)
         .eq("entity_type", filters.entityType)
         .gte("streak_len", filters.minStreak)
         .gte("season_win_pct", filters.minSeasonWinPct)
@@ -72,7 +75,6 @@ export function useStreaks(filters: StreakFilters) {
       }
 
       if (filters.playerSearch.trim()) {
-        // For teams, search by team_abbr; for players, search by player_name
         const searchField = filters.entityType === "team" ? "team_abbr" : "player_name";
         query = query.ilike(searchField, `%${filters.playerSearch.trim()}%`);
       }
@@ -83,19 +85,19 @@ export function useStreaks(filters: StreakFilters) {
 
       let streaks = data as Streak[];
 
-      // Filter to NBA teams only (exclude G League)
-      // Filter to NBA teams only (exclude G League), then postseason-relevant only
-      streaks = streaks.filter((s) => isNbaTeam(s.team_abbr) && isPostseasonTeam(s.team_abbr));
+      // Sport-aware team filter:
+      // - NBA: keep only valid NBA teams that are postseason-relevant
+      // - WNBA: keep only valid WNBA teams
+      streaks = streaks.filter((s) =>
+        isLeagueTeam(sport, s.team_abbr) && isInScopeTeam(sport, s.team_abbr)
+      );
 
-      // Apply threshold minimums unless advanced mode is on
       if (!filters.advanced) {
         streaks = filterByMinThreshold(streaks);
       }
 
-      // De-duplicate: show only best card per player+stat
       streaks = deduplicateStreaks(streaks);
 
-      // Apply Best Bets filter: streak >= 3 AND (season >= 55% OR L10 >= 60%)
       if (filters.bestBets) {
         streaks = streaks.filter(
           (s) =>
@@ -104,7 +106,6 @@ export function useStreaks(filters: StreakFilters) {
         );
       }
 
-      // Apply threshold range filter (client-side)
       if (filters.thresholdMin !== null) {
         streaks = streaks.filter((s) => s.threshold >= filters.thresholdMin!);
       }
@@ -112,12 +113,10 @@ export function useStreaks(filters: StreakFilters) {
         streaks = streaks.filter((s) => s.threshold <= filters.thresholdMax!);
       }
 
-      // Apply team filter (client-side)
       if (filters.teamFilter && filters.teamFilter !== "All") {
         streaks = streaks.filter((s) => s.team_abbr === filters.teamFilter);
       }
 
-      // Apply recent only filter (last 3 days)
       if (filters.recentOnly) {
         const threeDaysAgo = new Date();
         threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
@@ -125,7 +124,6 @@ export function useStreaks(filters: StreakFilters) {
         streaks = streaks.filter((s) => s.last_game >= threeDaysAgoStr);
       }
 
-      // Sort based on selected option
       streaks.sort((a, b) => {
         switch (filters.sortBy) {
           case "season":

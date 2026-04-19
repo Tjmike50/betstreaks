@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSport } from "@/contexts/SportContext";
 import { toast } from "@/hooks/use-toast";
 import { SavedSlipCard } from "@/components/saved-slips/SavedSlipCard";
 import type { AISlip } from "@/types/aiSlip";
@@ -13,6 +14,7 @@ type SortMode = "newest" | "oldest" | "risk";
 
 export default function SavedSlipsPage() {
   const { user } = useAuth();
+  const { sport } = useSport();
   const navigate = useNavigate();
   const [slips, setSlips] = useState<AISlip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -25,7 +27,7 @@ export default function SavedSlipsPage() {
       return;
     }
     loadSavedSlips();
-  }, [user]);
+  }, [user, sport]);
 
   const loadSavedSlips = async () => {
     if (!user) return;
@@ -37,6 +39,7 @@ export default function SavedSlipsPage() {
         .from("saved_slips")
         .select("slip_id")
         .eq("user_id", user.id)
+        .eq("sport", sport)
         .order("created_at", { ascending: false });
 
       if (savedErr) throw savedErr;
