@@ -1148,23 +1148,25 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines, score_all_market_players } = body;
+    const sport: "NBA" | "WNBA" = body?.sport === "WNBA" ? "WNBA" : "NBA";
 
     // market_lines: optional array of {player_name, stat_type, threshold} from live market
     // When provided, we use market thresholds per player instead of defaults
     // Build market thresholds from provided market_lines or auto-fetch from line_snapshots
     let effectiveMarketLines = market_lines;
-    
+
     const today = game_date || new Date().toISOString().split("T")[0];
+    console.log(`[${sport}] prop-scoring-engine starting for ${today}`);
 
     // Auto-fetch all market lines from line_snapshots for full coverage
     // Filter out stale lines for teams not playing today
     if (score_all_market_players && !effectiveMarketLines) {
-      // First get today's playing teams to filter stale lines
+      // First get today's playing teams to filter stale lines (sport-scoped)
       const { data: todayGames } = await supabase
         .from("games_today")
         .select("home_team_abbr, away_team_abbr")
         .eq("game_date", today)
-        .eq("sport", "NBA");
+        .eq("sport", sport);
       const playingTeams = new Set<string>();
       if (todayGames) {
         for (const g of todayGames) {
@@ -1172,7 +1174,7 @@ serve(async (req) => {
           if (g.away_team_abbr) playingTeams.add(g.away_team_abbr);
         }
       }
-      console.log(`Today's playing teams (${playingTeams.size}): ${[...playingTeams].join(", ")}`);
+      console.log(`[${sport}] Today's playing teams (${playingTeams.size}): ${[...playingTeams].join(", ")}`);
 
       // Paginate to get all line_snapshots (default limit is 1000)
       let allLsRows: any[] = [];
@@ -1612,6 +1614,7 @@ serve(async (req) => {
     if (propsToCache.length > 0) {
       const rows = propsToCache.map((p) => ({
         game_date: today,
+        sport,
         player_id: p.player_id,
         player_name: p.player_name,
         team_abbr: p.team_abbr,
