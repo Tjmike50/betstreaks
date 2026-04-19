@@ -73,8 +73,9 @@ const App = () => (
             </div>
             <BottomNav />
           </SidebarProvider>
-        </BrowserRouter>
-      </TooltipProvider>
+          </BrowserRouter>
+        </TooltipProvider>
+      </SportProvider>
     </AuthProvider>
   </QueryClientProvider>
 );
