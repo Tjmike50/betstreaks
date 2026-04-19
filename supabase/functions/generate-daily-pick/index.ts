@@ -508,6 +508,8 @@ Deno.serve(async (req) => {
             leg_count: legs.length,
             risk_label: riskLabel,
             avg_confidence: Number(avgConfidence.toFixed(1)),
+            estimated_odds: estimatedOdds,
+            odds_hit_count: oddsHitCount,
           },
         });
       } catch (auditErr) {
@@ -529,6 +531,8 @@ Deno.serve(async (req) => {
         risk_label: riskLabel,
         leg_count: legs.length,
         avg_confidence: Number(avgConfidence.toFixed(1)),
+        estimated_odds: estimatedOdds,
+        odds_hit_count: oddsHitCount,
         duration_ms: Date.now() - startTime,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
