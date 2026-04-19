@@ -249,6 +249,137 @@ function buildReasoning(legs: PropScoreRow[], avgConfidence: number): string {
   )}). Mix of ${stats}. Based on recent form, matchup history, and value vs market. Not financial advice — please bet responsibly.`;
 }
 
+// =============================================================================
+// AI prose layer (Lovable AI Gateway, fail-soft)
+// Only rewrites slip_name + reasoning. Picks/odds/risk stay deterministic.
+// =============================================================================
+const AI_GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const AI_MODEL = "google/gemini-3-flash-preview";
+const AI_TIMEOUT_MS = 8000;
+
+async function generateProse(
+  sport: string,
+  legs: EnrichedLeg[],
+  riskLabel: string,
+  avgConfidence: number,
+  estimatedOdds: string | null,
+  gameDate: string,
+): Promise<{ slip_name: string; reasoning: string } | null> {
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) {
+    console.warn("[generate-daily-pick] LOVABLE_API_KEY missing — skipping AI prose");
+    return null;
+  }
+
+  const legSummaries = legs.map((l, i) => {
+    const recent = l.last10_avg ?? l.season_avg ?? 0;
+    return `Leg ${i + 1}: ${l.player_name} (${l.team_abbr ?? "?"} vs ${l.opponent_abbr ?? "?"}) — ${l.side} ${l.threshold} ${statLabel(l.stat_type)}${l.odds ? ` @ ${l.odds}` : ""}. Confidence ${(l.confidence_score ?? 0).toFixed(0)}, Value ${(l.value_score ?? 0).toFixed(0)}, recent avg ${recent.toFixed(1)}.`;
+  }).join("\n");
+
+  const systemPrompt = `You are a sports analyst writing concise, neutral copy for ${sport} player-prop parlays. Rules:
+- Never use the words "guaranteed", "lock", "sure thing", "free money", or similar certainty language.
+- Sound analytical, not hype-y.
+- No emojis, no markdown.
+- Reference real factors: recent form, matchup, value vs market.
+- Keep reasoning to 1-2 sentences (max ~30 words).
+- Slip name: 3-6 words, punchy, references a player or theme. No date in the name.`;
+
+  const userPrompt = `Sport: ${sport}
+Date: ${gameDate}
+Risk profile: ${riskLabel} (avg confidence ${avgConfidence.toFixed(0)})
+Estimated parlay odds: ${estimatedOdds ?? "not available"}
+
+Legs:
+${legSummaries}
+
+Write a short slip_name and a 1-2 sentence reasoning explaining why these legs were chosen.`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(AI_GATEWAY_URL, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "format_daily_pick",
+              description: "Return a slip name and reasoning for a daily pick.",
+              parameters: {
+                type: "object",
+                properties: {
+                  slip_name: {
+                    type: "string",
+                    description: "3-6 word punchy headline for the parlay.",
+                  },
+                  reasoning: {
+                    type: "string",
+                    description: "1-2 sentence neutral analyst summary, max ~30 words.",
+                  },
+                },
+                required: ["slip_name", "reasoning"],
+                additionalProperties: false,
+              },
+            },
+          },
+        ],
+        tool_choice: { type: "function", function: { name: "format_daily_pick" } },
+      }),
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.warn(
+        `[generate-daily-pick] AI prose failed [${response.status}]: ${body.slice(0, 300)}`,
+      );
+      return null;
+    }
+
+    const data = await response.json();
+    const toolCall = data?.choices?.[0]?.message?.tool_calls?.[0];
+    const argsStr = toolCall?.function?.arguments;
+    if (!argsStr) {
+      console.warn("[generate-daily-pick] AI prose returned no tool_call arguments");
+      return null;
+    }
+    const parsed = JSON.parse(argsStr);
+    const slip_name = typeof parsed?.slip_name === "string" ? parsed.slip_name.trim() : "";
+    const reasoning = typeof parsed?.reasoning === "string" ? parsed.reasoning.trim() : "";
+    if (!slip_name || !reasoning) {
+      console.warn("[generate-daily-pick] AI prose returned empty fields");
+      return null;
+    }
+
+    // Compliance guard — strip if forbidden terms slipped through
+    const forbidden = /\b(guaranteed|guarantee|lock|sure thing|free money)\b/i;
+    if (forbidden.test(slip_name) || forbidden.test(reasoning)) {
+      console.warn("[generate-daily-pick] AI prose tripped compliance guard, falling back");
+      return null;
+    }
+
+    return { slip_name, reasoning };
+  } catch (err) {
+    clearTimeout(timeout);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[generate-daily-pick] AI prose exception: ${msg}`);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
