@@ -7,6 +7,8 @@ import { NavLink } from "@/components/NavLink";
 import { useAdmin } from "@/hooks/useAdmin";
 import { useAlerts } from "@/hooks/useAlerts";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { useSport } from "@/contexts/SportContext";
+import { SportSwitcher } from "@/components/SportSwitcher";
 import {
   Sidebar,
   SidebarContent,
@@ -45,6 +47,7 @@ export function DesktopSidebar() {
   const { isAdmin } = useAdmin();
   const { newAlertCount } = useAlerts();
   const { isPremium } = usePremiumStatus();
+  const { config: sportConfig } = useSport();
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
@@ -57,14 +60,21 @@ export function DesktopSidebar() {
     <Sidebar collapsible="icon" className="border-r border-border/50">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
-          <span className="text-xl">🔥</span>
+          <span className="text-xl" aria-hidden>🔥</span>
           {!collapsed && (
-            <div>
+            <div className="min-w-0 flex-1">
               <h1 className="text-lg font-bold text-foreground leading-tight">BetStreaks</h1>
-              <p className="text-[10px] font-medium text-primary uppercase tracking-wider">NBA Playoffs</p>
+              <p className="text-[10px] font-medium text-primary uppercase tracking-wider truncate">
+                {sportConfig.tagline}
+              </p>
             </div>
           )}
         </div>
+        {!collapsed && (
+          <div className="mt-3">
+            <SportSwitcher variant="full" className="w-full justify-between" />
+          </div>
+        )}
       </SidebarHeader>
 
       <SidebarContent>
