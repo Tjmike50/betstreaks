@@ -195,7 +195,7 @@ export default function PremiumPage() {
           </button>
           <div>
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Crown className="h-6 w-6 text-yellow-500" />
+              <Crown className="h-6 w-6 text-premium" />
               Premium
             </h1>
           </div>
@@ -237,8 +237,8 @@ export default function PremiumPage() {
           <Card className="bg-card border-border">
             <CardContent className="p-6 space-y-6">
               <div className="text-center space-y-3">
-                <div className="w-16 h-16 mx-auto rounded-full bg-yellow-500/20 flex items-center justify-center">
-                  <Sparkles className="h-8 w-8 text-yellow-500" />
+                <div className="w-16 h-16 mx-auto rounded-full bg-premium/20 flex items-center justify-center">
+                  <Sparkles className="h-8 w-8 text-premium" />
                 </div>
                 <h2 className="text-xl font-bold text-foreground">
                   You're a Premium Member!
@@ -251,8 +251,8 @@ export default function PremiumPage() {
               <div className="space-y-3">
                 {PREMIUM_FEATURES.map((feature, index) => (
                   <div key={index} className="flex items-center gap-3">
-                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center">
-                      <Check className="h-3 w-3 text-green-500" />
+                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-success/20 flex items-center justify-center">
+                      <Check className="h-3 w-3 text-success" />
                     </div>
                     <span className="text-sm text-foreground">{feature}</span>
                   </div>
