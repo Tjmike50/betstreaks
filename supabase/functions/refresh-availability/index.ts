@@ -106,15 +106,16 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const today = body.game_date || new Date().toISOString().split("T")[0];
+    const sport: "NBA" | "WNBA" = body.sport === "WNBA" ? "WNBA" : "NBA";
 
-    console.log(`Refreshing availability for ${today}...`);
+    console.log(`[${sport}] Refreshing availability for ${today}...`);
 
-    // 1. Get today's games to know which teams are playing
+    // 1. Get today's games to know which teams are playing (sport-scoped)
     const { data: games } = await supabase
       .from("games_today")
       .select("home_team_abbr, away_team_abbr")
       .eq("game_date", today)
-      .eq("sport", "NBA");
+      .eq("sport", sport);
 
     const teamsPlaying = new Set<string>();
     for (const g of games || []) {
@@ -123,9 +124,9 @@ serve(async (req) => {
     }
 
     if (teamsPlaying.size === 0) {
-      console.log("No NBA games today — skipping availability refresh.");
+      console.log(`[${sport}] No games today — skipping availability refresh.`);
       return new Response(
-        JSON.stringify({ ok: true, message: "No games today", records: 0 }),
+        JSON.stringify({ ok: true, sport, message: "No games today", records: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -205,10 +206,16 @@ serve(async (req) => {
       }
     }
 
-    // 6. Update refresh_status for availability tracking (id=2 for availability)
+    // 6. Update refresh_status for availability tracking
+    // (id=2 for NBA, id=12 for WNBA — keeps history separable per sport)
     await supabase
       .from("refresh_status")
-      .upsert({ id: 2, sport: "NBA_AVAIL", last_run: new Date().toISOString() }, { onConflict: "id" });
+      .upsert(
+        sport === "WNBA"
+          ? { id: 12, sport: "WNBA_AVAIL", last_run: new Date().toISOString() }
+          : { id: 2, sport: "NBA_AVAIL", last_run: new Date().toISOString() },
+        { onConflict: "id" }
+      );
 
     // Build coverage report
     const teamsWithData = Object.keys(teamCoverage);
