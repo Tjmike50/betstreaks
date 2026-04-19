@@ -20,6 +20,41 @@ const NBA_TEAM_ABBRS: Record<string, string> = {
   "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
 };
 
+// WNBA team abbreviations as returned by The Odds API "home_team" / "away_team" strings.
+const WNBA_TEAM_ABBRS: Record<string, string> = {
+  "Atlanta Dream": "ATL", "Chicago Sky": "CHI", "Connecticut Sun": "CON",
+  "Dallas Wings": "DAL", "Golden State Valkyries": "GSV", "Indiana Fever": "IND",
+  "Las Vegas Aces": "LVA", "Los Angeles Sparks": "LA", "Minnesota Lynx": "MIN",
+  "New York Liberty": "NYL", "Phoenix Mercury": "PHX", "Seattle Storm": "SEA",
+  "Washington Mystics": "WAS",
+};
+
+// Phase 1 sport registry (mirrors src/lib/sports/registry.ts).
+// When WNBA goes in-season, flip seasonState below to enable ingestion.
+type SportKey = "NBA" | "WNBA";
+const SPORT_CONFIG: Record<SportKey, {
+  oddsApiSport: string;
+  teamMap: Record<string, string>;
+  refreshStatusId: number;
+  refreshStatusLabel: string;
+  seasonState: "preseason" | "regular" | "postseason" | "offseason";
+}> = {
+  NBA: {
+    oddsApiSport: "basketball_nba",
+    teamMap: NBA_TEAM_ABBRS,
+    refreshStatusId: 3,
+    refreshStatusLabel: "NBA_LINES",
+    seasonState: "postseason",
+  },
+  WNBA: {
+    oddsApiSport: "basketball_wnba",
+    teamMap: WNBA_TEAM_ABBRS,
+    refreshStatusId: 13,
+    refreshStatusLabel: "WNBA_LINES",
+    seasonState: "offseason",
+  },
+};
+
 const STAT_MAP: Record<string, string> = {
   player_points: "Points",
   player_rebounds: "Rebounds",
@@ -48,16 +83,35 @@ serve(async (req) => {
       "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
     };
 
-    const todayStr = new Date().toISOString().split("T")[0];
-    console.log(`Collecting line snapshots for ${todayStr}...`);
+    // Sport selection (default NBA for backward compatibility).
+    const reqBody = await req.json().catch(() => ({}));
+    const rawSport = (reqBody?.sport ?? "NBA") as string;
+    const sport: SportKey = rawSport === "WNBA" ? "WNBA" : "NBA";
+    const cfg = SPORT_CONFIG[sport];
 
-    // 1. Fetch today's NBA games via get-odds (game-level h2h)
+    // Offseason short-circuit (saves Odds API quota).
+    if (cfg.seasonState === "offseason") {
+      console.log(`[${sport}] seasonState=offseason — skipping line collection.`);
+      await supabase.from("refresh_status").upsert(
+        { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
+        { onConflict: "id" }
+      );
+      return new Response(
+        JSON.stringify({ ok: true, sport, skipped: "offseason", new_snapshots: 0, games_processed: 0 }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    console.log(`[${sport}] Collecting line snapshots for ${todayStr}...`);
+
+    // 1. Fetch today's games via get-odds (game-level h2h)
     let gamesOddsResponse: any;
     try {
       const res = await fetch(`${fnBase}/get-odds`, {
         method: "POST",
         headers: svcHeaders,
-        body: JSON.stringify({ sport: "basketball_nba", market: "h2h", ttl: 300 }),
+        body: JSON.stringify({ sport: cfg.oddsApiSport, market: "h2h", ttl: 300 }),
         signal: AbortSignal.timeout(30_000),
       });
       gamesOddsResponse = await res.json();
@@ -71,7 +125,7 @@ serve(async (req) => {
     const oddsFallback = gamesOddsResponse.meta?.fallbackUsed || false;
     const oddsStale = gamesOddsResponse.meta?.isStale || false;
 
-    console.log(`Got ${oddsData.length} game-odds entries from ${oddsProvider} (fallback=${oddsFallback}, stale=${oddsStale})`);
+    console.log(`[${sport}] Got ${oddsData.length} game-odds entries from ${oddsProvider} (fallback=${oddsFallback}, stale=${oddsStale})`);
 
     // Deduplicate events by eventId
     const eventMap = new Map<string, any>();
@@ -86,15 +140,15 @@ serve(async (req) => {
       }
     }
     const gamesData = [...eventMap.values()];
-    console.log(`Found ${gamesData.length} unique NBA games`);
+    console.log(`[${sport}] Found ${gamesData.length} unique games`);
 
     if (gamesData.length === 0) {
       await supabase.from("refresh_status").upsert(
-        { id: 3, sport: "NBA_LINES", last_run: new Date().toISOString() },
+        { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
         { onConflict: "id" }
       );
       return new Response(
-        JSON.stringify({ ok: true, message: "No NBA games today", snapshots: 0, provider: oddsProvider }),
+        JSON.stringify({ ok: true, sport, message: `No ${sport} games today`, snapshots: 0, provider: oddsProvider }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -104,14 +158,14 @@ serve(async (req) => {
     for (const game of gamesData) {
       const commence = new Date(game.commence_time);
       const gameDate = commence.toISOString().split("T")[0];
-      const homeAbbr = NBA_TEAM_ABBRS[game.home_team] || null;
-      const awayAbbr = NBA_TEAM_ABBRS[game.away_team] || null;
+      const homeAbbr = cfg.teamMap[game.home_team] || null;
+      const awayAbbr = cfg.teamMap[game.away_team] || null;
       const gameTime = commence.toLocaleTimeString("en-US", {
         hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/New_York",
       });
       gamesTodayRows.push({
         id: game.id,
-        sport: "NBA",
+        sport,
         game_date: gameDate,
         home_team_abbr: homeAbbr,
         away_team_abbr: awayAbbr,
@@ -167,7 +221,7 @@ serve(async (req) => {
           method: "POST",
           headers: svcHeaders,
           body: JSON.stringify({
-            sport: "basketball_nba",
+            sport: cfg.oddsApiSport,
             market: propMarkets,
             eventId: game.id,
             ttl: 120,
@@ -247,7 +301,7 @@ serve(async (req) => {
 
     // 5. Update refresh_status
     await supabase.from("refresh_status").upsert(
-      { id: 3, sport: "NBA_LINES", last_run: new Date().toISOString() },
+      { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
       { onConflict: "id" }
     );
 
@@ -268,32 +322,32 @@ serve(async (req) => {
 
     if (allGameDates.has(todayET) && gamesProcessed > 0) {
       try {
-        console.log("Pipeline: triggering refresh-availability...");
+        console.log(`[${sport}] Pipeline: triggering refresh-availability...`);
         const availRes = await fetch(`${fnBase}/refresh-availability`, {
           method: "POST", headers: svcHeaders,
-          body: JSON.stringify({ game_date: todayET }),
+          body: JSON.stringify({ game_date: todayET, sport }),
           signal: AbortSignal.timeout(45_000),
         });
         const availBody = await availRes.json();
         pipelineResults.availability = { ok: availBody.ok, records: availBody.records };
-        console.log(`Pipeline: availability done — ${availBody.records} records`);
+        console.log(`[${sport}] Pipeline: availability done — ${availBody.records} records`);
       } catch (e) {
-        console.error("Pipeline: availability failed:", e);
+        console.error(`[${sport}] Pipeline: availability failed:`, e);
         pipelineResults.availability = { ok: false, error: String(e) };
       }
 
       try {
-        console.log("Pipeline: triggering prop-scoring-engine...");
+        console.log(`[${sport}] Pipeline: triggering prop-scoring-engine...`);
         const scoreRes = await fetch(`${fnBase}/prop-scoring-engine`, {
           method: "POST", headers: svcHeaders,
-          body: JSON.stringify({ score_all_market_players: true }),
+          body: JSON.stringify({ score_all_market_players: true, sport }),
           signal: AbortSignal.timeout(45_000),
         });
         const scoreBody = await scoreRes.json();
         pipelineResults.scoring = { ok: true, scored_count: scoreBody.scored_count };
-        console.log(`Pipeline: scoring done — ${scoreBody.scored_count} props scored`);
+        console.log(`[${sport}] Pipeline: scoring done — ${scoreBody.scored_count} props scored`);
       } catch (e) {
-        console.error("Pipeline: scoring failed:", e);
+        console.error(`[${sport}] Pipeline: scoring failed:`, e);
         pipelineResults.scoring = { ok: false, error: String(e) };
       }
     } else {
