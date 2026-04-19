@@ -31,7 +31,6 @@ export default function ResearchHubPage() {
             description="Search players, view recent form, splits, and streaks."
             icon={Users}
             to="/research/players"
-            comingSoon
             accent="primary"
           />
           <CheatsheetCard
