@@ -91,6 +91,48 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_player_insights: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          id: string
+          insight_date: string
+          key_points: Json
+          model: string | null
+          player_id: number
+          player_name: string
+          sport: string
+          summary: string
+          updated_at: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          insight_date?: string
+          key_points?: Json
+          model?: string | null
+          player_id: number
+          player_name: string
+          sport?: string
+          summary: string
+          updated_at?: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          insight_date?: string
+          key_points?: Json
+          model?: string | null
+          player_id?: number
+          player_name?: string
+          sport?: string
+          summary?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ai_slip_legs: {
         Row: {
           id: string
@@ -147,6 +189,7 @@ export type Database = {
           reasoning: string | null
           risk_label: string
           slip_name: string
+          sport: string
           user_id: string | null
         }
         Insert: {
@@ -157,6 +200,7 @@ export type Database = {
           reasoning?: string | null
           risk_label?: string
           slip_name: string
+          sport?: string
           user_id?: string | null
         }
         Update: {
@@ -167,6 +211,7 @@ export type Database = {
           reasoning?: string | null
           risk_label?: string
           slip_name?: string
+          sport?: string
           user_id?: string | null
         }
         Relationships: []
@@ -243,6 +288,39 @@ export type Database = {
           id?: string
           message?: string
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      cheatsheet_cache: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          module: string
+          payload: Json
+          scope_date: string
+          sport: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          module: string
+          payload?: Json
+          scope_date?: string
+          sport?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          module?: string
+          payload?: Json
+          scope_date?: string
+          sport?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -336,6 +414,7 @@ export type Database = {
           id: string
           player_id: number
           player_name: string | null
+          sport: string
           user_id: string
         }
         Insert: {
@@ -343,6 +422,7 @@ export type Database = {
           id?: string
           player_id: number
           player_name?: string | null
+          sport?: string
           user_id: string
         }
         Update: {
@@ -350,6 +430,7 @@ export type Database = {
           id?: string
           player_id?: number
           player_name?: string | null
+          sport?: string
           user_id?: string
         }
         Relationships: []
@@ -645,6 +726,7 @@ export type Database = {
           scored_at: string
           season_avg: number | null
           season_hit_rate: number | null
+          sport: string
           stat_type: string
           team_abbr: string | null
           threshold: number
@@ -681,6 +763,7 @@ export type Database = {
           scored_at?: string
           season_avg?: number | null
           season_hit_rate?: number | null
+          sport?: string
           stat_type: string
           team_abbr?: string | null
           threshold: number
@@ -717,6 +800,7 @@ export type Database = {
           scored_at?: string
           season_avg?: number | null
           season_hit_rate?: number | null
+          sport?: string
           stat_type?: string
           team_abbr?: string | null
           threshold?: number
@@ -902,18 +986,21 @@ export type Database = {
           created_at: string
           id: string
           slip_id: string
+          sport: string
           user_id: string
         }
         Insert: {
           created_at?: string
           id?: string
           slip_id: string
+          sport?: string
           user_id: string
         }
         Update: {
           created_at?: string
           id?: string
           slip_id?: string
+          sport?: string
           user_id?: string
         }
         Relationships: [
