@@ -83,18 +83,6 @@ serve(async (req) => {
       "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
     };
 
-    const todayStr = new Date().toISOString().split("T")[0];
-    console.log(`Collecting line snapshots for ${todayStr}...`);
-
-    // 1. Fetch today's NBA games via get-odds (game-level h2h)
-    let gamesOddsResponse: any;
-    try {
-      const res = await fetch(`${fnBase}/get-odds`, {
-        method: "POST",
-        headers: svcHeaders,
-        body: JSON.stringify({ sport: "basketball_nba", market: "h2h", ttl: 300 }),
-        signal: AbortSignal.timeout(30_000),
-      });
     // Sport selection (default NBA for backward compatibility).
     const reqBody = await req.json().catch(() => ({}));
     const rawSport = (reqBody?.sport ?? "NBA") as string;
