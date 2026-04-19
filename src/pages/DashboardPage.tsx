@@ -2,7 +2,7 @@
 // DashboardPage — new Home / command center for BetStreaks.
 // Sport-aware. Reuses existing hooks and components.
 // Block 1: Hero + Today's Slate + Hot Streaks + Quick Links.
-// AI Daily Pick + Best Plays Preview land in Block 2.
+// Block 2: AI Daily Pick + Best Plays Preview.
 // =============================================================================
 import { useEffect, useState } from "react";
 import { Footer } from "@/components/Footer";
@@ -14,6 +14,8 @@ import { DashboardHero } from "@/components/dashboard/DashboardHero";
 import { TodaySlateStrip } from "@/components/dashboard/TodaySlateStrip";
 import { HotStreaksStrip } from "@/components/dashboard/HotStreaksStrip";
 import { QuickLinksGrid } from "@/components/dashboard/QuickLinksGrid";
+import { AIDailyPickCard } from "@/components/dashboard/AIDailyPickCard";
+import { BestPlaysPreview } from "@/components/dashboard/BestPlaysPreview";
 
 const ONBOARDING_KEY = "onboarding_complete";
 
@@ -54,6 +56,8 @@ export default function DashboardPage() {
 
       <main className="flex-1 pb-20">
         <TodaySlateStrip />
+        <AIDailyPickCard />
+        <BestPlaysPreview />
         <HotStreaksStrip />
         <QuickLinksGrid />
       </main>
