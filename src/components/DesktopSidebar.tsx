@@ -145,7 +145,7 @@ export function DesktopSidebar() {
         )}
       </SidebarContent>
 
-      {!isPremium && (
+      {!isPremium && sportConfig.key === "NBA" && (
         <SidebarFooter className="p-3">
           {!collapsed ? (
             <button
