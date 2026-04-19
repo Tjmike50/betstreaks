@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useSport } from "@/contexts/SportContext";
 import { Brain, Sparkles, Loader2, Bookmark, BookmarkCheck, Copy, Shield, Zap, Target, AlertCircle, WifiOff, CreditCard, Database, TrendingUp, BarChart3, Activity, Users, UserMinus, Trophy, ArrowUpDown, Hash, RefreshCw, Info, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
