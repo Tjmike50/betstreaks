@@ -675,6 +675,7 @@ Deno.serve(async (req) => {
             avg_confidence: Number(avgConfidence.toFixed(1)),
             estimated_odds: estimatedOdds,
             odds_hit_count: oddsHitCount,
+            prose_source: proseSource,
           },
         });
       } catch (auditErr) {
