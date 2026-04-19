@@ -20,6 +20,41 @@ const NBA_TEAM_ABBRS: Record<string, string> = {
   "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
 };
 
+// WNBA team abbreviations as returned by The Odds API "home_team" / "away_team" strings.
+const WNBA_TEAM_ABBRS: Record<string, string> = {
+  "Atlanta Dream": "ATL", "Chicago Sky": "CHI", "Connecticut Sun": "CON",
+  "Dallas Wings": "DAL", "Golden State Valkyries": "GSV", "Indiana Fever": "IND",
+  "Las Vegas Aces": "LVA", "Los Angeles Sparks": "LA", "Minnesota Lynx": "MIN",
+  "New York Liberty": "NYL", "Phoenix Mercury": "PHX", "Seattle Storm": "SEA",
+  "Washington Mystics": "WAS",
+};
+
+// Phase 1 sport registry (mirrors src/lib/sports/registry.ts).
+// When WNBA goes in-season, flip seasonState below to enable ingestion.
+type SportKey = "NBA" | "WNBA";
+const SPORT_CONFIG: Record<SportKey, {
+  oddsApiSport: string;
+  teamMap: Record<string, string>;
+  refreshStatusId: number;
+  refreshStatusLabel: string;
+  seasonState: "preseason" | "regular" | "postseason" | "offseason";
+}> = {
+  NBA: {
+    oddsApiSport: "basketball_nba",
+    teamMap: NBA_TEAM_ABBRS,
+    refreshStatusId: 3,
+    refreshStatusLabel: "NBA_LINES",
+    seasonState: "postseason",
+  },
+  WNBA: {
+    oddsApiSport: "basketball_wnba",
+    teamMap: WNBA_TEAM_ABBRS,
+    refreshStatusId: 13,
+    refreshStatusLabel: "WNBA_LINES",
+    seasonState: "offseason",
+  },
+};
+
 const STAT_MAP: Record<string, string> = {
   player_points: "Points",
   player_rebounds: "Rebounds",
