@@ -61,50 +61,6 @@ export default function BestBetsPage() {
   // Shared sport-aware best-bets query (limit 50 preserved from previous behavior)
   const { data: streaks, isLoading, error } = useBestBets({ ...filters, limit: 50 });
 
-  // Fetch all streaks and filter/sort client-side
-  const { data: streaks, isLoading, error } = useQuery({
-    queryKey: ["bestBets", filters],
-    queryFn: async () => {
-      const cutoffDate = getDaysAgoDate(filters.maxDaysAgo);
-
-      // Fetch both players and teams in one query
-      const { data, error } = await supabase
-        .from("streaks")
-        .select("*")
-        .gte("streak_len", filters.minStreak)
-        .gte("last_game", cutoffDate)
-        .order("streak_len", { ascending: false });
-
-      if (error) throw error;
-
-      let results = data as Streak[];
-
-      // Filter to NBA teams only (exclude G League)
-      results = results.filter((s) => isNbaTeam(s.team_abbr));
-
-      // Filter by L10 hit %
-      results = results.filter((s) => (s.last10_hit_pct ?? 0) >= filters.minL10Pct);
-
-      // Filter by entity type
-      if (!filters.showPlayers) {
-        results = results.filter((s) => s.entity_type !== "player");
-      }
-      if (!filters.showTeams) {
-        results = results.filter((s) => s.entity_type !== "team");
-      }
-
-      // Sort by Best Bets score
-      results.sort((a, b) => {
-        const scoreA = calculateBestBetsScore(a);
-        const scoreB = calculateBestBetsScore(b);
-        return scoreB - scoreA;
-      });
-
-      // Limit to top 50
-      return results.slice(0, 50);
-    },
-  });
-
   const handleToggleStar = (streak: Streak) => {
     const result = toggleWatchlist(streak);
     if (result.limitReached) {
