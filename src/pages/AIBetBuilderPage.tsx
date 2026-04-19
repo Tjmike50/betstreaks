@@ -228,9 +228,12 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
       return;
     }
     setSaving(true);
+    // Read sport from the slip row (set by the edge function); fall back to NBA
+    const slipSport = (slip as any).sport || "NBA";
     const { error } = await supabase.from("saved_slips").insert({
       user_id: user.id,
       slip_id: slip.id,
+      sport: slipSport,
     });
     setSaving(false);
     if (error) {
