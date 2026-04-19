@@ -127,7 +127,7 @@ export function AIDailyPickCard() {
           )}
 
           {pick.reasoning && (
-            <p className="text-xs text-muted-foreground line-clamp-2 italic">
+            <p className="text-xs text-muted-foreground italic leading-relaxed">
               {pick.reasoning}
             </p>
           )}
