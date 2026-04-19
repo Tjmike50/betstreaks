@@ -60,18 +60,18 @@ function DistributionBar({ distribution, label, colorFn }: {
 
 function booksColor(key: string): string {
   const n = parseInt(key);
-  if (n >= 4) return "bg-green-500";
-  if (n >= 3) return "bg-emerald-500";
-  if (n >= 2) return "bg-yellow-500";
-  return "bg-red-500";
+  if (n >= 4) return "bg-success";
+  if (n >= 3) return "bg-success";
+  if (n >= 2) return "bg-warning";
+  return "bg-danger";
 }
 
 function confidenceColor(key: string): string {
   const n = parseInt(key);
-  if (n >= 70) return "bg-green-500";
-  if (n >= 50) return "bg-emerald-500";
-  if (n >= 30) return "bg-yellow-500";
-  return "bg-red-500";
+  if (n >= 70) return "bg-success";
+  if (n >= 50) return "bg-success";
+  if (n >= 30) return "bg-warning";
+  return "bg-danger";
 }
 
 /** Compute slip-level aggregate market quality stats */
@@ -112,9 +112,9 @@ function computeSlipMarketStats(slips: AISlip[]) {
 }
 
 function getConfTier(conf: number): { label: string; color: string; bgColor: string } {
-  if (conf >= 70) return { label: "Strong", color: "text-green-400", bgColor: "bg-green-500/15 border-green-500/25" };
-  if (conf >= 45) return { label: "Moderate", color: "text-yellow-400", bgColor: "bg-yellow-500/15 border-yellow-500/25" };
-  return { label: "Weak", color: "text-red-400", bgColor: "bg-red-500/15 border-red-500/25" };
+  if (conf >= 70) return { label: "Strong", color: "text-success", bgColor: "bg-success/15 border-success/25" };
+  if (conf >= 45) return { label: "Moderate", color: "text-warning", bgColor: "bg-warning/15 border-warning/25" };
+  return { label: "Weak", color: "text-danger", bgColor: "bg-danger/15 border-danger/25" };
 }
 
 export function MarketDepthSummary({ data, slips }: Props) {
@@ -136,9 +136,9 @@ export function MarketDepthSummary({ data, slips }: Props) {
           <div className="ml-auto flex items-center gap-2">
             {data.scoring_source && (
               <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border ${
-                data.scoring_source === "today" ? "bg-green-500/10 text-green-400 border-green-500/20"
-                  : data.scoring_source === "auto-triggered" ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                  : data.scoring_source === "yesterday" ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
+                data.scoring_source === "today" ? "bg-success/10 text-success border-success/20"
+                  : data.scoring_source === "auto-triggered" ? "bg-info/10 text-info border-info/20"
+                  : data.scoring_source === "yesterday" ? "bg-warning/10 text-warning border-warning/20"
                   : "bg-muted/20 text-muted-foreground border-border/30"
               }`}>
                 Scoring: {data.scoring_source}
@@ -177,20 +177,20 @@ export function MarketDepthSummary({ data, slips }: Props) {
                 <div className="text-[8px] text-muted-foreground">Books Range</div>
               </div>
               <div className="text-center">
-                <div className={`text-sm font-bold ${slipStats.allMainLine ? "text-green-400" : "text-yellow-400"}`}>
+                <div className={`text-sm font-bold ${slipStats.allMainLine ? "text-success" : "text-warning"}`}>
                   {slipStats.allMainLine ? "✓" : "Mixed"}
                 </div>
                 <div className="text-[8px] text-muted-foreground">Main Lines</div>
               </div>
               <div className="text-center">
-                <div className={`text-sm font-bold ${slipStats.allVerified ? "text-green-400" : "text-yellow-400"}`}>
+                <div className={`text-sm font-bold ${slipStats.allVerified ? "text-success" : "text-warning"}`}>
                   {slipStats.allVerified ? "✓" : "Partial"}
                 </div>
                 <div className="text-[8px] text-muted-foreground">Verified</div>
               </div>
             </div>
             {slipStats.weakCount > 0 && (
-              <div className="flex items-center gap-1.5 text-[10px] text-yellow-400">
+              <div className="flex items-center gap-1.5 text-[10px] text-warning">
                 <AlertTriangle className="h-3 w-3" />
                 {slipStats.weakCount} leg{slipStats.weakCount > 1 ? "s" : ""} with weak market backing
               </div>
@@ -201,8 +201,8 @@ export function MarketDepthSummary({ data, slips }: Props) {
         {/* Key metrics grid */}
         <div className="grid grid-cols-4 gap-2">
           <StatCell label="Live Props" value={data.live_props_found} icon={BookOpen} color="text-primary" />
-          <StatCell label="Verified" value={data.verified_prop_candidates} icon={CheckCircle2} color="text-green-400" />
-          <StatCell label="Sent to AI" value={data.verified_candidates_passed_to_llm} icon={TrendingUp} color="text-blue-400" />
+          <StatCell label="Verified" value={data.verified_prop_candidates} icon={CheckCircle2} color="text-success" />
+          <StatCell label="Sent to AI" value={data.verified_candidates_passed_to_llm} icon={TrendingUp} color="text-info" />
           <StatCell label="Games" value={data.games_today} icon={BarChart3} />
         </div>
 
@@ -233,7 +233,7 @@ export function MarketDepthSummary({ data, slips }: Props) {
                 <FilterRow label="Single-book excluded" count={mq.removed_by_single_book_exclude} />
               )}
               {totalFiltered === 0 && (
-                <div className="flex items-center gap-1.5 text-[10px] text-green-400">
+                <div className="flex items-center gap-1.5 text-[10px] text-success">
                   <CheckCircle2 className="h-3 w-3" />
                   All candidates passed quality filters
                 </div>
@@ -261,15 +261,15 @@ export function MarketDepthSummary({ data, slips }: Props) {
         {/* Enrichment & alias stats */}
         {data.enrichment_coverage && (
           <div className="flex items-center gap-3 text-[10px] flex-wrap">
-            <span className="text-green-400">✓ {data.enrichment_coverage.full} enriched</span>
+            <span className="text-success">✓ {data.enrichment_coverage.full} enriched</span>
             {data.enrichment_coverage.partial > 0 && (
-              <span className="text-yellow-400">◐ {data.enrichment_coverage.partial} partial</span>
+              <span className="text-warning">◐ {data.enrichment_coverage.partial} partial</span>
             )}
             {data.enrichment_coverage.none > 0 && (
-              <span className="text-red-400">✗ {data.enrichment_coverage.none} missing</span>
+              <span className="text-danger">✗ {data.enrichment_coverage.none} missing</span>
             )}
             {(data.enrichment_coverage.alias_hits ?? 0) > 0 && (
-              <span className="text-blue-400" title={`Rescued: ${data.enrichment_coverage.alias_rescued_players?.join(", ") || "—"}`}>
+              <span className="text-info" title={`Rescued: ${data.enrichment_coverage.alias_rescued_players?.join(", ") || "—"}`}>
                 🔗 {data.enrichment_coverage.alias_hits} alias hits
               </span>
             )}
@@ -278,12 +278,12 @@ export function MarketDepthSummary({ data, slips }: Props) {
 
         {/* Leg validation summary */}
         <div className="flex items-center gap-3 text-[10px]">
-          <span className="flex items-center gap-1 text-green-400">
+          <span className="flex items-center gap-1 text-success">
             <CheckCircle2 className="h-3 w-3" />
             {data.final_legs_accepted} legs accepted
           </span>
           {data.final_legs_rejected_no_match > 0 && (
-            <span className="flex items-center gap-1 text-red-400">
+            <span className="flex items-center gap-1 text-danger">
               <XCircle className="h-3 w-3" />
               {data.final_legs_rejected_no_match} rejected (no match)
             </span>
@@ -301,7 +301,7 @@ function FilterRow({ label, count }: { label: string; count: number }) {
   return (
     <div className="flex items-center justify-between text-[10px]">
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-red-400/80">-{count}</span>
+      <span className="font-mono text-danger/80">-{count}</span>
     </div>
   );
 }

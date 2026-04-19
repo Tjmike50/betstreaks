@@ -31,18 +31,18 @@ const QUICK_PROMPTS = [
 
 function getRiskColor(risk: string) {
   switch (risk) {
-    case "safe": return "border-green-500/40 bg-green-500/5";
-    case "balanced": return "border-yellow-500/40 bg-yellow-500/5";
-    case "aggressive": return "border-red-500/40 bg-red-500/5";
+    case "safe": return "border-success/40 bg-success/5";
+    case "balanced": return "border-warning/40 bg-warning/5";
+    case "aggressive": return "border-danger/40 bg-danger/5";
     default: return "border-border/50";
   }
 }
 
 function getRiskBadge(risk: string) {
   switch (risk) {
-    case "safe": return "bg-green-500/20 text-green-400 border-green-500/30";
-    case "balanced": return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
-    case "aggressive": return "bg-red-500/20 text-red-400 border-red-500/30";
+    case "safe": return "bg-success/20 text-success border-success/30";
+    case "balanced": return "bg-warning/20 text-warning border-warning/30";
+    case "aggressive": return "bg-danger/20 text-danger border-danger/30";
     default: return "";
   }
 }
@@ -57,18 +57,18 @@ function getRiskIcon(risk: string) {
 
 function getVolatilityColor(label: string | null | undefined) {
   switch (label) {
-    case "low": return "text-green-400";
-    case "medium": return "text-yellow-400";
-    case "high": return "text-red-400";
+    case "low": return "text-success";
+    case "medium": return "text-warning";
+    case "high": return "text-danger";
     default: return "text-muted-foreground";
   }
 }
 
 function getConfidenceColor(score: number | null | undefined) {
   if (score == null) return "text-muted-foreground";
-  if (score >= 70) return "text-green-400";
-  if (score >= 45) return "text-yellow-400";
-  return "text-red-400";
+  if (score >= 70) return "text-success";
+  if (score >= 45) return "text-warning";
+  return "text-danger";
 }
 
 function DataContextChips({ ctx }: { ctx: LegDataContext }) {
@@ -79,25 +79,25 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
 
   if (ctx.vs_opponent) {
     const sampleNote = ctx.vs_opponent_sample != null ? ` (${ctx.vs_opponent_sample}g)` : "";
-    chips.push({ label: `vs OPP: ${ctx.vs_opponent}${sampleNote}`, color: "bg-blue-500/10 text-blue-400" });
+    chips.push({ label: `vs OPP: ${ctx.vs_opponent}${sampleNote}`, color: "bg-info/10 text-info" });
   }
   if (ctx.home_away_split) {
     const sampleNote = ctx.home_away_sample != null ? ` (${ctx.home_away_sample}g)` : "";
     chips.push({ label: `${ctx.home_away_split}${sampleNote}`, color: "bg-purple-500/10 text-purple-400" });
   }
-  if (ctx.rest_note) chips.push({ label: ctx.rest_note, color: "bg-orange-500/10 text-orange-400" });
+  if (ctx.rest_note) chips.push({ label: ctx.rest_note, color: "bg-accent-orange/10 text-accent-orange" });
   if (ctx.opp_defense_note) chips.push({ label: ctx.opp_defense_note, color: "bg-cyan-500/10 text-cyan-400" });
   if (ctx.teammate_note) chips.push({ label: ctx.teammate_note, color: "bg-pink-500/10 text-pink-400" });
-  if (ctx.minutes_trend === "up") chips.push({ label: "📈 Usage trending up", color: "bg-green-500/10 text-green-400" });
-  if (ctx.minutes_trend === "down") chips.push({ label: "📉 Usage trending down", color: "bg-red-500/10 text-red-400" });
+  if (ctx.minutes_trend === "up") chips.push({ label: "📈 Usage trending up", color: "bg-success/10 text-success" });
+  if (ctx.minutes_trend === "down") chips.push({ label: "📉 Usage trending down", color: "bg-danger/10 text-danger" });
   if (ctx.role_label === "starter") chips.push({ label: "Starter", color: "bg-primary/10 text-primary" });
   if (ctx.role_label === "bench") chips.push({ label: "Bench", color: "bg-muted text-muted-foreground" });
-  if (ctx.availability_note) chips.push({ label: ctx.availability_note, color: "bg-amber-500/10 text-amber-400" });
-  if (ctx.lineup_confidence === "low") chips.push({ label: "⚠ Uncertain lineup", color: "bg-red-500/10 text-red-400" });
-  if (ctx.lineup_confidence === "medium") chips.push({ label: "Lineup TBD", color: "bg-yellow-500/10 text-yellow-400" });
+  if (ctx.availability_note) chips.push({ label: ctx.availability_note, color: "bg-warning/10 text-warning" });
+  if (ctx.lineup_confidence === "low") chips.push({ label: "⚠ Uncertain lineup", color: "bg-danger/10 text-danger" });
+  if (ctx.lineup_confidence === "medium") chips.push({ label: "Lineup TBD", color: "bg-warning/10 text-warning" });
   if (ctx.market_note) {
     const isPositive = ctx.market_note.includes("improved") || ctx.market_note.includes("favorable");
-    chips.push({ label: `📊 ${ctx.market_note}`, color: isPositive ? "bg-green-500/10 text-green-400" : "bg-orange-500/10 text-orange-400" });
+    chips.push({ label: `📊 ${ctx.market_note}`, color: isPositive ? "bg-success/10 text-success" : "bg-accent-orange/10 text-accent-orange" });
   }
   // Market badges (source, verified, books, confidence, edge) are now in LegMarketBadges — skip here
 
@@ -105,9 +105,9 @@ function DataContextChips({ ctx }: { ctx: LegDataContext }) {
     for (const tag of ctx.tags.slice(0, 3)) {
       const label = tag.replace(/_/g, " ");
       const color = tag.includes("Hot") || tag.includes("consistent") || tag.includes("Strong") || tag.includes("Hit")
-        ? "bg-green-500/10 text-green-400"
+        ? "bg-success/10 text-success"
         : tag.includes("cold") || tag.includes("volatile") || tag.includes("Weak") || tag.includes("small")
-        ? "bg-red-500/10 text-red-400"
+        ? "bg-danger/10 text-danger"
         : "bg-muted text-muted-foreground";
       chips.push({ label, color });
     }
@@ -138,7 +138,7 @@ function ScoringFreshnessBadge({ ctx }: { ctx: LegDataContext }) {
   return (
     <div className="flex items-center gap-1.5 mt-1.5">
       {isYesterday && (
-        <span className="inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        <span className="inline-flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-warning/10 text-warning border border-warning/20">
           ⏳ Yesterday's data
         </span>
       )}
@@ -206,7 +206,7 @@ function LegDataBar({ ctx }: { ctx: LegDataContext }) {
             {ctx.sample_size} game sample
           </span>
           {ctx.sample_size < 15 && (
-            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20">
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-warning/15 text-warning border border-warning/20">
               ⚠ Low sample
             </span>
           )}
@@ -299,12 +299,12 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 {isGameLevel && leg.bet_type === "moneyline" && (
-                  <span className="text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded shrink-0">
+                  <span className="text-[10px] font-mono font-bold bg-success/10 text-success px-1.5 py-0.5 rounded shrink-0">
                     ML
                   </span>
                 )}
                 {isGameLevel && leg.bet_type === "spread" && (
-                  <span className="text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded shrink-0">
+                  <span className="text-[10px] font-mono font-bold bg-info/10 text-info px-1.5 py-0.5 rounded shrink-0">
                     SPR
                   </span>
                 )}
@@ -581,11 +581,11 @@ export default function AIBetBuilderPage() {
         )}
 
         {isCreditsError && (
-          <Card className="border-orange-500/30 bg-orange-500/5">
+          <Card className="border-accent-orange/30 bg-accent-orange/5">
             <CardContent className="pt-4 flex items-start gap-3">
-              <CreditCard className="h-5 w-5 text-orange-400 shrink-0 mt-0.5" />
+              <CreditCard className="h-5 w-5 text-accent-orange shrink-0 mt-0.5" />
               <div className="space-y-2">
-                <p className="text-sm font-medium text-orange-400">AI credits exhausted</p>
+                <p className="text-sm font-medium text-accent-orange">AI credits exhausted</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
                 <Button size="sm" variant="outline" onClick={() => navigate("/premium")}>
                   Check Plan
@@ -596,11 +596,11 @@ export default function AIBetBuilderPage() {
         )}
 
         {isNoDataError && (
-          <Card className="border-blue-500/30 bg-blue-500/5">
+          <Card className="border-info/30 bg-info/5">
             <CardContent className="pt-4 flex items-start gap-3">
-              <Database className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
+              <Database className="h-5 w-5 text-info shrink-0 mt-0.5" />
               <div className="space-y-2">
-                <p className="text-sm font-medium text-blue-400">Prop data not ready</p>
+                <p className="text-sm font-medium text-info">Prop data not ready</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
@@ -656,9 +656,9 @@ export default function AIBetBuilderPage() {
             </h2>
             {/* Fallback banner */}
             {isFallback && (
-              <Card className="border-blue-500/30 bg-blue-500/5">
+              <Card className="border-info/30 bg-info/5">
                 <CardContent className="pt-3 pb-3 flex items-start gap-2.5">
-                  <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+                  <Info className="h-4 w-4 text-info shrink-0 mt-0.5" />
                   <p className="text-xs text-muted-foreground">
                     These picks were built from scored data without AI formatting. Try again later for full AI analysis.
                   </p>
