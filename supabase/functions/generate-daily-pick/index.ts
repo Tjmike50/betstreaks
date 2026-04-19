@@ -38,8 +38,9 @@ interface PropScoreRow {
 }
 
 const RISK_LABEL = (avgConfidence: number): "safe" | "balanced" | "aggressive" => {
-  if (avgConfidence >= 80) return "safe";
-  if (avgConfidence >= 65) return "balanced";
+  // Calibrated to market-first scoring scale (15–85, typical high ~70).
+  if (avgConfidence >= 65) return "safe";
+  if (avgConfidence >= 55) return "balanced";
   return "aggressive";
 };
 
