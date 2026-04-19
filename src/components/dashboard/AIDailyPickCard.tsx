@@ -11,6 +11,25 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RegenerateDailyPickButton } from "@/components/dashboard/RegenerateDailyPickButton";
 
+// Friendly display labels for stat codes (matches conventions used elsewhere
+// in the app — keeps deterministic per-leg text readable on mobile).
+const STAT_DISPLAY: Record<string, string> = {
+  pts: "PTS",
+  reb: "REB",
+  ast: "AST",
+  stl: "STL",
+  blk: "BLK",
+  fg3m: "3PM",
+  pra: "PRA",
+  pr: "PR",
+  pa: "PA",
+  ra: "RA",
+};
+
+function formatStat(stat: string): string {
+  return STAT_DISPLAY[stat.toLowerCase()] ?? stat.toUpperCase();
+}
+
 export function AIDailyPickCard() {
   const navigate = useNavigate();
   const { config } = useSport();
