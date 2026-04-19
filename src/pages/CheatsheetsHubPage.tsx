@@ -9,19 +9,29 @@ import { Footer } from "@/components/Footer";
 
 export default function CheatsheetsHubPage() {
   const { config } = useSport();
+  const isOffseason = config.seasonState === "offseason";
 
   return (
     <div className="min-h-screen pb-24 md:pb-8">
       <div className="max-w-3xl mx-auto px-4 pt-6">
         <header className="mb-6">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-primary mb-1">
-            {config.name} Cheatsheets
-          </p>
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+              {config.name} Cheatsheets
+            </p>
+            {isOffseason && (
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                Offseason
+              </span>
+            )}
+          </div>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground">
             Find your edge fast
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Curated views of today's top props — value, streaks, matchups, and best bets.
+            {isOffseason
+              ? `${config.name} is in offseason — cheatsheets will repopulate when the season resumes.`
+              : "Curated views of today's top props — value, streaks, matchups, and best bets."}
           </p>
         </header>
 

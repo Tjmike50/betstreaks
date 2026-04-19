@@ -61,10 +61,12 @@ export default function ResearchPlayersPage() {
           <div className="glass-card p-8 text-center">
             <Users className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
             <h3 className="text-base font-semibold text-foreground mb-1">
-              No player data yet
+              No {config.name} player data yet
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
-              {config.tagline} doesn't have active streak data right now.
+              {config.seasonState === "offseason"
+                ? `${config.name} is in offseason. Check back when the season resumes.`
+                : `${config.name} doesn't have active streak data right now.`}
             </p>
             <Button variant="outline" size="sm" onClick={() => navigate("/cheatsheets")}>
               Browse Cheatsheets

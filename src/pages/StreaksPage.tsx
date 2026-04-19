@@ -225,9 +225,13 @@ const Index = () => {
           </div>
         ) : (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No streaks found</p>
+            <p className="text-foreground font-medium">
+              No {sportConfig.name} streaks right now
+            </p>
             <p className="text-sm text-muted-foreground mt-2">
-              Try adjusting your filters
+              {sportConfig.seasonState === "offseason"
+                ? `${sportConfig.name} is in offseason. Check back when the season resumes.`
+                : "Try adjusting your filters, or check back closer to tip-off."}
             </p>
           </div>
         )}
