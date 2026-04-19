@@ -72,7 +72,37 @@ serve(async (req) => {
       results.line_collection = { status: "skipped", duration_ms: 0, reason: "offseason" };
       results.availability_refresh = { status: "skipped", duration_ms: 0, reason: "offseason" };
       results.scoring = { status: "skipped", duration_ms: 0, reason: "offseason" };
+      if (sport === "WNBA") {
+        results.wnba_stats = { status: "skipped", duration_ms: 0, reason: "offseason" };
+      }
       continue;
+    }
+
+    // ── Step 0 (WNBA only): Refresh stats from SportsDataIO before odds collection ──
+    if (sport === "WNBA") {
+      console.log(`[${sport}] Step 0: refresh-wnba-data (stats)...`);
+      const step0Start = Date.now();
+      try {
+        const res = await fetch(`${fnBase}/refresh-wnba-data`, {
+          method: "POST",
+          headers: svcHeaders,
+          body: JSON.stringify({}),
+          signal: AbortSignal.timeout(120_000),
+        });
+        const body = await res.json();
+        results.wnba_stats = {
+          status: body.ok ? "success" : "failed",
+          duration_ms: Date.now() - step0Start,
+          total_rows: body.total_rows,
+          steps: body.steps,
+        };
+        console.log(`[${sport}] Step 0 done: ${body.total_rows ?? 0} rows`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        allErrors.push(`${sport}.wnba_stats: ${msg}`);
+        results.wnba_stats = { status: "failed", duration_ms: Date.now() - step0Start, error: msg };
+        console.error(`[${sport}] Step 0 failed (non-fatal):`, msg);
+      }
     }
 
     // ── Step A: Collect line snapshots (also upserts games_today) ──
