@@ -19,10 +19,10 @@ export function PremiumLockedScreen({
       <div className="max-w-md w-full text-center space-y-6">
         {/* Lock Icon with Premium Badge */}
         <div className="flex flex-col items-center gap-3">
-          <div className="w-16 h-16 rounded-full bg-yellow-500/20 flex items-center justify-center">
-            <Lock className="h-8 w-8 text-yellow-500" />
+          <div className="w-16 h-16 rounded-full bg-premium/20 flex items-center justify-center">
+            <Lock className="h-8 w-8 text-premium" />
           </div>
-          <Badge className="bg-yellow-500/20 text-yellow-500 border-yellow-500/30 px-3 py-1">
+          <Badge className="bg-premium/20 text-premium border-premium/30 px-3 py-1">
             <Lock className="h-3 w-3 mr-1" />
             Premium Feature
           </Badge>
@@ -39,7 +39,7 @@ export function PremiumLockedScreen({
             <span className="text-foreground font-medium">Free users</span> see what already happened.
           </p>
           <p className="text-sm">
-            <span className="text-yellow-500 font-medium">Premium users</span> see what's building right now.
+            <span className="text-premium font-medium">Premium users</span> see what's building right now.
           </p>
         </div>
 
@@ -49,7 +49,7 @@ export function PremiumLockedScreen({
           <ul className="space-y-2">
             {PREMIUM_FEATURES_WITH_ICONS.map((feature, index) => (
               <li key={index} className="flex items-center gap-3 text-sm">
-                <feature.icon className="h-4 w-4 text-yellow-500 shrink-0" />
+                <feature.icon className="h-4 w-4 text-premium shrink-0" />
                 <span>{feature.text}</span>
               </li>
             ))}
@@ -62,7 +62,7 @@ export function PremiumLockedScreen({
           <p className="text-sm text-muted-foreground">or</p>
           <p className="text-lg font-semibold">
             {PREMIUM_PRICING.yearly.display} <span className="text-sm font-normal text-muted-foreground">/ {PREMIUM_PRICING.yearly.period}</span>
-            <Badge variant="secondary" className="ml-2 bg-green-500/20 text-green-400 border-green-500/30">
+            <Badge variant="secondary" className="ml-2 bg-success/20 text-success border-success/30">
               save 50%
             </Badge>
           </p>
@@ -71,11 +71,11 @@ export function PremiumLockedScreen({
         {/* CTA Buttons */}
         <div className="flex flex-col gap-3">
           {isLoggedIn ? (
-            <Button asChild size="lg" className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
+            <Button asChild size="lg" className="w-full bg-premium hover:bg-premium/90 text-premium-foreground font-semibold">
               <Link to="/premium">Upgrade to Premium</Link>
             </Button>
           ) : (
-            <Button asChild size="lg" className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
+            <Button asChild size="lg" className="w-full bg-premium hover:bg-premium/90 text-premium-foreground font-semibold">
               <Link to="/auth">Log in to Upgrade</Link>
             </Button>
           )}

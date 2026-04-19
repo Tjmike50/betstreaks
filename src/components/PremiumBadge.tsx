@@ -10,7 +10,7 @@ export function PremiumBadge({ className, size = "sm" }: PremiumBadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full bg-yellow-500/20 text-yellow-500 font-medium",
+        "inline-flex items-center gap-1 rounded-full bg-premium/20 text-premium font-medium",
         size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-sm",
         className
       )}
