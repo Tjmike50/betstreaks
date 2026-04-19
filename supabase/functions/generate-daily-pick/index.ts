@@ -143,6 +143,81 @@ function pickLegs(rows: PropScoreRow[], legCount: number): PropScoreRow[] {
   return picked;
 }
 
+// =============================================================================
+// Odds enrichment helpers (DraftKings-only for v1)
+// =============================================================================
+function americanToDecimal(american: string | null | undefined): number | null {
+  if (!american) return null;
+  const trimmed = String(american).trim().replace(/^\+/, "");
+  const n = Number(trimmed);
+  if (!isFinite(n) || n === 0) return null;
+  if (n > 0) return n / 100 + 1;
+  return 100 / Math.abs(n) + 1;
+}
+
+function decimalToAmerican(decimal: number | null): string | null {
+  if (decimal == null || !isFinite(decimal) || decimal <= 1) return null;
+  if (decimal >= 2) {
+    const v = Math.round((decimal - 1) * 100);
+    return `+${v}`;
+  }
+  const v = Math.round(-100 / (decimal - 1));
+  return `${v}`; // already negative
+}
+
+interface EnrichedLeg extends PropScoreRow {
+  side: "Over" | "Under";
+  odds: string | null;
+}
+
+async function enrichLegsWithOdds(
+  supabase: ReturnType<typeof createClient>,
+  legs: PropScoreRow[],
+  gameDate: string,
+): Promise<{ enriched: EnrichedLeg[]; estimatedOdds: string | null }> {
+  const enriched = await Promise.all(
+    legs.map(async (leg): Promise<EnrichedLeg> => {
+      const side = determineSide(leg);
+      try {
+        const { data, error } = await supabase
+          .from("line_snapshots")
+          .select("over_odds, under_odds, snapshot_at")
+          .eq("player_name", leg.player_name)
+          .eq("stat_type", leg.stat_type)
+          .eq("threshold", leg.threshold)
+          .eq("game_date", gameDate)
+          .eq("sportsbook", "draftkings")
+          .order("snapshot_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          console.warn(
+            `[generate-daily-pick] odds lookup error for ${leg.player_name} ${leg.stat_type} ${leg.threshold}:`,
+            error.message,
+          );
+          return { ...leg, side, odds: null };
+        }
+        const odds = side === "Over" ? data?.over_odds ?? null : data?.under_odds ?? null;
+        return { ...leg, side, odds: odds ?? null };
+      } catch (err) {
+        console.warn(
+          `[generate-daily-pick] odds lookup failed for ${leg.player_name}:`,
+          err instanceof Error ? err.message : err,
+        );
+        return { ...leg, side, odds: null };
+      }
+    }),
+  );
+
+  // Compute parlay total only if every leg has odds
+  const decimals = enriched.map((l) => americanToDecimal(l.odds));
+  if (decimals.some((d) => d == null)) {
+    return { enriched, estimatedOdds: null };
+  }
+  const totalDecimal = decimals.reduce((acc, d) => acc * (d as number), 1);
+  return { enriched, estimatedOdds: decimalToAmerican(totalDecimal) };
+}
+
 function buildSlipName(sport: string, dateStr: string): string {
   const d = new Date(dateStr + "T12:00:00Z");
   const month = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
