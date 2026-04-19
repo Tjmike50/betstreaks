@@ -46,7 +46,6 @@ export default function CheatsheetsHubPage() {
             icon={Flame}
             to="/cheatsheets/streaks"
             accent="emerald"
-            comingSoon
           />
           <CheatsheetCard
             title="Matchup Edges"
@@ -54,7 +53,6 @@ export default function CheatsheetsHubPage() {
             icon={Swords}
             to="/cheatsheets/matchups"
             accent="violet"
-            comingSoon
           />
         </div>
 
