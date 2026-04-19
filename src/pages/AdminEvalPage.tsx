@@ -157,7 +157,7 @@ function computeLegCountStats(slips: SlipOutcome[]) {
 
 function HitRateBar({ rate, total }: { rate: number | null; total: number }) {
   if (rate == null || total === 0) return <span className="text-muted-foreground text-xs">—</span>;
-  const color = rate >= 60 ? "bg-green-500" : rate >= 40 ? "bg-yellow-500" : "bg-red-500";
+  const color = rate >= 60 ? "bg-success" : rate >= 40 ? "bg-warning" : "bg-danger";
   return (
     <div className="flex items-center gap-2">
       <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
@@ -180,8 +180,8 @@ function TrendIndicator({ snapshots, field }: { snapshots: DailySnapshot[]; fiel
 
   if (Math.abs(diff) < 1) return <span className="text-[10px] text-muted-foreground ml-1">→ stable</span>;
   return diff > 0
-    ? <span className="text-[10px] text-green-400 ml-1 flex items-center gap-0.5"><TrendingUp className="h-3 w-3" />+{diff.toFixed(1)}%</span>
-    : <span className="text-[10px] text-red-400 ml-1 flex items-center gap-0.5"><TrendingDown className="h-3 w-3" />{diff.toFixed(1)}%</span>;
+    ? <span className="text-[10px] text-success ml-1 flex items-center gap-0.5"><TrendingUp className="h-3 w-3" />+{diff.toFixed(1)}%</span>
+    : <span className="text-[10px] text-danger ml-1 flex items-center gap-0.5"><TrendingDown className="h-3 w-3" />{diff.toFixed(1)}%</span>;
 }
 
 export default function AdminEvalPage() {
@@ -603,10 +603,10 @@ export default function AdminEvalPage() {
 
         {/* Stale Pipeline Warning */}
         {!latestFailed && pipelineStale && (
-          <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-3 flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
+          <div className="rounded-lg border border-warning/50 bg-warning/10 p-3 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
             <div className="text-sm">
-              <span className="font-semibold text-yellow-600">Pipeline may be stale</span>
+              <span className="font-semibold text-warning">Pipeline may be stale</span>
               <span className="text-xs text-muted-foreground ml-1.5">
                 — No successful run in the last 6 hours
               </span>
@@ -659,8 +659,8 @@ export default function AdminEvalPage() {
                 <div className="text-[10px] text-muted-foreground">Status</div>
                 <div className="text-xs font-medium">
                   {pipelineStatus?.hoursSince != null && pipelineStatus.hoursSince <= 4
-                    ? <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-600">Fresh</Badge>
-                    : <Badge variant="outline" className="text-[10px] border-yellow-500/50 text-yellow-600">Stale</Badge>}
+                    ? <Badge variant="outline" className="text-[10px] border-success/50 text-success">Fresh</Badge>
+                    : <Badge variant="outline" className="text-[10px] border-warning/50 text-warning">Stale</Badge>}
                 </div>
               </div>
             </div>
@@ -692,13 +692,13 @@ export default function AdminEvalPage() {
                   const rowBg = isFailed
                     ? "bg-destructive/10 border border-destructive/30"
                     : isSlow
-                      ? "bg-yellow-500/10 border border-yellow-500/30"
+                      ? "bg-warning/10 border border-warning/30"
                       : "bg-card/50";
                   return (
                     <div key={run.id} className={`flex items-center gap-2 text-[11px] rounded-lg px-2.5 py-1.5 ${rowBg}`}>
                       {isFailed
                         ? <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
-                        : <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />}
+                        : <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />}
                       <span className="font-medium min-w-[90px]">
                         {ranAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
                         {ranAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
@@ -757,8 +757,8 @@ export default function AdminEvalPage() {
                   </div>
                   {loopStatus.gradeHoursAgo != null && (
                     loopStatus.gradeHoursAgo <= 26
-                      ? <CheckCircle className="h-3.5 w-3.5 text-green-500 ml-auto" />
-                      : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 ml-auto" />
+                      ? <CheckCircle className="h-3.5 w-3.5 text-success ml-auto" />
+                      : <AlertTriangle className="h-3.5 w-3.5 text-warning ml-auto" />
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -773,8 +773,8 @@ export default function AdminEvalPage() {
                   </div>
                   {loopStatus.analysisHoursAgo != null && (
                     loopStatus.analysisHoursAgo <= 26
-                      ? <CheckCircle className="h-3.5 w-3.5 text-green-500 ml-auto" />
-                      : <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 ml-auto" />
+                      ? <CheckCircle className="h-3.5 w-3.5 text-success ml-auto" />
+                      : <AlertTriangle className="h-3.5 w-3.5 text-warning ml-auto" />
                   )}
                 </div>
               </div>
@@ -788,7 +788,7 @@ export default function AdminEvalPage() {
 
         {/* Availability Status */}
         {!availLoading && availStatus && (
-          <Card className={availStatus.isFresh ? "border-border" : "border-yellow-500/30"}>
+          <Card className={availStatus.isFresh ? "border-border" : "border-warning/30"}>
             <CardContent className="pt-4 space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -812,9 +812,9 @@ export default function AdminEvalPage() {
                 <div>
                   <div className="text-lg font-bold flex items-center justify-center gap-1">
                     {availStatus.isFresh ? (
-                      <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-green-500">Fresh</span></>
+                      <><CheckCircle className="h-4 w-4 text-success" /><span className="text-success">Fresh</span></>
                     ) : (
-                      <><AlertTriangle className="h-4 w-4 text-yellow-500" /><span className="text-yellow-500">Stale</span></>
+                      <><AlertTriangle className="h-4 w-4 text-warning" /><span className="text-warning">Stale</span></>
                     )}
                   </div>
                   <div className="text-[10px] text-muted-foreground">
@@ -833,7 +833,7 @@ export default function AdminEvalPage() {
                 </div>
               )}
               {availStatus.teamsMissing.length > 0 && (
-                <p className="text-[10px] text-yellow-500">
+                <p className="text-[10px] text-warning">
                   Missing: {availStatus.teamsMissing.join(", ")}
                 </p>
               )}
@@ -956,13 +956,13 @@ export default function AdminEvalPage() {
                             <td className="py-1 font-mono">{s.snapshot_date.slice(5)}</td>
                             <td className="text-center">{s.prop_hits}/{s.prop_total}</td>
                             <td className="text-center font-mono">
-                              <span className={s.prop_hit_rate != null ? (s.prop_hit_rate >= 50 ? "text-green-400" : "text-red-400") : "text-muted-foreground"}>
+                              <span className={s.prop_hit_rate != null ? (s.prop_hit_rate >= 50 ? "text-success" : "text-danger") : "text-muted-foreground"}>
                                 {s.prop_hit_rate != null ? `${s.prop_hit_rate}%` : "—"}
                               </span>
                             </td>
                             <td className="text-center">{s.slip_hits}/{s.slip_total}</td>
                             <td className="text-center font-mono">
-                              <span className={s.slip_hit_rate != null ? (s.slip_hit_rate >= 30 ? "text-green-400" : "text-red-400") : "text-muted-foreground"}>
+                              <span className={s.slip_hit_rate != null ? (s.slip_hit_rate >= 30 ? "text-success" : "text-danger") : "text-muted-foreground"}>
                                 {s.slip_hit_rate != null ? `${s.slip_hit_rate}%` : "—"}
                               </span>
                             </td>
@@ -1214,7 +1214,7 @@ export default function AdminEvalPage() {
                               <span className="font-mono w-16">{bucket}</span>
                               <div className="flex items-center gap-2">
                                 <span className="text-muted-foreground">actual: {data.actual_rate}%</span>
-                                <span className={`font-mono font-medium ${data.delta > 5 ? "text-green-400" : data.delta < -5 ? "text-red-400" : "text-muted-foreground"}`}>
+                                <span className={`font-mono font-medium ${data.delta > 5 ? "text-success" : data.delta < -5 ? "text-danger" : "text-muted-foreground"}`}>
                                   {data.delta > 0 ? "+" : ""}{data.delta.toFixed(1)}pp
                                 </span>
                                 <span className="text-muted-foreground">({data.total})</span>
@@ -1267,7 +1267,7 @@ export default function AdminEvalPage() {
                               <div className="flex items-center gap-2">
                                 <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                                   <div
-                                    className={`h-full rounded-full ${item.spread > 15 ? "bg-green-500" : item.spread > 5 ? "bg-yellow-500" : "bg-red-500"}`}
+                                    className={`h-full rounded-full ${item.spread > 15 ? "bg-success" : item.spread > 5 ? "bg-warning" : "bg-danger"}`}
                                     style={{ width: `${Math.min(100, item.spread * 2)}%` }}
                                   />
                                 </div>
@@ -1298,7 +1298,7 @@ export default function AdminEvalPage() {
                   {propOutcomes.slice(0, 30).map((p) => (
                     <div key={p.id} className="flex items-center justify-between text-xs py-1 border-b border-border/20">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${p.hit ? "bg-green-500" : "bg-red-500"}`} />
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${p.hit ? "bg-success" : "bg-danger"}`} />
                         <span className="truncate">{p.player_name}</span>
                         <span className="text-muted-foreground">{p.stat_type} {p.threshold}</span>
                       </div>
