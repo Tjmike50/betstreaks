@@ -28,6 +28,8 @@ import AIBetBuilderPage from "./pages/AIBetBuilderPage";
 import BetAnalyzerPage from "./pages/BetAnalyzerPage";
 import SavedSlipsPage from "./pages/SavedSlipsPage";
 import AdminEvalPage from "./pages/AdminEvalPage";
+import CheatsheetsHubPage from "./pages/CheatsheetsHubPage";
+import ValueCheatsheetPage from "./pages/cheatsheets/ValueCheatsheetPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +52,9 @@ const App = () => (
                     <Route path="/" element={<Index />} />
                     <Route path="/today" element={<TodayPage />} />
                     <Route path="/best-bets" element={<BestBetsPage />} />
+                    <Route path="/cheatsheets" element={<CheatsheetsHubPage />} />
+                    <Route path="/cheatsheets/value" element={<ValueCheatsheetPage />} />
+                    <Route path="/cheatsheets/best-bets" element={<BestBetsPage />} />
                     <Route path="/alerts" element={<AlertsPage />} />
                     <Route path="/streak" element={<StreakDetailPage />} />
                     <Route path="/watchlist" element={<WatchlistPage />} />

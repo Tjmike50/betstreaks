@@ -1,11 +1,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Flame, Bell, User, Calendar, Brain } from "lucide-react";
+import { Flame, Bell, BookOpen, Brain, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAlerts } from "@/hooks/useAlerts";
 
 const navItems = [
   { path: "/", label: "Home", icon: Flame },
-  { path: "/today", label: "Today", icon: Calendar },
+  { path: "/cheatsheets", label: "Cheats", icon: BookOpen },
   { path: "/ai-builder", label: "AI", icon: Brain, isHero: true },
   { path: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
   { path: "/account", label: "Account", icon: User },
