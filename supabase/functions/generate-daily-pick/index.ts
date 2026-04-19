@@ -411,10 +411,34 @@ Deno.serve(async (req) => {
       `[generate-daily-pick] Created pick ${pickId} for ${sport} ${gameDate} with ${legs.length} legs (risk=${riskLabel})`,
     );
 
+    // Audit log — success only, admin-triggered force regenerates
+    if (force && adminUserId) {
+      try {
+        await supabase.from("analytics_events").insert({
+          event_name: "admin_regenerate_daily_pick",
+          user_id: adminUserId,
+          metadata: {
+            sport,
+            pick_date: gameDate,
+            previous_pick_id: previousPickId,
+            new_pick_id: pickId,
+            leg_count: legs.length,
+            risk_label: riskLabel,
+            avg_confidence: Number(avgConfidence.toFixed(1)),
+          },
+        });
+      } catch (auditErr) {
+        console.error("[generate-daily-pick] audit log write failed:", auditErr);
+        // non-fatal — pick is already created
+      }
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
         created: true,
+        forced: force,
+        previous_pick_id: previousPickId,
         pick_id: pickId,
         sport,
         pick_date: gameDate,
