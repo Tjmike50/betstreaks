@@ -65,29 +65,35 @@ export type Database = {
         Row: {
           created_at: string
           estimated_odds: string | null
+          generation_source: string
           id: string
           pick_date: string
           reasoning: string | null
           risk_label: string
           slip_name: string
+          sport: string
         }
         Insert: {
           created_at?: string
           estimated_odds?: string | null
+          generation_source?: string
           id?: string
           pick_date?: string
           reasoning?: string | null
           risk_label: string
           slip_name: string
+          sport?: string
         }
         Update: {
           created_at?: string
           estimated_odds?: string | null
+          generation_source?: string
           id?: string
           pick_date?: string
           reasoning?: string | null
           risk_label?: string
           slip_name?: string
+          sport?: string
         }
         Relationships: []
       }

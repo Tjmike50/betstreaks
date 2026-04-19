@@ -1,11 +1,10 @@
 // =============================================================================
-// useAIDailyPick — fetches the latest ai_daily_picks row + its legs.
-// Note: ai_daily_picks has no `sport` column; we surface the latest pick
-// regardless of sport. Sport-awareness is applied via empty-state copy on
-// the consuming component when no pick exists.
+// useAIDailyPick — fetches the latest ai_daily_picks row for the active sport,
+// plus its legs. Sport-aware: NBA vs WNBA picks are isolated.
 // =============================================================================
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useSport } from "@/contexts/SportContext";
 
 export interface AIDailyPickLeg {
   id: string;
@@ -31,12 +30,14 @@ export interface AIDailyPick {
 }
 
 export function useAIDailyPick() {
+  const { sport } = useSport();
   return useQuery({
-    queryKey: ["aiDailyPick"],
+    queryKey: ["aiDailyPick", sport],
     queryFn: async (): Promise<AIDailyPick | null> => {
       const { data: pick, error } = await supabase
         .from("ai_daily_picks")
         .select("*")
+        .eq("sport", sport)
         .order("pick_date", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(1)
