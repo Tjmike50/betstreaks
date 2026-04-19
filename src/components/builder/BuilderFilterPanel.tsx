@@ -165,9 +165,9 @@ export function BuilderFilterPanel({ filters, onChange, isPremium }: Props) {
                       onClick={() => update({ riskLevel: isActive ? null : opt.value })}
                       className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${
                         isActive
-                          ? opt.value === "safe" ? "bg-green-500/20 text-green-400 border border-green-500/30"
-                          : opt.value === "aggressive" ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                          : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                          ? opt.value === "safe" ? "bg-success/20 text-success border border-success/30"
+                          : opt.value === "aggressive" ? "bg-danger/20 text-danger border border-danger/30"
+                          : "bg-warning/20 text-warning border border-warning/30"
                           : "bg-secondary/50 text-muted-foreground hover:bg-secondary border border-transparent"
                       }`}
                     >

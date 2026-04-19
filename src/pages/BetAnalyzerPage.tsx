@@ -14,11 +14,11 @@ const STAT_TYPES = ["Points", "Rebounds", "Assists", "3-Pointers", "Spread", "To
 
 function getGradeStyle(grade: string) {
   switch (grade) {
-    case "A": return { bg: "bg-green-500/20 border-green-500/40", text: "text-green-400" };
-    case "B": return { bg: "bg-blue-500/20 border-blue-500/40", text: "text-blue-400" };
-    case "C": return { bg: "bg-yellow-500/20 border-yellow-500/40", text: "text-yellow-400" };
-    case "D": return { bg: "bg-orange-500/20 border-orange-500/40", text: "text-orange-400" };
-    case "F": return { bg: "bg-red-500/20 border-red-500/40", text: "text-red-400" };
+    case "A": return { bg: "bg-success/20 border-success/40", text: "text-success" };
+    case "B": return { bg: "bg-info/20 border-info/40", text: "text-info" };
+    case "C": return { bg: "bg-warning/20 border-warning/40", text: "text-warning" };
+    case "D": return { bg: "bg-accent-orange/20 border-accent-orange/40", text: "text-accent-orange" };
+    case "F": return { bg: "bg-danger/20 border-danger/40", text: "text-danger" };
     default: return { bg: "bg-muted", text: "text-muted-foreground" };
   }
 }
@@ -62,9 +62,9 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
             <div className="flex-1 space-y-1.5">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className={
-                  analysis.risk_label === "safe" ? "bg-green-500/20 text-green-400 border-green-500/30" :
-                  analysis.risk_label === "balanced" ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
-                  "bg-red-500/20 text-red-400 border-red-500/30"
+                  analysis.risk_label === "safe" ? "bg-success/20 text-success border-success/30" :
+                  analysis.risk_label === "balanced" ? "bg-warning/20 text-warning border-warning/30" :
+                  "bg-danger/20 text-danger border-danger/30"
                 }>
                   {analysis.risk_label}
                 </Badge>
@@ -78,9 +78,9 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
 
       {/* Strongest & Weakest */}
       <div className="grid grid-cols-2 gap-3">
-        <Card className="border-green-500/20">
+        <Card className="border-success/20">
           <CardContent className="pt-3 pb-3 space-y-1.5">
-            <div className="flex items-center gap-1.5 text-green-400 text-[11px] font-bold uppercase tracking-wide">
+            <div className="flex items-center gap-1.5 text-success text-[11px] font-bold uppercase tracking-wide">
               <TrendingUp className="h-3.5 w-3.5" />
               Strongest
             </div>
@@ -90,9 +90,9 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
             <p className="text-[11px] text-muted-foreground leading-relaxed">{analysis.strongest_leg?.reasoning}</p>
           </CardContent>
         </Card>
-        <Card className="border-red-500/20">
+        <Card className="border-danger/20">
           <CardContent className="pt-3 pb-3 space-y-1.5">
-            <div className="flex items-center gap-1.5 text-red-400 text-[11px] font-bold uppercase tracking-wide">
+            <div className="flex items-center gap-1.5 text-danger text-[11px] font-bold uppercase tracking-wide">
               <TrendingDown className="h-3.5 w-3.5" />
               Weakest
             </div>
@@ -106,9 +106,9 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
 
       {/* Correlation Warnings */}
       {analysis.correlation_warnings && analysis.correlation_warnings.length > 0 && (
-        <Card className="border-yellow-500/20 bg-yellow-500/5">
+        <Card className="border-warning/20 bg-warning/5">
           <CardContent className="pt-3 pb-3 space-y-1.5">
-            <div className="flex items-center gap-1.5 text-yellow-400 text-[11px] font-bold uppercase tracking-wide">
+            <div className="flex items-center gap-1.5 text-warning text-[11px] font-bold uppercase tracking-wide">
               <AlertTriangle className="h-3.5 w-3.5" />
               Correlation Warnings
             </div>
@@ -121,10 +121,10 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
 
       {/* Rebuilds */}
       {analysis.safer_rebuild && (
-        <Card className="border-green-500/20">
+        <Card className="border-success/20">
           <CardHeader className="pb-1.5 pt-3 px-4">
             <CardTitle className="text-sm flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-green-400" />
+              <ShieldCheck className="h-4 w-4 text-success" />
               <span>Safer Rebuild</span>
               <span className="font-mono text-primary text-xs">{analysis.safer_rebuild.estimated_odds}</span>
             </CardTitle>
@@ -142,10 +142,10 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
       )}
 
       {analysis.aggressive_rebuild && (
-        <Card className="border-red-500/20">
+        <Card className="border-danger/20">
           <CardHeader className="pb-1.5 pt-3 px-4">
             <CardTitle className="text-sm flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-red-400" />
+              <TrendingUp className="h-4 w-4 text-danger" />
               <span>Higher Payout Version</span>
               <span className="font-mono text-primary text-xs">{analysis.aggressive_rebuild.estimated_odds}</span>
             </CardTitle>

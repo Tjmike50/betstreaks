@@ -16,7 +16,7 @@ function getMarketStrength(ctx: LegDataContext): { tier: "strong" | "moderate" |
 }
 
 function ConfidenceMeter({ value }: { value: number }) {
-  const color = value >= 70 ? "bg-green-500" : value >= 45 ? "bg-yellow-500" : "bg-red-500";
+  const color = value >= 70 ? "bg-success" : value >= 45 ? "bg-warning" : "bg-danger";
   return (
     <div className="flex items-center gap-1.5">
       <div className="w-12 h-1.5 rounded-full bg-muted/40 overflow-hidden">
@@ -43,13 +43,13 @@ export function LegMarketBadges({ ctx, isGameLevel }: Props) {
       <div className="flex items-center gap-1 flex-wrap">
         {/* Verified badge */}
         {ctx.odds_validated && (
-          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/25">
+          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-success/15 text-success border border-success/25">
             <CheckCircle2 className="h-2.5 w-2.5" />
             Verified
           </span>
         )}
         {ctx.odds_validated === false && (
-          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/25">
+          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-danger/15 text-danger border border-danger/25">
             Unverified
           </span>
         )}
@@ -57,9 +57,9 @@ export function LegMarketBadges({ ctx, isGameLevel }: Props) {
         {/* Books count */}
         {ctx.books_count != null && ctx.books_count > 0 && (
           <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${
-            ctx.books_count >= 3 ? "bg-green-500/10 text-green-400 border-green-500/20"
-              : ctx.books_count >= 2 ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
-              : "bg-red-500/10 text-red-400 border-red-500/20"
+            ctx.books_count >= 3 ? "bg-success/10 text-success border-success/20"
+              : ctx.books_count >= 2 ? "bg-warning/10 text-warning border-warning/20"
+              : "bg-danger/10 text-danger border-danger/20"
           }`}>
             <BookOpen className="h-2.5 w-2.5" />
             {ctx.books_count} book{ctx.books_count > 1 ? "s" : ""}
@@ -73,7 +73,7 @@ export function LegMarketBadges({ ctx, isGameLevel }: Props) {
           </span>
         )}
         {ctx.is_main_line === false && (
-          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-warning/10 text-warning border border-warning/20">
             Alt Line
           </span>
         )}
@@ -93,7 +93,7 @@ export function LegMarketBadges({ ctx, isGameLevel }: Props) {
         {/* Edge */}
         {ctx.edge != null && ctx.edge !== 0 && (
           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
-            ctx.edge > 0 ? "bg-green-500/10 text-green-400 border-green-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"
+            ctx.edge > 0 ? "bg-success/10 text-success border-success/20" : "bg-danger/10 text-danger border-danger/20"
           }`}>
             {ctx.edge > 0 ? "+" : ""}{ctx.edge}% edge
           </span>

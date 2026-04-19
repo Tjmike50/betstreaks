@@ -49,6 +49,13 @@
     --streak-green: 165 100% 42%;
     --streak-blue: 217 92% 68%;
     --streak-gold: 18 100% 60%;
+
+    /* Semantic status tokens (AI Builder / Analyzer) */
+    --success: 142 71% 45%;
+    --warning: 45 93% 55%;
+    --danger: 0 84% 60%;
+    --info: 217 92% 60%;
+    --accent-orange: 25 95% 58%;
   }
 
   .dark {
@@ -88,6 +95,12 @@
     --sidebar-accent-foreground: 210 20% 98%;
     --sidebar-border: 212 30% 22%;
     --sidebar-ring: 205 100% 54%;
+
+    --success: 142 71% 45%;
+    --warning: 45 93% 55%;
+    --danger: 0 84% 60%;
+    --info: 217 92% 60%;
+    --accent-orange: 25 95% 58%;
   }
 }
 
