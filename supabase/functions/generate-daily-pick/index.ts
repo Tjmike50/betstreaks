@@ -165,6 +165,21 @@ function decimalToAmerican(decimal: number | null): string | null {
   return `${v}`; // already negative
 }
 
+// Map prop-score stat codes (pts/reb/ast/fg3m/...) → line_snapshots labels
+// (Points/Rebounds/Assists/3-Pointers/...). DK is our v1 source.
+const STAT_CODE_TO_SNAPSHOT_LABEL: Record<string, string[]> = {
+  pts: ["Points"],
+  reb: ["Rebounds"],
+  ast: ["Assists"],
+  fg3m: ["3-Pointers", "3-Pointers Made", "Threes Made"],
+  stl: ["Steals"],
+  blk: ["Blocks"],
+  pra: ["Pts+Rebs+Asts", "PRA"],
+  pr: ["Pts+Rebs", "PR"],
+  pa: ["Pts+Asts", "PA"],
+  ra: ["Rebs+Asts", "RA"],
+};
+
 interface EnrichedLeg extends PropScoreRow {
   side: "Over" | "Under";
   odds: string | null;
