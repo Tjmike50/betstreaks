@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSport } from "@/contexts/SportContext";
 import type { Streak } from "@/types/streak";
+import type { SportKey } from "@/lib/sports/registry";
 
-const STORAGE_KEY = "betstreaks_watchlist";
+const STORAGE_KEY_BASE = "betstreaks_watchlist";
 const MAX_OFFLINE_STARS = 5;
 
 interface WatchlistItem {
@@ -18,63 +20,62 @@ interface WatchlistItem {
   threshold: number;
 }
 
-// Create a unique key for a streak to use in the watchlist lookup
+// Per-sport offline storage key (legacy "betstreaks_watchlist" reused for NBA
+// to preserve existing local stars; WNBA gets its own bucket).
+function offlineStorageKey(sport: SportKey): string {
+  return sport === "NBA" ? STORAGE_KEY_BASE : `${STORAGE_KEY_BASE}__${sport}`;
+}
+
 function getStreakKey(streak: Pick<Streak, "entity_type" | "player_id" | "stat" | "threshold">): string {
   return `${streak.entity_type}-${streak.player_id}-${streak.stat}-${streak.threshold}`;
 }
 
-// ============================================
-// OFFLINE MODE: localStorage-based storage
-// ============================================
-
-function loadOfflineWatchlist(): string[] {
+function loadOfflineWatchlist(sport: SportKey): string[] {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(offlineStorageKey(sport));
     return stored ? JSON.parse(stored) : [];
   } catch {
     return [];
   }
 }
 
-function saveOfflineWatchlist(keys: string[]): void {
+function saveOfflineWatchlist(sport: SportKey, keys: string[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
+    localStorage.setItem(offlineStorageKey(sport), JSON.stringify(keys));
   } catch {
-    // Ignore storage errors
+    // ignore
   }
 }
 
-// ============================================
-// HOOK: useWatchlist
-// ============================================
-
-export function useWatchlist() {
+export function useWatchlist(sportOverride?: SportKey) {
   const queryClient = useQueryClient();
   const { user, isAuthenticated } = useAuth();
+  const { sport: activeSport } = useSport();
+  const sport = sportOverride ?? activeSport;
   const userId = user?.id ?? null;
-  
-  // Offline state (localStorage)
-  const [offlineKeys, setOfflineKeys] = useState<string[]>(() => loadOfflineWatchlist());
+
+  const [offlineKeys, setOfflineKeys] = useState<string[]>(() => loadOfflineWatchlist(sport));
+
+  // Reload offline keys whenever the active sport changes.
+  useEffect(() => {
+    setOfflineKeys(loadOfflineWatchlist(sport));
+  }, [sport]);
 
   // Sync offlineKeys to localStorage
   useEffect(() => {
-    saveOfflineWatchlist(offlineKeys);
-  }, [offlineKeys]);
-
-  // ============================================
-  // AUTHED MODE: Supabase-based storage (future)
-  // ============================================
+    saveOfflineWatchlist(sport, offlineKeys);
+  }, [sport, offlineKeys]);
 
   const { data: watchlistItems = [] } = useQuery({
-    queryKey: ["watchlist", userId],
+    queryKey: ["watchlist", userId, sport],
     queryFn: async () => {
       if (!userId) return [];
-      
+
       const { data, error } = await supabase
         .from("watchlist_items")
         .select("*")
         .eq("user_id", userId)
-        .eq("sport", "NBA");
+        .eq("sport", sport);
 
       if (error) throw error;
       return data as WatchlistItem[];
@@ -82,14 +83,13 @@ export function useWatchlist() {
     enabled: !!userId,
   });
 
-  // Add to watchlist (authed mode)
   const addMutation = useMutation({
     mutationFn: async (streak: Streak) => {
       if (!userId) throw new Error("Not authenticated");
 
       const { error } = await supabase.from("watchlist_items").insert({
         user_id: userId,
-        sport: "NBA",
+        sport,
         entity_type: streak.entity_type,
         player_id: streak.player_id,
         team_abbr: streak.team_abbr,
@@ -100,11 +100,10 @@ export function useWatchlist() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["watchlist", userId] });
+      queryClient.invalidateQueries({ queryKey: ["watchlist", userId, sport] });
     },
   });
 
-  // Remove from watchlist (authed mode)
   const removeMutation = useMutation({
     mutationFn: async (streak: Streak) => {
       if (!userId) throw new Error("Not authenticated");
@@ -113,7 +112,7 @@ export function useWatchlist() {
         .from("watchlist_items")
         .delete()
         .eq("user_id", userId)
-        .eq("sport", "NBA")
+        .eq("sport", sport)
         .eq("entity_type", streak.entity_type)
         .eq("player_id", streak.player_id)
         .eq("stat", streak.stat)
@@ -122,33 +121,26 @@ export function useWatchlist() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["watchlist", userId] });
+      queryClient.invalidateQueries({ queryKey: ["watchlist", userId, sport] });
     },
   });
 
-  // ============================================
-  // COMBINED: Mode-aware starred keys
-  // ============================================
-
   const starredKeys = useMemo(() => {
     const keys = new Set<string>();
-    
+
     if (userId) {
-      // Authed mode: use Supabase items
       for (const item of watchlistItems) {
         keys.add(`${item.entity_type}-${item.player_id}-${item.stat}-${item.threshold}`);
       }
     } else {
-      // Offline mode: use localStorage
       for (const key of offlineKeys) {
         keys.add(key);
       }
     }
-    
+
     return keys;
   }, [userId, watchlistItems, offlineKeys]);
 
-  // Check if a streak is starred
   const isStarred = useCallback(
     (streak: Pick<Streak, "entity_type" | "player_id" | "stat" | "threshold">): boolean => {
       return starredKeys.has(getStreakKey(streak));
@@ -156,17 +148,12 @@ export function useWatchlist() {
     [starredKeys]
   );
 
-  // ============================================
-  // TOGGLE: Mode-aware add/remove
-  // ============================================
-
   const toggleWatchlist = useCallback(
     (streak: Streak): { added: boolean; limitReached: boolean } => {
       const key = getStreakKey(streak);
       const currentlyStarred = starredKeys.has(key);
 
       if (userId) {
-        // AUTHED MODE: unlimited, use Supabase
         if (currentlyStarred) {
           removeMutation.mutate(streak);
           return { added: false, limitReached: false };
@@ -175,7 +162,6 @@ export function useWatchlist() {
           return { added: true, limitReached: false };
         }
       } else {
-        // OFFLINE MODE: capped at MAX_OFFLINE_STARS
         if (currentlyStarred) {
           setOfflineKeys((prev) => prev.filter((k) => k !== key));
           return { added: false, limitReached: false };
@@ -191,26 +177,19 @@ export function useWatchlist() {
     [userId, starredKeys, offlineKeys, addMutation, removeMutation]
   );
 
-  // Remove from offline watchlist by key
   const removeOfflineKey = useCallback((key: string) => {
     setOfflineKeys((prev) => prev.filter((k) => k !== key));
   }, []);
 
   return {
-    // Auth state
     isAuthenticated: !!userId,
-    
-    // Watchlist operations
     isStarred,
     toggleWatchlist,
     removeOfflineKey,
-    
-    // Loading state
     isLoading: addMutation.isPending || removeMutation.isPending,
-    
-    // Offline mode info
     offlineCount: offlineKeys.length,
     maxOfflineStars: MAX_OFFLINE_STARS,
     offlineKeys,
+    sport,
   };
 }
