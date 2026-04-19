@@ -3,6 +3,7 @@ import { formatDistanceToNow, format } from "date-fns";
 import { useSearchParams } from "react-router-dom";
 import { useGamesToday } from "@/hooks/useGamesToday";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
+import { useSport } from "@/contexts/SportContext";
 import { GameCard } from "@/components/GameCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,6 +14,7 @@ import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 export default function TodayPage() {
   const { games, isLoading, isFetching, error, lastUpdated, refetch, debugInfo } = useGamesToday();
   const { formattedTime: refreshStatusTime, lastRun: refreshLastRun, season } = useRefreshStatus();
+  const { config: sportConfig } = useSport();
   const [searchParams] = useSearchParams();
 
   const isDebug = searchParams.get("debug") === "1";
@@ -86,7 +88,7 @@ export default function TodayPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-lg font-medium">
-              No NBA games scheduled
+              No {sportConfig.shortName} games scheduled
             </p>
             <p className="text-sm text-muted-foreground mt-1">
               for {todayFormatted}
