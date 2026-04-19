@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useSport } from "@/contexts/SportContext";
+import type { SportKey } from "@/lib/sports/registry";
 
 export interface GameToday {
   id: string;
@@ -22,39 +24,33 @@ function getLocalDateString(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function getOffsetDateString(date: Date, offsetDays: number): string {
-  const newDate = new Date(date);
-  newDate.setDate(date.getDate() + offsetDays);
-  return getLocalDateString(newDate);
-}
-
-export function useGamesToday() {
+export function useGamesToday(sportOverride?: SportKey) {
+  const { sport: activeSport } = useSport();
+  const sport = sportOverride ?? activeSport;
   const todayStr = getLocalDateString(new Date());
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["games-today", todayStr],
+    queryKey: ["games-today", sport, todayStr],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("games_today")
         .select("*")
-        .eq("sport", "NBA")
+        .eq("sport", sport)
         .eq("game_date", todayStr)
         .order("game_time", { ascending: true, nullsFirst: false })
         .order("id", { ascending: true });
 
       if (error) throw error;
 
-      // Filter out placeholder games with null team abbreviations (All-Star break, etc.)
       const validGames = (data as GameToday[]).filter(
         (game) => game.home_team_abbr && game.away_team_abbr
       );
 
       return validGames;
     },
-    staleTime: 1000 * 60 * 2, // 2 minutes
+    staleTime: 1000 * 60 * 2,
   });
 
-  // Get the most recent updated_at from all games
   const lastUpdated = data?.reduce((latest, game) => {
     const gameUpdated = new Date(game.updated_at);
     return gameUpdated > latest ? gameUpdated : latest;
@@ -65,6 +61,7 @@ export function useGamesToday() {
   };
 
   const debugInfo = {
+    sport,
     date: todayStr,
     rawCount: data?.length ?? 0,
   };
@@ -79,3 +76,4 @@ export function useGamesToday() {
     debugInfo,
   };
 }
+
