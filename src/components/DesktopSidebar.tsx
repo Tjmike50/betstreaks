@@ -1,6 +1,6 @@
 import {
   Flame, Calendar, Brain, TrendingUp, Bookmark,
-  Bell, Heart, Star, User, Crown, Shield, BookOpen,
+  Bell, Heart, Star, User, Crown, Shield, BookOpen, Search,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -29,6 +29,7 @@ const mainNav = [
   { title: "Home", url: "/", icon: Flame },
   { title: "Today", url: "/today", icon: Calendar },
   { title: "AI Builder", url: "/ai-builder", icon: Brain },
+  { title: "Research", url: "/research", icon: Search },
   { title: "Cheatsheets", url: "/cheatsheets", icon: BookOpen },
   { title: "Best Bets", url: "/best-bets", icon: TrendingUp },
   { title: "Saved Slips", url: "/saved-slips", icon: Bookmark },

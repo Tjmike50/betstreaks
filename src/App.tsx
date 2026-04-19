@@ -29,6 +29,8 @@ import BetAnalyzerPage from "./pages/BetAnalyzerPage";
 import SavedSlipsPage from "./pages/SavedSlipsPage";
 import AdminEvalPage from "./pages/AdminEvalPage";
 import CheatsheetsHubPage from "./pages/CheatsheetsHubPage";
+import ResearchHubPage from "./pages/ResearchHubPage";
+import ResearchGamesPage from "./pages/research/ResearchGamesPage";
 import ValueCheatsheetPage from "./pages/cheatsheets/ValueCheatsheetPage";
 import StreakCheatsheetPage from "./pages/cheatsheets/StreakCheatsheetPage";
 import MatchupCheatsheetPage from "./pages/cheatsheets/MatchupCheatsheetPage";
@@ -73,6 +75,9 @@ const App = () => (
                     <Route path="/ai-builder" element={<AIBetBuilderPage />} />
                     <Route path="/analyzer" element={<BetAnalyzerPage />} />
                     <Route path="/saved-slips" element={<SavedSlipsPage />} />
+                    <Route path="/research" element={<ResearchHubPage />} />
+                    <Route path="/research/games" element={<ResearchGamesPage />} />
+                    <Route path="/research/player/:playerId" element={<PlayerPage />} />
                     <Route path="/player/:playerId" element={<PlayerPage />} />
                     <Route path="/admin/eval" element={<AdminEvalPage />} />
                     <Route path="*" element={<NotFound />} />
