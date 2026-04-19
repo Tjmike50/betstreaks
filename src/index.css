@@ -56,6 +56,11 @@
     --danger: 0 84% 60%;
     --info: 217 92% 60%;
     --accent-orange: 25 95% 58%;
+    --premium: 45 93% 55%;
+    --premium-foreground: 0 0% 0%;
+    --medal-gold: 45 93% 55%;
+    --medal-silver: 0 0% 80%;
+    --medal-bronze: 30 60% 40%;
   }
 
   .dark {
@@ -101,6 +106,11 @@
     --danger: 0 84% 60%;
     --info: 217 92% 60%;
     --accent-orange: 25 95% 58%;
+    --premium: 45 93% 55%;
+    --premium-foreground: 0 0% 0%;
+    --medal-gold: 45 93% 55%;
+    --medal-silver: 0 0% 80%;
+    --medal-bronze: 30 60% 40%;
   }
 }
 
