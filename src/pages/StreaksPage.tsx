@@ -12,6 +12,7 @@ import { AdminRefreshButton } from "@/components/AdminRefreshButton";
 import { useStreaks } from "@/hooks/useStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSport } from "@/contexts/SportContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -63,6 +64,7 @@ function saveFilters(filters: StreakFilters) {
 const Index = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { sport, config: sportConfig } = useSport();
   const [filters, setFilters] = useState<StreakFilters>(loadFilters);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
@@ -119,9 +121,11 @@ const Index = () => {
       <header className="px-4 pt-4 pb-2">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-bold text-foreground">Playoff Streaks</h2>
+            <h2 className="text-xl font-bold text-foreground">
+              {sport === "NBA" ? "Playoff Streaks" : `${sportConfig.shortName} Streaks`}
+            </h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Track active NBA Playoff player &amp; team prop streaks, updated daily.
+              Track active {sportConfig.tagline} player &amp; team prop streaks, updated daily.
             </p>
           </div>
           <AdminRefreshButton />

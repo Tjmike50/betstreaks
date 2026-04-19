@@ -3,6 +3,7 @@ import { X, Crown } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { useSport } from "@/contexts/SportContext";
 
 const STORAGE_KEY = "playoff_banner_dismissed";
 
@@ -11,8 +12,10 @@ export function EarlyAccessBanner() {
     return localStorage.getItem(STORAGE_KEY) === "true";
   });
   const { isPremium, isLoading } = usePremiumStatus();
+  const { sport } = useSport();
 
-  if (isDismissed || isLoading || isPremium) {
+  // Playoff Pass is NBA-specific; hide when viewing other sports.
+  if (isDismissed || isLoading || isPremium || sport !== "NBA") {
     return null;
   }
 

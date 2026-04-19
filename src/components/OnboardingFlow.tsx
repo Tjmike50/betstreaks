@@ -9,22 +9,22 @@ interface OnboardingFlowProps {
 
 const slides = [
   {
-    title: "Playoff Streaks Are Live 🏀",
-    body: "Track what's hitting during the NBA Playoffs — updated daily with real game data.",
+    title: "Streaks That Hit 🏀",
+    body: "Track active player & team prop streaks across the NBA and WNBA — updated daily with real game data.",
     icon: Flame,
     color: "text-primary",
     bgColor: "bg-primary/20",
   },
   {
-    title: "AI-Powered Playoff Slips",
-    body: "Our AI analyzes playoff matchups, hit rates, and streaks to build data-driven parlays instantly.",
+    title: "AI-Powered Slips",
+    body: "Our AI analyzes matchups, hit rates, and streaks to build data-driven parlays instantly.",
     icon: Brain,
     color: "text-primary",
     bgColor: "bg-primary/20",
   },
   {
     title: "Get the Playoff Pass",
-    body: "Full access through the Finals — $25. Promo codes accepted at checkout.",
+    body: "Full NBA Playoff access through the Finals — $25. Promo codes accepted at checkout.",
     icon: Crown,
     color: "text-amber-400",
     bgColor: "bg-amber-400/20",
