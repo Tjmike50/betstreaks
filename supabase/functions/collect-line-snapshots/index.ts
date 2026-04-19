@@ -95,6 +95,37 @@ serve(async (req) => {
         body: JSON.stringify({ sport: "basketball_nba", market: "h2h", ttl: 300 }),
         signal: AbortSignal.timeout(30_000),
       });
+    // Sport selection (default NBA for backward compatibility).
+    const reqBody = await req.json().catch(() => ({}));
+    const rawSport = (reqBody?.sport ?? "NBA") as string;
+    const sport: SportKey = rawSport === "WNBA" ? "WNBA" : "NBA";
+    const cfg = SPORT_CONFIG[sport];
+
+    // Offseason short-circuit (saves Odds API quota).
+    if (cfg.seasonState === "offseason") {
+      console.log(`[${sport}] seasonState=offseason — skipping line collection.`);
+      await supabase.from("refresh_status").upsert(
+        { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
+        { onConflict: "id" }
+      );
+      return new Response(
+        JSON.stringify({ ok: true, sport, skipped: "offseason", new_snapshots: 0, games_processed: 0 }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    console.log(`[${sport}] Collecting line snapshots for ${todayStr}...`);
+
+    // 1. Fetch today's games via get-odds (game-level h2h)
+    let gamesOddsResponse: any;
+    try {
+      const res = await fetch(`${fnBase}/get-odds`, {
+        method: "POST",
+        headers: svcHeaders,
+        body: JSON.stringify({ sport: cfg.oddsApiSport, market: "h2h", ttl: 300 }),
+        signal: AbortSignal.timeout(30_000),
+      });
       gamesOddsResponse = await res.json();
     } catch (e) {
       console.error("Failed to fetch game odds:", e);
@@ -106,7 +137,7 @@ serve(async (req) => {
     const oddsFallback = gamesOddsResponse.meta?.fallbackUsed || false;
     const oddsStale = gamesOddsResponse.meta?.isStale || false;
 
-    console.log(`Got ${oddsData.length} game-odds entries from ${oddsProvider} (fallback=${oddsFallback}, stale=${oddsStale})`);
+    console.log(`[${sport}] Got ${oddsData.length} game-odds entries from ${oddsProvider} (fallback=${oddsFallback}, stale=${oddsStale})`);
 
     // Deduplicate events by eventId
     const eventMap = new Map<string, any>();
@@ -121,15 +152,15 @@ serve(async (req) => {
       }
     }
     const gamesData = [...eventMap.values()];
-    console.log(`Found ${gamesData.length} unique NBA games`);
+    console.log(`[${sport}] Found ${gamesData.length} unique games`);
 
     if (gamesData.length === 0) {
       await supabase.from("refresh_status").upsert(
-        { id: 3, sport: "NBA_LINES", last_run: new Date().toISOString() },
+        { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
         { onConflict: "id" }
       );
       return new Response(
-        JSON.stringify({ ok: true, message: "No NBA games today", snapshots: 0, provider: oddsProvider }),
+        JSON.stringify({ ok: true, sport, message: `No ${sport} games today`, snapshots: 0, provider: oddsProvider }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
