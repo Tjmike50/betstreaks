@@ -596,8 +596,13 @@ serve(async (req) => {
     });
     const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    const { prompt, slipCount = 1, filters = null } = await req.json();
+    const { prompt, slipCount = 1, filters = null, sport: rawSport } = await req.json();
     if (!prompt) throw new Error("prompt is required");
+
+    // Phase 1 multi-sport: accept "NBA" | "WNBA". Default NBA for backward compatibility.
+    const sport: "NBA" | "WNBA" = rawSport === "WNBA" ? "WNBA" : "NBA";
+    const oddsApiSport = sport === "WNBA" ? "basketball_wnba" : "basketball_nba";
+    const sportLabel = sport === "WNBA" ? "WNBA" : "NBA";
 
     // --- Auth & usage limits ---
     const { data: { user } } = await supabase.auth.getUser();
@@ -645,7 +650,7 @@ serve(async (req) => {
       const gameOddsRes = await fetch(`${fnBase}/get-odds`, {
         method: "POST",
         headers: svcFetchHeaders,
-        body: JSON.stringify({ sport: "basketball_nba", market: "h2h,spreads,totals", ttl: 300 }),
+        body: JSON.stringify({ sport: oddsApiSport, market: "h2h,spreads,totals", ttl: 300 }),
         signal: AbortSignal.timeout(30_000),
       });
       const gameOddsBody = await gameOddsRes.json();
@@ -739,7 +744,7 @@ serve(async (req) => {
             method: "POST",
             headers: svcFetchHeaders,
             body: JSON.stringify({
-              sport: "basketball_nba",
+              sport: oddsApiSport,
               market: "player_points,player_rebounds,player_assists,player_threes",
               eventId: game.id,
               ttl: 120,
@@ -1527,7 +1532,7 @@ Respond with ONLY valid JSON:
       if (parts.length > 0) filterConstraints = `\n\nUSER FILTER CONSTRAINTS (MUST follow):\n${parts.map(p => `- ${p}`).join("\n")}`;
     }
 
-    const userPrompt = `Generate ${Math.min(slipCount, 5)} NBA bet slip(s) for: "${prompt}"
+    const userPrompt = `Generate ${Math.min(slipCount, 5)} ${sportLabel} bet slip(s) for: "${prompt}"
 
 Use ONLY players/stats/thresholds from the verified market entries. Each slip should have ${filters?.legCount ? filters.legCount : "2-4"} legs.${filterConstraints}`;
 
@@ -1675,7 +1680,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         const savedFallbackSlips = [];
         for (const slip of fallbackSlips) {
           const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
-            user_id: user?.id || null, prompt, slip_name: slip.slip_name,
+            user_id: user?.id || null, prompt, slip_name: slip.slip_name, sport,
             risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
           }).select().single();
           if (slipErr) { console.error("[AI-Builder] Error saving fallback slip:", slipErr); continue; }
@@ -1989,7 +1994,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
     const savedSlips = [];
     for (const slip of parsed.slips) {
       const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
-        user_id: user?.id || null, prompt, slip_name: slip.slip_name,
+        user_id: user?.id || null, prompt, slip_name: slip.slip_name, sport,
         risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
       }).select().single();
 
