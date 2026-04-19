@@ -5,6 +5,7 @@ import { Footer } from "@/components/Footer";
 import { SaveMorePicksModal } from "@/components/SaveMorePicksModal";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { useBestBets, type BestBetsFilters } from "@/hooks/useBestBets";
+import { useSport } from "@/contexts/SportContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -48,6 +49,7 @@ function saveFilters(filters: LocalFilters) {
 
 export default function BestBetsPage() {
   const navigate = useNavigate();
+  const { config: sportConfig } = useSport();
   const [filters, setFilters] = useState<LocalFilters>(loadFilters);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
@@ -249,9 +251,13 @@ export default function BestBetsPage() {
         ) : (
           <div className="text-center py-12">
             <Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">No best bets found</p>
+            <p className="text-foreground font-medium">
+              No {sportConfig.name} best bets right now
+            </p>
             <p className="text-sm text-muted-foreground mt-2">
-              Try adjusting your filters
+              {sportConfig.seasonState === "offseason"
+                ? `${sportConfig.name} is in offseason. Check back when the season resumes.`
+                : "Try adjusting your filters, or check back closer to tip-off."}
             </p>
           </div>
         )}

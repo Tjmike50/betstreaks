@@ -60,10 +60,14 @@ export default function ResearchGamesPage() {
           <div className="glass-card p-8 text-center">
             <CalendarDays className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
             <h3 className="text-base font-semibold text-foreground mb-1">
-              No games scheduled
+              {config.seasonState === "offseason"
+                ? `${config.name} is in offseason`
+                : `No ${config.name} games scheduled`}
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
-              {config.tagline} doesn't have games on the board today.
+              {config.seasonState === "offseason"
+                ? "Check back when the season resumes."
+                : `${config.name} doesn't have games on the board today.`}
             </p>
             <Button variant="outline" size="sm" onClick={() => navigate("/cheatsheets")}>
               Browse Cheatsheets
