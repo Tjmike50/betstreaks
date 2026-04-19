@@ -421,6 +421,17 @@ Deno.serve(async (req) => {
     const slipName = buildSlipName(sport, gameDate);
     const reasoning = buildReasoning(legs, avgConfidence);
 
+    // Enrich with DraftKings odds (fail-soft: missing snapshot → null)
+    const { enriched, estimatedOdds } = await enrichLegsWithOdds(
+      supabase,
+      legs,
+      gameDate,
+    );
+    const oddsHitCount = enriched.filter((l) => l.odds != null).length;
+    console.log(
+      `[generate-daily-pick] Odds enrichment: ${oddsHitCount}/${enriched.length} legs matched · estimated_odds=${estimatedOdds ?? "null"}`,
+    );
+
     // Insert pick
     const { data: insertedPick, error: insertPickError } = await supabase
       .from("ai_daily_picks")
@@ -430,7 +441,7 @@ Deno.serve(async (req) => {
         risk_label: riskLabel,
         slip_name: slipName,
         reasoning,
-        estimated_odds: null, // odds enrichment deferred
+        estimated_odds: estimatedOdds,
         generation_source: "auto",
       })
       .select("id")
@@ -456,21 +467,18 @@ Deno.serve(async (req) => {
 
     const pickId = insertedPick.id;
 
-    // Insert legs
-    const legRows = legs.map((leg, idx) => {
-      const side = determineSide(leg);
-      return {
-        daily_pick_id: pickId,
-        leg_order: idx + 1,
-        player_name: leg.player_name,
-        team_abbr: leg.team_abbr,
-        stat_type: leg.stat_type,
-        pick: side,
-        line: String(leg.threshold),
-        odds: null,
-        reasoning: `Confidence ${(leg.confidence_score ?? 0).toFixed(0)} · Value ${(leg.value_score ?? 0).toFixed(0)} · L10 avg ${(leg.last10_avg ?? leg.season_avg ?? 0).toFixed(1)}`,
-      };
-    });
+    // Insert legs (with enriched odds)
+    const legRows = enriched.map((leg, idx) => ({
+      daily_pick_id: pickId,
+      leg_order: idx + 1,
+      player_name: leg.player_name,
+      team_abbr: leg.team_abbr,
+      stat_type: leg.stat_type,
+      pick: leg.side,
+      line: String(leg.threshold),
+      odds: leg.odds,
+      reasoning: `Confidence ${(leg.confidence_score ?? 0).toFixed(0)} · Value ${(leg.value_score ?? 0).toFixed(0)} · L10 avg ${(leg.last10_avg ?? leg.season_avg ?? 0).toFixed(1)}`,
+    }));
 
     const { error: insertLegsError } = await supabase
       .from("ai_daily_pick_legs")
