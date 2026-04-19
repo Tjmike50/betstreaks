@@ -9,7 +9,8 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { DesktopSidebar } from "@/components/DesktopSidebar";
 import { MobileHeader } from "@/components/MobileHeader";
 import { BottomNav } from "@/components/BottomNav";
-import Index from "./pages/Index";
+import DashboardPage from "./pages/DashboardPage";
+import StreaksPage from "./pages/StreaksPage";
 import TodayPage from "./pages/TodayPage";
 import PlayerPage from "./pages/PlayerPage";
 import StreakDetailPage from "./pages/StreakDetailPage";
@@ -54,7 +55,8 @@ const App = () => (
                 <MobileHeader />
                 <main className="flex-1">
                   <Routes>
-                    <Route path="/" element={<Index />} />
+                    <Route path="/" element={<DashboardPage />} />
+                    <Route path="/streaks" element={<StreaksPage />} />
                     <Route path="/today" element={<TodayPage />} />
                     <Route path="/best-bets" element={<BestBetsPage />} />
                     <Route path="/cheatsheets" element={<CheatsheetsHubPage />} />

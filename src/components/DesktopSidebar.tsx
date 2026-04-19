@@ -27,6 +27,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 const mainNav = [
   { title: "Home", url: "/", icon: Flame },
+  { title: "Streaks", url: "/streaks", icon: TrendingUp },
   { title: "Today", url: "/today", icon: Calendar },
   { title: "AI Builder", url: "/ai-builder", icon: Brain },
   { title: "Research", url: "/research", icon: Search },
