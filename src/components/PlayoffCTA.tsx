@@ -2,11 +2,14 @@ import { Crown, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { useSport } from "@/contexts/SportContext";
 
 export function PlayoffCTA() {
   const { isPremium, isLoading } = usePremiumStatus();
+  const { sport } = useSport();
 
-  if (isLoading || isPremium) {
+  // Playoff Pass is NBA-Playoffs specific — hide for other sports.
+  if (isLoading || isPremium || sport !== "NBA") {
     return null;
   }
 

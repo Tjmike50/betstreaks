@@ -10,6 +10,7 @@ import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { Badge } from "@/components/ui/badge";
 import { PREMIUM_FEATURES, PREMIUM_PRICING } from "@/lib/premiumFeatures";
 import { analytics } from "@/lib/analytics";
+import { useSport } from "@/contexts/SportContext";
 
 const PRICE_IDS = {
   monthly: "price_1SyJVfF2kOU6awRkLbvUGeLl",
@@ -25,6 +26,7 @@ export default function PremiumPage() {
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
   const { isPremium, isLoading: isPremiumLoading, refetch } = usePremiumStatus();
+  const { sport } = useSport();
   
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -310,7 +312,8 @@ export default function PremiumPage() {
         ) : (
           // Non-Premium User View - Subscription Options
           <div className="space-y-6">
-            {/* Playoff Pass - Highlighted */}
+            {/* Playoff Pass — NBA-Playoffs only */}
+            {sport === "NBA" && (
             <Card className="border-2 border-primary relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
               <CardContent className="p-6 space-y-5">
@@ -374,6 +377,7 @@ export default function PremiumPage() {
                 </p>
               </CardContent>
             </Card>
+            )}
 
             {/* Standard Plans */}
             <Card className="bg-card border-border">
