@@ -143,6 +143,98 @@ function pickLegs(rows: PropScoreRow[], legCount: number): PropScoreRow[] {
   return picked;
 }
 
+// =============================================================================
+// Odds enrichment helpers (DraftKings-only for v1)
+// =============================================================================
+function americanToDecimal(american: string | null | undefined): number | null {
+  if (!american) return null;
+  const trimmed = String(american).trim().replace(/^\+/, "");
+  const n = Number(trimmed);
+  if (!isFinite(n) || n === 0) return null;
+  if (n > 0) return n / 100 + 1;
+  return 100 / Math.abs(n) + 1;
+}
+
+function decimalToAmerican(decimal: number | null): string | null {
+  if (decimal == null || !isFinite(decimal) || decimal <= 1) return null;
+  if (decimal >= 2) {
+    const v = Math.round((decimal - 1) * 100);
+    return `+${v}`;
+  }
+  const v = Math.round(-100 / (decimal - 1));
+  return `${v}`; // already negative
+}
+
+// Map prop-score stat codes (pts/reb/ast/fg3m/...) → line_snapshots labels
+// (Points/Rebounds/Assists/3-Pointers/...). DK is our v1 source.
+const STAT_CODE_TO_SNAPSHOT_LABEL: Record<string, string[]> = {
+  pts: ["Points"],
+  reb: ["Rebounds"],
+  ast: ["Assists"],
+  fg3m: ["3-Pointers", "3-Pointers Made", "Threes Made"],
+  stl: ["Steals"],
+  blk: ["Blocks"],
+  pra: ["Pts+Rebs+Asts", "PRA"],
+  pr: ["Pts+Rebs", "PR"],
+  pa: ["Pts+Asts", "PA"],
+  ra: ["Rebs+Asts", "RA"],
+};
+
+interface EnrichedLeg extends PropScoreRow {
+  side: "Over" | "Under";
+  odds: string | null;
+}
+
+async function enrichLegsWithOdds(
+  supabase: ReturnType<typeof createClient>,
+  legs: PropScoreRow[],
+  gameDate: string,
+): Promise<{ enriched: EnrichedLeg[]; estimatedOdds: string | null }> {
+  const enriched = await Promise.all(
+    legs.map(async (leg): Promise<EnrichedLeg> => {
+      const side = determineSide(leg);
+      const labelCandidates =
+        STAT_CODE_TO_SNAPSHOT_LABEL[leg.stat_type.toLowerCase()] ?? [leg.stat_type];
+      try {
+        const { data, error } = await supabase
+          .from("line_snapshots")
+          .select("over_odds, under_odds, snapshot_at, stat_type")
+          .eq("player_name", leg.player_name)
+          .in("stat_type", labelCandidates)
+          .eq("threshold", leg.threshold)
+          .eq("game_date", gameDate)
+          .eq("sportsbook", "draftkings")
+          .order("snapshot_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          console.warn(
+            `[generate-daily-pick] odds lookup error for ${leg.player_name} ${leg.stat_type} ${leg.threshold}:`,
+            error.message,
+          );
+          return { ...leg, side, odds: null };
+        }
+        const odds = side === "Over" ? data?.over_odds ?? null : data?.under_odds ?? null;
+        return { ...leg, side, odds: odds ?? null };
+      } catch (err) {
+        console.warn(
+          `[generate-daily-pick] odds lookup failed for ${leg.player_name}:`,
+          err instanceof Error ? err.message : err,
+        );
+        return { ...leg, side, odds: null };
+      }
+    }),
+  );
+
+  // Compute parlay total only if every leg has odds
+  const decimals = enriched.map((l) => americanToDecimal(l.odds));
+  if (decimals.some((d) => d == null)) {
+    return { enriched, estimatedOdds: null };
+  }
+  const totalDecimal = decimals.reduce((acc, d) => acc * (d as number), 1);
+  return { enriched, estimatedOdds: decimalToAmerican(totalDecimal) };
+}
+
 function buildSlipName(sport: string, dateStr: string): string {
   const d = new Date(dateStr + "T12:00:00Z");
   const month = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
@@ -346,6 +438,17 @@ Deno.serve(async (req) => {
     const slipName = buildSlipName(sport, gameDate);
     const reasoning = buildReasoning(legs, avgConfidence);
 
+    // Enrich with DraftKings odds (fail-soft: missing snapshot → null)
+    const { enriched, estimatedOdds } = await enrichLegsWithOdds(
+      supabase,
+      legs,
+      gameDate,
+    );
+    const oddsHitCount = enriched.filter((l) => l.odds != null).length;
+    console.log(
+      `[generate-daily-pick] Odds enrichment: ${oddsHitCount}/${enriched.length} legs matched · estimated_odds=${estimatedOdds ?? "null"}`,
+    );
+
     // Insert pick
     const { data: insertedPick, error: insertPickError } = await supabase
       .from("ai_daily_picks")
@@ -355,7 +458,7 @@ Deno.serve(async (req) => {
         risk_label: riskLabel,
         slip_name: slipName,
         reasoning,
-        estimated_odds: null, // odds enrichment deferred
+        estimated_odds: estimatedOdds,
         generation_source: "auto",
       })
       .select("id")
@@ -381,21 +484,18 @@ Deno.serve(async (req) => {
 
     const pickId = insertedPick.id;
 
-    // Insert legs
-    const legRows = legs.map((leg, idx) => {
-      const side = determineSide(leg);
-      return {
-        daily_pick_id: pickId,
-        leg_order: idx + 1,
-        player_name: leg.player_name,
-        team_abbr: leg.team_abbr,
-        stat_type: leg.stat_type,
-        pick: side,
-        line: String(leg.threshold),
-        odds: null,
-        reasoning: `Confidence ${(leg.confidence_score ?? 0).toFixed(0)} · Value ${(leg.value_score ?? 0).toFixed(0)} · L10 avg ${(leg.last10_avg ?? leg.season_avg ?? 0).toFixed(1)}`,
-      };
-    });
+    // Insert legs (with enriched odds)
+    const legRows = enriched.map((leg, idx) => ({
+      daily_pick_id: pickId,
+      leg_order: idx + 1,
+      player_name: leg.player_name,
+      team_abbr: leg.team_abbr,
+      stat_type: leg.stat_type,
+      pick: leg.side,
+      line: String(leg.threshold),
+      odds: leg.odds,
+      reasoning: `Confidence ${(leg.confidence_score ?? 0).toFixed(0)} · Value ${(leg.value_score ?? 0).toFixed(0)} · L10 avg ${(leg.last10_avg ?? leg.season_avg ?? 0).toFixed(1)}`,
+    }));
 
     const { error: insertLegsError } = await supabase
       .from("ai_daily_pick_legs")
@@ -425,6 +525,8 @@ Deno.serve(async (req) => {
             leg_count: legs.length,
             risk_label: riskLabel,
             avg_confidence: Number(avgConfidence.toFixed(1)),
+            estimated_odds: estimatedOdds,
+            odds_hit_count: oddsHitCount,
           },
         });
       } catch (auditErr) {
@@ -446,6 +548,8 @@ Deno.serve(async (req) => {
         risk_label: riskLabel,
         leg_count: legs.length,
         avg_confidence: Number(avgConfidence.toFixed(1)),
+        estimated_odds: estimatedOdds,
+        odds_hit_count: oddsHitCount,
         duration_ms: Date.now() - startTime,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
