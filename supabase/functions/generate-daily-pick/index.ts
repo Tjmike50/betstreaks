@@ -193,12 +193,14 @@ async function enrichLegsWithOdds(
   const enriched = await Promise.all(
     legs.map(async (leg): Promise<EnrichedLeg> => {
       const side = determineSide(leg);
+      const labelCandidates =
+        STAT_CODE_TO_SNAPSHOT_LABEL[leg.stat_type.toLowerCase()] ?? [leg.stat_type];
       try {
         const { data, error } = await supabase
           .from("line_snapshots")
-          .select("over_odds, under_odds, snapshot_at")
+          .select("over_odds, under_odds, snapshot_at, stat_type")
           .eq("player_name", leg.player_name)
-          .eq("stat_type", leg.stat_type)
+          .in("stat_type", labelCandidates)
           .eq("threshold", leg.threshold)
           .eq("game_date", gameDate)
           .eq("sportsbook", "draftkings")
