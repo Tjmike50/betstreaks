@@ -30,10 +30,12 @@ serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    const { legs } = await req.json();
+    const { legs, sport: rawSport } = await req.json();
     if (!legs || !Array.isArray(legs) || legs.length === 0) {
       throw new Error("legs array is required");
     }
+    const sport: "NBA" | "WNBA" = rawSport === "WNBA" ? "WNBA" : "NBA";
+    const sportLabel = sport === "WNBA" ? "WNBA" : "NBA";
 
     // Check user auth & premium for free limit
     const { data: { user } } = await supabase.auth.getUser();
@@ -71,7 +73,7 @@ serve(async (req) => {
       }
     }
 
-    const systemPrompt = `You are an NBA betting analyst for BetStreaks. Analyze bet slips and provide structured grades.
+    const systemPrompt = `You are an ${sportLabel} betting analyst for BetStreaks. Analyze bet slips and provide structured grades.
 
 RULES:
 - Never say "lock", "guaranteed", or "sure thing"

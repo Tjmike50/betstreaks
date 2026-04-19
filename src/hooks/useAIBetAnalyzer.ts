@@ -2,11 +2,13 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { BetAnalysis, AnalyzerLegInput } from "@/types/aiSlip";
 import { toast } from "@/hooks/use-toast";
+import { useSport } from "@/contexts/SportContext";
 
 export function useAIBetAnalyzer() {
   const [analysis, setAnalysis] = useState<BetAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { sport } = useSport();
 
   const analyzeSlip = async (legs: AnalyzerLegInput[]) => {
     setIsLoading(true);
@@ -15,7 +17,7 @@ export function useAIBetAnalyzer() {
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke("ai-bet-analyzer", {
-        body: { legs },
+        body: { legs, sport },
       });
 
       if (fnError) {
