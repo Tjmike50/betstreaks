@@ -78,6 +78,7 @@ const App = () => (
                     <Route path="/saved-slips" element={<SavedSlipsPage />} />
                     <Route path="/research" element={<ResearchHubPage />} />
                     <Route path="/research/games" element={<ResearchGamesPage />} />
+                    <Route path="/research/players" element={<ResearchPlayersPage />} />
                     <Route path="/research/player/:playerId" element={<PlayerPage />} />
                     <Route path="/player/:playerId" element={<PlayerPage />} />
                     <Route path="/admin/eval" element={<AdminEvalPage />} />
