@@ -30,12 +30,14 @@ export interface AIDailyPick {
 }
 
 export function useAIDailyPick() {
+  const { sport } = useSport();
   return useQuery({
-    queryKey: ["aiDailyPick"],
+    queryKey: ["aiDailyPick", sport],
     queryFn: async (): Promise<AIDailyPick | null> => {
       const { data: pick, error } = await supabase
         .from("ai_daily_picks")
         .select("*")
+        .eq("sport", sport)
         .order("pick_date", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(1)
