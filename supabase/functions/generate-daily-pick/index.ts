@@ -71,26 +71,28 @@ function determineSide(row: PropScoreRow): "Over" | "Under" {
 }
 
 function pickLegs(rows: PropScoreRow[], legCount: number): PropScoreRow[] {
-  // Deterministic recipe:
-  // - confidence_score >= 70, value_score >= 60
-  // - one leg per (player_id) — no doubling up on same player
-  // - one leg per game (proxy: one per team_abbr OR opponent_abbr pairing)
-  // - prefer stat-type diversity
-  // - sort by composite (confidence + value)/2 desc
+  // Deterministic recipe (calibrated to market-first scoring scale 15–85):
+  // - Sanity floors: confidence_score >= 55, value_score >= 50
+  // - Composite = (confidence * 0.6 + value * 0.4) — confidence weighted higher
+  // - Diversification passes: stat-type, then game-uniqueness, then player-uniqueness
+  // - Returns top N after diversification
   const eligible = rows
     .filter(
       (r) =>
-        (r.confidence_score ?? 0) >= 70 &&
-        (r.value_score ?? 0) >= 60 &&
+        (r.confidence_score ?? 0) >= 55 &&
+        (r.value_score ?? 0) >= 50 &&
         r.threshold > 0 &&
         r.player_name &&
         r.stat_type,
     )
     .sort((a, b) => {
-      const sa = ((a.confidence_score ?? 0) + (a.value_score ?? 0)) / 2;
-      const sb = ((b.confidence_score ?? 0) + (b.value_score ?? 0)) / 2;
+      const sa =
+        (a.confidence_score ?? 0) * 0.6 + (a.value_score ?? 0) * 0.4;
+      const sb =
+        (b.confidence_score ?? 0) * 0.6 + (b.value_score ?? 0) * 0.4;
       return sb - sa;
     });
+
 
   const picked: PropScoreRow[] = [];
   const seenPlayers = new Set<number>();
