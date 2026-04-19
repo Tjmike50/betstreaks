@@ -42,8 +42,8 @@ export function PremiumLockModal({ open, onOpenChange }: PremiumLockModalProps) 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-yellow-500/20">
-            <Crown className="h-6 w-6 text-yellow-500" />
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-premium/20">
+            <Crown className="h-6 w-6 text-premium" />
           </div>
           <DialogTitle className="text-center">
             Upgrade to Premium

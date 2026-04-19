@@ -91,7 +91,7 @@ export default function BestBetsPage() {
       {/* Header */}
       <header className="px-4 py-4 border-b border-border">
         <div className="flex items-center gap-2">
-          <Trophy className="h-6 w-6 text-amber-500" />
+          <Trophy className="h-6 w-6 text-premium" />
           <h1 className="text-2xl font-bold text-foreground">Best Bets</h1>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
@@ -230,10 +230,10 @@ export default function BestBetsPage() {
                     <div
                       className={`absolute -left-1 -top-1 z-10 h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${
                         index === 0
-                          ? "bg-amber-500 text-black"
+                          ? "bg-medal-gold text-background"
                           : index === 1
-                          ? "bg-gray-300 text-black"
-                          : "bg-amber-700 text-white"
+                          ? "bg-medal-silver text-background"
+                          : "bg-medal-bronze text-foreground"
                       }`}
                     >
                       {index + 1}

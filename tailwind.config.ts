@@ -67,6 +67,15 @@ export default {
         danger: "hsl(var(--danger))",
         info: "hsl(var(--info))",
         "accent-orange": "hsl(var(--accent-orange))",
+        premium: {
+          DEFAULT: "hsl(var(--premium))",
+          foreground: "hsl(var(--premium-foreground))",
+        },
+        medal: {
+          gold: "hsl(var(--medal-gold))",
+          silver: "hsl(var(--medal-silver))",
+          bronze: "hsl(var(--medal-bronze))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

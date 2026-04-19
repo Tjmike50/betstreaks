@@ -94,20 +94,20 @@ export default function AccountPage() {
       // Logged out - show upgrade teaser
       return (
         <Card 
-          className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
+          className="bg-gradient-to-r from-premium/10 to-premium/5 border-premium/20 cursor-pointer hover:bg-premium/15 transition-colors"
           onClick={() => navigate("/premium")}
         >
           <CardContent className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
-                <Crown className="h-5 w-5 text-yellow-500" />
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-premium/20">
+                <Crown className="h-5 w-5 text-premium" />
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">Go Premium</h3>
                 <p className="text-xs text-muted-foreground">$10/mo or $60/yr</p>
               </div>
             </div>
-            <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
+            <Button variant="outline" size="sm" className="border-premium/30 text-premium hover:bg-premium/10">
               Learn more
             </Button>
           </CardContent>
@@ -117,7 +117,7 @@ export default function AccountPage() {
 
     if (isPremiumLoading) {
       return (
-        <Card className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20">
+        <Card className="bg-gradient-to-r from-premium/10 to-premium/5 border-premium/20">
           <CardContent className="p-4 flex items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </CardContent>
@@ -128,11 +128,11 @@ export default function AccountPage() {
     if (isPremium) {
       // Premium user - show status and manage button
       return (
-        <Card className="bg-gradient-to-r from-green-500/10 to-green-500/5 border-green-500/20">
+        <Card className="bg-gradient-to-r from-success/10 to-success/5 border-success/20">
           <CardContent className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-500/20">
-                <Check className="h-5 w-5 text-green-500" />
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-success/20">
+                <Check className="h-5 w-5 text-success" />
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">You are Premium</h3>
@@ -142,7 +142,7 @@ export default function AccountPage() {
             <Button 
               variant="outline" 
               size="sm" 
-              className="border-green-500/30 text-green-500 hover:bg-green-500/10"
+              className="border-success/30 text-success hover:bg-success/10"
               onClick={handleManageBilling}
               disabled={isPortalLoading}
             >
@@ -163,20 +163,20 @@ export default function AccountPage() {
     // Logged in but not premium - show upgrade CTA
     return (
       <Card 
-        className="bg-gradient-to-r from-yellow-500/10 to-yellow-500/5 border-yellow-500/20 cursor-pointer hover:bg-yellow-500/15 transition-colors"
+        className="bg-gradient-to-r from-premium/10 to-premium/5 border-premium/20 cursor-pointer hover:bg-premium/15 transition-colors"
         onClick={() => navigate("/premium")}
       >
         <CardContent className="p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20">
-              <Crown className="h-5 w-5 text-yellow-500" />
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-premium/20">
+              <Crown className="h-5 w-5 text-premium" />
             </div>
             <div>
               <h3 className="font-semibold text-foreground">Go Premium</h3>
               <p className="text-xs text-muted-foreground">$10/mo or $60/yr</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" className="border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10">
+          <Button variant="outline" size="sm" className="border-premium/30 text-premium hover:bg-premium/10">
             Upgrade
           </Button>
         </CardContent>
@@ -219,7 +219,7 @@ export default function AccountPage() {
                     Checking...
                   </span>
                 ) : isPremium ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-medium">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-success/20 text-success text-xs font-medium">
                     <Check className="h-3 w-3" />
                     Premium
                   </span>
