@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bookmark, Brain, AlertCircle, ArrowUpDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSport } from "@/contexts/SportContext";
+import { ENABLED_SPORTS, type SportKey } from "@/lib/sports/registry";
 import { toast } from "@/hooks/use-toast";
 import { SavedSlipCard } from "@/components/saved-slips/SavedSlipCard";
 import type { AISlip } from "@/types/aiSlip";
@@ -14,12 +16,20 @@ type SortMode = "newest" | "oldest" | "risk";
 
 export default function SavedSlipsPage() {
   const { user } = useAuth();
-  const { sport } = useSport();
+  const { sport: activeSport } = useSport();
   const navigate = useNavigate();
   const [slips, setSlips] = useState<AISlip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("newest");
+  // Local tab override — defaults to global active sport, but the user can
+  // flip between NBA/WNBA on the page without changing the global sport.
+  const [tabSport, setTabSport] = useState<SportKey>(activeSport);
+
+  // Keep tab in sync if the global sport changes (e.g. user switches in nav).
+  useEffect(() => {
+    setTabSport(activeSport);
+  }, [activeSport]);
 
   useEffect(() => {
     if (!user) {
@@ -27,7 +37,10 @@ export default function SavedSlipsPage() {
       return;
     }
     loadSavedSlips();
-  }, [user, sport]);
+    // We intentionally load ALL the user's saved slips once, then filter
+    // client-side by tabSport — avoids a refetch on every tab change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const loadSavedSlips = async () => {
     if (!user) return;
@@ -39,7 +52,6 @@ export default function SavedSlipsPage() {
         .from("saved_slips")
         .select("slip_id")
         .eq("user_id", user.id)
-        .eq("sport", sport)
         .order("created_at", { ascending: false });
 
       if (savedErr) throw savedErr;
@@ -97,7 +109,23 @@ export default function SavedSlipsPage() {
     navigate(`/ai-builder?prompt=${encodeURIComponent(prompt)}`);
   };
 
-  const sortedSlips = [...slips].sort((a, b) => {
+  // Per-sport counts for the tab labels.
+  const counts = useMemo(() => {
+    const c: Record<SportKey, number> = { NBA: 0, WNBA: 0 };
+    for (const s of slips) {
+      const key = (s.sport as SportKey) || "NBA";
+      if (key in c) c[key] += 1;
+    }
+    return c;
+  }, [slips]);
+
+  // Filter by the active tab sport.
+  const filteredSlips = useMemo(
+    () => slips.filter((s) => ((s.sport as SportKey) || "NBA") === tabSport),
+    [slips, tabSport],
+  );
+
+  const sortedSlips = [...filteredSlips].sort((a, b) => {
     if (sortMode === "oldest") return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     if (sortMode === "risk") {
       const order = { safe: 0, balanced: 1, aggressive: 2 };
@@ -142,16 +170,30 @@ export default function SavedSlipsPage() {
               <span className="text-sm font-semibold text-primary">Saved Slips</span>
             </div>
             <p className="text-xs text-muted-foreground pl-1">
-              {slips.length} slip{slips.length !== 1 ? "s" : ""} saved
+              {filteredSlips.length} {tabSport} slip{filteredSlips.length !== 1 ? "s" : ""} saved
             </p>
           </div>
-          {slips.length > 1 && (
+          {filteredSlips.length > 1 && (
             <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={cycleSortMode}>
               <ArrowUpDown className="h-3 w-3" />
               {sortLabel}
             </Button>
           )}
         </div>
+
+        {/* Sport tabs */}
+        <Tabs value={tabSport} onValueChange={(v) => setTabSport(v as SportKey)} className="w-full">
+          <TabsList className="w-full">
+            {ENABLED_SPORTS.map((s) => (
+              <TabsTrigger key={s.key} value={s.key} className="flex-1">
+                {s.shortName}
+                <span className="ml-1.5 text-[10px] text-muted-foreground">
+                  ({counts[s.key] ?? 0})
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
         {/* Error state */}
         {error && (
@@ -182,14 +224,16 @@ export default function SavedSlipsPage() {
               </Card>
             ))}
           </div>
-        ) : !error && slips.length === 0 ? (
+        ) : !error && filteredSlips.length === 0 ? (
           <div className="text-center py-12 space-y-4">
             <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mx-auto">
               <Brain className="h-8 w-8 text-muted-foreground" />
             </div>
             <div className="space-y-1">
-              <p className="text-sm font-medium">No saved slips yet</p>
-              <p className="text-xs text-muted-foreground">Generate slips with the AI Builder and save your favorites</p>
+              <p className="text-sm font-medium">No saved {tabSport} slips yet</p>
+              <p className="text-xs text-muted-foreground">
+                Generate {tabSport} slips with the AI Builder and save your favorites
+              </p>
             </div>
             <Button variant="outline" onClick={() => navigate("/ai-builder")}>
               Build a Slip
