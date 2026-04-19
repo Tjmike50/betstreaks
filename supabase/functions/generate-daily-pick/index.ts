@@ -12,6 +12,10 @@
 //   sport: "NBA" | "WNBA"  (required, default "NBA")
 //   leg_count: number      (optional, default 3, clamped 1..6)
 //   game_date: "YYYY-MM-DD" (optional, defaults to today UTC date)
+//   force: boolean         (optional, ADMIN-ONLY) — when true, deletes any
+//                          existing pick for (sport, pick_date) and regenerates.
+//                          Requires Authorization: Bearer <user_jwt> for an
+//                          admin user (user_flags.is_admin = true).
 // =============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
