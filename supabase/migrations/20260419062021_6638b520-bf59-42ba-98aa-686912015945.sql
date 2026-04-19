@@ -1,0 +1,1 @@
+DELETE FROM ai_daily_picks WHERE id = '7ec542f2-1d2e-4ed0-8fb7-1fc89a2190e8';
