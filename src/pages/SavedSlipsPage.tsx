@@ -113,7 +113,7 @@ export default function SavedSlipsPage() {
   const counts = useMemo(() => {
     const c: Record<SportKey, number> = { NBA: 0, WNBA: 0 };
     for (const s of slips) {
-      const key = (s.sport as SportKey) || "NBA";
+      const key = ((s as any).sport as SportKey) || "NBA";
       if (key in c) c[key] += 1;
     }
     return c;
@@ -121,7 +121,7 @@ export default function SavedSlipsPage() {
 
   // Filter by the active tab sport.
   const filteredSlips = useMemo(
-    () => slips.filter((s) => ((s.sport as SportKey) || "NBA") === tabSport),
+    () => slips.filter((s) => (((s as any).sport as SportKey) || "NBA") === tabSport),
     [slips, tabSport],
   );
 
