@@ -12,6 +12,10 @@
 //   sport: "NBA" | "WNBA"  (required, default "NBA")
 //   leg_count: number      (optional, default 3, clamped 1..6)
 //   game_date: "YYYY-MM-DD" (optional, defaults to today UTC date)
+//   force: boolean         (optional, ADMIN-ONLY) — when true, deletes any
+//                          existing pick for (sport, pick_date) and regenerates.
+//                          Requires Authorization: Bearer <user_jwt> for an
+//                          admin user (user_flags.is_admin = true).
 // =============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -165,6 +169,7 @@ Deno.serve(async (req) => {
     let sport = (url.searchParams.get("sport") ?? "NBA").toUpperCase();
     let legCount = Number(url.searchParams.get("leg_count") ?? "3");
     let gameDate = url.searchParams.get("game_date") ?? "";
+    let force = url.searchParams.get("force") === "true";
 
     // Allow body to override
     if (req.method === "POST") {
@@ -173,6 +178,7 @@ Deno.serve(async (req) => {
         if (body?.sport) sport = String(body.sport).toUpperCase();
         if (body?.leg_count != null) legCount = Number(body.leg_count);
         if (body?.game_date) gameDate = String(body.game_date);
+        if (body?.force === true) force = true;
       } catch {
         // ignore — empty body is fine
       }
@@ -188,7 +194,6 @@ Deno.serve(async (req) => {
     legCount = Math.max(1, Math.min(6, isNaN(legCount) ? 3 : legCount));
 
     if (!gameDate) {
-      // Default: today (UTC date — matches game_date convention in player_prop_scores)
       gameDate = new Date().toISOString().slice(0, 10);
     }
 
@@ -196,7 +201,49 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Skip-on-conflict: if a pick already exists for (sport, pick_date), bail.
+    // -------------------------------------------------------------------------
+    // Admin verification — only when force=true.
+    // Default (cron / non-force) path stays open.
+    // -------------------------------------------------------------------------
+    let adminUserId: string | null = null;
+    if (force) {
+      const authHeader = req.headers.get("Authorization") ?? "";
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (!token) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "Authentication required for force=true" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      const { data: userData, error: userError } = await supabase.auth.getUser(token);
+      if (userError || !userData?.user) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "Invalid auth token" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      const { data: flags, error: flagsError } = await supabase
+        .from("user_flags")
+        .select("is_admin")
+        .eq("user_id", userData.user.id)
+        .maybeSingle();
+      if (flagsError || !flags?.is_admin) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "Admin privileges required for force=true" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      adminUserId = userData.user.id;
+      console.log(
+        `[generate-daily-pick] Force regenerate authorized for admin ${adminUserId} (${sport} ${gameDate})`,
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // Existing pick handling
+    //   force=false → skip-on-conflict (current behavior, unchanged)
+    //   force=true  → delete existing pick + legs (FK cascade), then regenerate
+    // -------------------------------------------------------------------------
     const { data: existing, error: existingError } = await supabase
       .from("ai_daily_picks")
       .select("id, slip_name, created_at")
@@ -205,21 +252,41 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (existingError) throw existingError;
+
+    let previousPickId: string | null = null;
     if (existing) {
+      if (!force) {
+        console.log(
+          `[generate-daily-pick] Skip: pick already exists for ${sport} ${gameDate} (id=${existing.id})`,
+        );
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            skipped: true,
+            reason: "already_exists",
+            existing_pick_id: existing.id,
+            sport,
+            pick_date: gameDate,
+            duration_ms: Date.now() - startTime,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      previousPickId = existing.id;
+      const { error: deleteError } = await supabase
+        .from("ai_daily_picks")
+        .delete()
+        .eq("id", existing.id);
+      if (deleteError) {
+        console.error(
+          `[generate-daily-pick] Failed to delete existing pick ${existing.id}:`,
+          deleteError,
+        );
+        throw deleteError;
+      }
       console.log(
-        `[generate-daily-pick] Skip: pick already exists for ${sport} ${gameDate} (id=${existing.id})`,
-      );
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          skipped: true,
-          reason: "already_exists",
-          existing_pick_id: existing.id,
-          sport,
-          pick_date: gameDate,
-          duration_ms: Date.now() - startTime,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        `[generate-daily-pick] Force: deleted previous pick ${existing.id} for ${sport} ${gameDate}`,
       );
     }
 
@@ -344,10 +411,34 @@ Deno.serve(async (req) => {
       `[generate-daily-pick] Created pick ${pickId} for ${sport} ${gameDate} with ${legs.length} legs (risk=${riskLabel})`,
     );
 
+    // Audit log — success only, admin-triggered force regenerates
+    if (force && adminUserId) {
+      try {
+        await supabase.from("analytics_events").insert({
+          event_name: "admin_regenerate_daily_pick",
+          user_id: adminUserId,
+          metadata: {
+            sport,
+            pick_date: gameDate,
+            previous_pick_id: previousPickId,
+            new_pick_id: pickId,
+            leg_count: legs.length,
+            risk_label: riskLabel,
+            avg_confidence: Number(avgConfidence.toFixed(1)),
+          },
+        });
+      } catch (auditErr) {
+        console.error("[generate-daily-pick] audit log write failed:", auditErr);
+        // non-fatal — pick is already created
+      }
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
         created: true,
+        forced: force,
+        previous_pick_id: previousPickId,
         pick_id: pickId,
         sport,
         pick_date: gameDate,

@@ -9,6 +9,7 @@ import { useSport } from "@/contexts/SportContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RegenerateDailyPickButton } from "@/components/dashboard/RegenerateDailyPickButton";
 
 export function AIDailyPickCard() {
   const navigate = useNavigate();
@@ -22,9 +23,12 @@ export function AIDailyPickCard() {
           <Sparkles className="h-4 w-4 text-primary" />
           <h2 className="text-base font-semibold text-foreground">AI Daily Pick</h2>
         </div>
-        <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
-          AI Suggestion
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          <RegenerateDailyPickButton hasExistingPick={!!pick} />
+          <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+            AI Suggestion
+          </Badge>
+        </div>
       </div>
 
       {isLoading ? (
