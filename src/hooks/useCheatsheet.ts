@@ -169,11 +169,10 @@ export function useCheatsheet({
       const { data, error } = await query.limit(limit * 2); // overfetch, then scope-filter
       if (error) throw error;
 
-      const scoped = (data ?? []).filter((row) =>
-        passesScope(sport, row.team_abbr ?? null),
-      );
+      const rows = (data ?? []) as unknown as CheatsheetRow[];
+      const scoped = rows.filter((row) => passesScope(sport, row.team_abbr ?? null));
 
-      return scoped.slice(0, limit) as CheatsheetRow[];
+      return scoped.slice(0, limit);
     },
     staleTime: 60_000,
   });
