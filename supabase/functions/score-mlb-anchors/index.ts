@@ -514,6 +514,18 @@ interface PitcherMatchup {
   hits_allowed_avg: number | null;
   earned_runs_allowed_avg: number | null;
   strikeouts_avg: number | null;
+  walks_allowed_avg: number | null;
+  home_runs_allowed_avg: number | null;
+}
+
+interface TeamOffenseRow {
+  team_id: number;
+  strikeout_rate: number | null;
+  walk_rate: number | null;
+  runs_per_game: number | null;
+  hits_per_game: number | null;
+  isolated_power: number | null;
+  ops: number | null;
 }
 
 interface MlbGameContext {
