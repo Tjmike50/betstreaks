@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import {
+  getMlbBuilderCandidates,
+  inferMlbSide,
+  mlbStatLabel,
+  type MlbCandidate,
+} from "../_shared/mlbCandidates.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -567,6 +573,411 @@ interface DebugInfo {
   market_quality: MarketQualityDebug | null;
 }
 
+// =============================================================================
+// MLB v1 builder handler — uses the MLB candidate feed (player_prop_scores
+// rows already scored by score-mlb-anchors) and lets the LLM compose slips.
+// Returns the same JSON shape the AI Builder client hook expects:
+//   { slips: AISlip[], debug?, scoring_metadata?, fallback?: boolean }
+//
+// What's real:
+//   • Candidate sourcing from player_prop_scores (sport=MLB, anchor stats only).
+//   • LLM-driven slip composition with strict JSON output.
+//   • Persistence to ai_slips / ai_slip_legs and ai_usage tracking.
+//
+// What's stubbed (intentional for v1):
+//   • No live odds verification (no MLB line_snapshots yet) — leg.odds is
+//     whatever the LLM proposes, and `data_context.odds_validated` is false.
+//   • No market_confidence / books_count / consensus enrichment.
+//   • No game-level (moneyline/spread/total) bets for MLB yet.
+//   • No team_abbr postseason scoping (MLB team registry not wired).
+// =============================================================================
+interface MlbBuilderArgs {
+  prompt: string;
+  slipCount: number;
+  // deno-lint-ignore no-explicit-any
+  supabase: any;
+  // deno-lint-ignore no-explicit-any
+  serviceClient: any;
+  userId: string;
+  isPremium: boolean;
+  gameDate: string;
+}
+
+const MLB_AI_GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const MLB_AI_MODEL = "google/gemini-3-flash-preview";
+
+async function handleMlbBuilder(args: MlbBuilderArgs): Promise<Response> {
+  const { prompt, slipCount, supabase, serviceClient, userId, isPremium, gameDate } = args;
+  const startedAt = Date.now();
+
+  const candidates = await getMlbBuilderCandidates(serviceClient, {
+    gameDate,
+    minOverall: 50,
+    maxPerPlayer: 2,
+    limit: 60,
+  });
+
+  console.log(
+    `[AI-Builder/MLB] ${gameDate}: ${candidates.length} builder candidates`,
+  );
+
+  if (candidates.length === 0) {
+    return new Response(
+      JSON.stringify({
+        error: "no_candidates",
+        message:
+          "MLB candidate feed is empty for today — scoring data may not be ready yet, or no MLB games are scored.",
+        debug: { sport: "MLB", game_date: gameDate, candidates: 0 },
+      }),
+      { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) {
+    return new Response(
+      JSON.stringify({ error: "LOVABLE_API_KEY not configured" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  // Compact LLM-facing summary — keep payload small.
+  const candidateLines = candidates.slice(0, 40).map((c, i) => {
+    const recent = c.last10_avg ?? c.season_avg ?? 0;
+    const side = inferMlbSide(c);
+    return `${i + 1}. ${c.player_name} (${c.team_abbr ?? "?"} vs ${c.opponent_abbr ?? "?"}) — ${mlbStatLabel(c.stat_type)} ${c.threshold} | suggest ${side} | overall ${Math.round(c.score_overall ?? 0)}, tier ${c.confidence_tier ?? "n/a"}, recent ${recent.toFixed(1)}`;
+  }).join("\n");
+
+  const systemPrompt = `You are a sports analyst building MLB player-prop parlays for BetStreaks. Rules:
+- Use ONLY candidates from the provided list. Never invent players, stats, or thresholds.
+- Each leg must reference a real candidate by exact player_name + stat_type + threshold.
+- Choose Over/Under that matches the suggested side unless reasoning strongly disagrees.
+- Never use words like "guaranteed", "lock", "sure thing", or "free money".
+- No emojis, no markdown.
+- Slip name: 3-6 words, punchy.
+- Per-leg reasoning: 1 sentence, max ~25 words, references recent form, matchup, or value.
+- Slip-level reasoning: 1-2 sentences, max ~40 words.
+- Risk label: one of "safe" | "balanced" | "aggressive".`;
+
+  const userPrompt = `Sport: MLB
+Date: ${gameDate}
+User prompt: ${prompt}
+Slips requested: ${slipCount}
+
+Available MLB candidates (anchor props: Hits / Total Bases / Strikeouts):
+${candidateLines}
+
+Return strict JSON with shape:
+{
+  "slips": [
+    {
+      "slip_name": "string",
+      "risk_label": "safe" | "balanced" | "aggressive",
+      "estimated_odds": "string or null",
+      "reasoning": "string",
+      "legs": [
+        {
+          "player_name": "string (exact match from list)",
+          "team_abbr": "string or null",
+          "stat_type": "HITS" | "TOTAL_BASES" | "STRIKEOUTS",
+          "line": "Over X.5" | "Under X.5",
+          "pick": "Over" | "Under",
+          "odds": "string or null",
+          "reasoning": "string"
+        }
+      ]
+    }
+  ]
+}`;
+
+  let llmContent = "";
+  try {
+    const aiRes = await fetch(MLB_AI_GATEWAY, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MLB_AI_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (aiRes.status === 401) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required.", message: "AI gateway auth failed." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (aiRes.status === 402) {
+      return new Response(
+        JSON.stringify({ error: "AI credits exhausted.", message: "Please try again later." }),
+        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (aiRes.status === 429) {
+      return new Response(
+        JSON.stringify({ error: "AI gateway rate-limited. Try again in a moment." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (!aiRes.ok) {
+      const body = await aiRes.text().catch(() => "");
+      console.warn(`[AI-Builder/MLB] LLM ${aiRes.status}: ${body.slice(0, 300)}`);
+      throw new Error(`LLM error ${aiRes.status}`);
+    }
+    const aiData = await aiRes.json();
+    llmContent = aiData?.choices?.[0]?.message?.content ?? "";
+  } catch (err) {
+    console.error("[AI-Builder/MLB] LLM call failed:", err);
+    return await mlbDeterministicFallback(args, candidates, startedAt);
+  }
+
+  let parsed: { slips?: any[] };
+  try {
+    parsed = JSON.parse(llmContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+  } catch {
+    console.warn("[AI-Builder/MLB] LLM returned invalid JSON, falling back");
+    return await mlbDeterministicFallback(args, candidates, startedAt);
+  }
+
+  // Validate legs against the candidate pool — exact (player, stat, threshold).
+  const candKey = (player: string, stat: string, threshold: number) =>
+    `${player.toLowerCase()}|${stat.toUpperCase()}|${threshold}`;
+  const candIndex = new Map<string, MlbCandidate>();
+  for (const c of candidates) candIndex.set(candKey(c.player_name, c.stat_type, c.threshold), c);
+
+  const validatedSlips: any[] = [];
+  for (const slip of parsed.slips ?? []) {
+    const validLegs: any[] = [];
+    for (const leg of slip.legs ?? []) {
+      const lineMatch = String(leg.line ?? "").match(/([\d.]+)/);
+      const threshold = lineMatch ? parseFloat(lineMatch[1]) : null;
+      if (threshold == null) continue;
+      const key = candKey(String(leg.player_name ?? ""), String(leg.stat_type ?? ""), threshold);
+      const cand = candIndex.get(key);
+      if (!cand) {
+        console.log(`[AI-Builder/MLB] reject leg (no candidate): ${leg.player_name} ${leg.stat_type} ${threshold}`);
+        continue;
+      }
+      const pick = String(leg.pick ?? "Over");
+      validLegs.push({
+        player_name: cand.player_name,
+        team_abbr: cand.team_abbr,
+        stat_type: cand.stat_type,
+        line: `${pick === "Under" ? "Under" : "Over"} ${cand.threshold}`,
+        pick: pick === "Under" ? "Under" : "Over",
+        odds: leg.odds ?? null,
+        reasoning: String(leg.reasoning ?? "").slice(0, 280),
+        data_context: {
+          score_overall: cand.score_overall,
+          confidence_tier: cand.confidence_tier,
+          score_recent_form: cand.score_recent_form,
+          score_matchup: cand.score_matchup,
+          score_opportunity: cand.score_opportunity,
+          score_consistency: cand.score_consistency,
+          score_value: cand.score_value,
+          score_risk: cand.score_risk,
+          summary_json: cand.summary_json,
+          season_avg: cand.season_avg,
+          last10_avg: cand.last10_avg,
+          opponent: cand.opponent_abbr,
+          home_away: cand.home_away,
+          // Honest about v1 limits — no live MLB odds verification yet.
+          odds_validated: false,
+          odds_source: null,
+          market_confidence: null,
+        },
+        bet_type: "player_prop",
+      });
+    }
+    if (validLegs.length === 0) continue;
+    validatedSlips.push({
+      slip_name: String(slip.slip_name ?? "MLB Slip").slice(0, 80),
+      risk_label: ["safe", "balanced", "aggressive"].includes(slip.risk_label) ? slip.risk_label : "balanced",
+      estimated_odds: slip.estimated_odds ?? null,
+      reasoning: String(slip.reasoning ?? "").slice(0, 400),
+      legs: validLegs,
+    });
+  }
+
+  if (validatedSlips.length === 0) {
+    console.warn("[AI-Builder/MLB] LLM produced 0 valid slips, falling back");
+    return await mlbDeterministicFallback(args, candidates, startedAt);
+  }
+
+  // Persist
+  const saved = await persistMlbSlips(supabase, validatedSlips, prompt, userId);
+
+  if (!isPremium) {
+    serviceClient.from("ai_usage").upsert(
+      { user_id: userId, usage_date: gameDate, request_count: 1 },
+      { onConflict: "user_id,usage_date" },
+    ).then(() => {});
+  }
+
+  return new Response(
+    JSON.stringify({
+      slips: saved,
+      fallback: false,
+      scoring_metadata: {
+        sport: "MLB",
+        game_date: gameDate,
+        verified_prop_candidates: candidates.length,
+        verified_candidates_passed_to_llm: Math.min(candidates.length, 40),
+        candidates_after_diversity: candidates.length,
+        unique_players: new Set(candidates.map((c) => c.player_id)).size,
+        legs_validated: saved.reduce((s, sl) => s + (sl.legs?.length ?? 0), 0),
+        legs_rejected: 0,
+        final_legs_accepted: saved.reduce((s, sl) => s + (sl.legs?.length ?? 0), 0),
+        final_legs_rejected_no_match: 0,
+        games_today: 0,
+        live_props_found: 0,
+        game_level_candidates: 0,
+        mode: "mlb_v1_anchor",
+        fallback_used: false,
+        scoring_data_available: candidates.length,
+        scoring_source: "today",
+        market_quality: null,
+      },
+      debug: { sport: "MLB", game_date: gameDate, duration_ms: Date.now() - startedAt },
+    }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
+}
+
+/** Deterministic fallback for MLB when the LLM is unavailable or produces junk. */
+async function mlbDeterministicFallback(
+  args: MlbBuilderArgs,
+  candidates: MlbCandidate[],
+  startedAt: number,
+): Promise<Response> {
+  const { supabase, serviceClient, userId, isPremium, gameDate, prompt, slipCount } = args;
+  const targetLegs = 3;
+  const slips: any[] = [];
+
+  // Pick top-N with player diversity per slip.
+  const usedPlayers = new Set<number>();
+  for (let i = 0; i < Math.max(1, Math.min(slipCount, 3)); i++) {
+    const legs: any[] = [];
+    for (const c of candidates) {
+      if (legs.length >= targetLegs) break;
+      if (usedPlayers.has(c.player_id)) continue;
+      const side = inferMlbSide(c);
+      legs.push({
+        player_name: c.player_name,
+        team_abbr: c.team_abbr,
+        stat_type: c.stat_type,
+        line: `${side} ${c.threshold}`,
+        pick: side,
+        odds: null,
+        reasoning: `${mlbStatLabel(c.stat_type)} ${c.threshold} — overall ${Math.round(c.score_overall ?? 0)}, tier ${c.confidence_tier ?? "n/a"}.`,
+        data_context: {
+          score_overall: c.score_overall,
+          confidence_tier: c.confidence_tier,
+          summary_json: c.summary_json,
+          season_avg: c.season_avg,
+          last10_avg: c.last10_avg,
+          odds_validated: false,
+        },
+        bet_type: "player_prop",
+      });
+      usedPlayers.add(c.player_id);
+    }
+    if (legs.length === 0) break;
+    slips.push({
+      slip_name: `MLB Anchor Slip ${i + 1}`,
+      risk_label: "balanced",
+      estimated_odds: null,
+      reasoning:
+        "Deterministic fallback — top-scored MLB anchor props with player diversity. Not financial advice.",
+      legs,
+    });
+  }
+
+  if (slips.length === 0) {
+    return new Response(
+      JSON.stringify({
+        error: "no_candidates",
+        message: "MLB fallback could not assemble any slips.",
+      }),
+      { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const saved = await persistMlbSlips(supabase, slips, prompt, userId);
+  if (!isPremium) {
+    serviceClient.from("ai_usage").upsert(
+      { user_id: userId, usage_date: gameDate, request_count: 1 },
+      { onConflict: "user_id,usage_date" },
+    ).then(() => {});
+  }
+
+  return new Response(
+    JSON.stringify({
+      slips: saved,
+      fallback: true,
+      scoring_metadata: {
+        sport: "MLB",
+        game_date: gameDate,
+        mode: "mlb_v1_anchor_fallback",
+        fallback_used: true,
+        scoring_data_available: candidates.length,
+        scoring_source: "today",
+        market_quality: null,
+      },
+      debug: { sport: "MLB", game_date: gameDate, duration_ms: Date.now() - startedAt },
+    }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
+}
+
+// deno-lint-ignore no-explicit-any
+async function persistMlbSlips(supabase: any, slips: any[], prompt: string, userId: string): Promise<any[]> {
+  const out: any[] = [];
+  for (const slip of slips) {
+    const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
+      user_id: userId,
+      prompt,
+      slip_name: slip.slip_name,
+      sport: "MLB",
+      risk_label: slip.risk_label,
+      estimated_odds: slip.estimated_odds,
+      reasoning: slip.reasoning,
+    }).select().single();
+    if (slipErr) {
+      console.error("[AI-Builder/MLB] insert slip failed:", slipErr);
+      continue;
+    }
+    const legRows = slip.legs.map((leg: any, idx: number) => ({
+      slip_id: slipRow.id,
+      player_name: leg.player_name,
+      team_abbr: leg.team_abbr,
+      stat_type: leg.stat_type,
+      line: leg.line,
+      pick: leg.pick,
+      odds: leg.odds,
+      reasoning: leg.reasoning,
+      leg_order: idx,
+    }));
+    const { data: insertedLegs, error: legErr } = await supabase.from("ai_slip_legs").insert(legRows).select();
+    if (legErr) console.error("[AI-Builder/MLB] insert legs failed:", legErr);
+    const legsWithCtx = (insertedLegs ?? legRows).map((lr: any, idx: number) => ({
+      ...lr,
+      data_context: slip.legs[idx]?.data_context ?? null,
+      bet_type: slip.legs[idx]?.bet_type ?? "player_prop",
+    }));
+    out.push({ ...slipRow, legs: legsWithCtx });
+  }
+  return out;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -599,10 +1010,17 @@ serve(async (req) => {
     const { prompt, slipCount = 1, filters = null, sport: rawSport } = await req.json();
     if (!prompt) throw new Error("prompt is required");
 
-    // Phase 1 multi-sport: accept "NBA" | "WNBA". Default NBA for backward compatibility.
-    const sport: "NBA" | "WNBA" = rawSport === "WNBA" ? "WNBA" : "NBA";
-    const oddsApiSport = sport === "WNBA" ? "basketball_wnba" : "basketball_nba";
-    const sportLabel = sport === "WNBA" ? "WNBA" : "NBA";
+    // Multi-sport: accept "NBA" | "WNBA" | "MLB". Default NBA for backward compatibility.
+    const upperSport = String(rawSport ?? "").toUpperCase();
+    const sport: "NBA" | "WNBA" | "MLB" =
+      upperSport === "WNBA" ? "WNBA" : upperSport === "MLB" ? "MLB" : "NBA";
+    const oddsApiSport =
+      sport === "WNBA"
+        ? "basketball_wnba"
+        : sport === "MLB"
+        ? "baseball_mlb"
+        : "basketball_nba";
+    const sportLabel = sport;
 
     // --- Auth & usage limits ---
     const { data: { user } } = await supabase.auth.getUser();
@@ -630,6 +1048,27 @@ serve(async (req) => {
 
     const todayStr = new Date().toISOString().split("T")[0];
     debug.db_query_date = todayStr;
+
+    // -------------------------------------------------------------------------
+    // MLB v1 short-circuit
+    // -------------------------------------------------------------------------
+    // The basketball pipeline below is heavily NBA/WNBA-specific (basketball
+    // stat maps, player_points/rebounds/etc. markets, postseason scoping,
+    // realistic-threshold ranges). For MLB v1 we bypass it entirely and build
+    // slips directly from the MLB candidate feed (player_prop_scores rows
+    // already produced by score-mlb-anchors). Odds enrichment + verified
+    // market validation will be added once collect-line-snapshots handles MLB.
+    if (sport === "MLB") {
+      return await handleMlbBuilder({
+        prompt,
+        slipCount,
+        supabase,
+        serviceClient,
+        userId: user.id,
+        isPremium,
+        gameDate: todayStr,
+      });
+    }
 
     const betType = filters?.betType || null;
     const includePlayerProps = !betType || betType === "player_props" || betType === "mixed";
