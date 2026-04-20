@@ -367,6 +367,23 @@ serve(async (req) => {
   steps.push(gamesResult.context);
   steps.push(await ingestProbablePitchers(supabase, gamesResult.pitcherIds));
 
+  // ─── Step 5: Game-log ingestion (hitter + pitcher) ───────
+  const todayStr = todayET();
+  const logResult = await ingestGameLogsWindow(supabase, todayStr, GAMELOG_LOOKBACK_DAYS);
+  steps.push(logResult.hitter);
+  steps.push(logResult.pitcher);
+
+  // ─── Step 6: Rolling stats / matchup / team offense rebuilds ───
+  // These read from the logs we just upserted.
+  const [rolling, matchup, teamOff] = await Promise.all([
+    rebuildRollingStats(supabase, todayStr, ROLLING_WINDOW_DAYS),
+    rebuildPitcherMatchupSummaries(supabase, todayStr, ROLLING_WINDOW_DAYS),
+    rebuildTeamOffenseDaily(supabase, todayStr, ROLLING_WINDOW_DAYS),
+  ]);
+  steps.push(rolling);
+  steps.push(matchup);
+  steps.push(teamOff);
+
   const totalRows = steps.reduce((acc, s) => acc + (s.rows || 0), 0);
   const hasError = steps.some((s) => s.error);
 
