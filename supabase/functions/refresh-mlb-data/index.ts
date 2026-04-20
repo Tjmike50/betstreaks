@@ -15,6 +15,18 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { ingestGameLogsWindow } from "../_shared/mlbGameLogIngest.ts";
+import {
+  rebuildRollingStats,
+  rebuildPitcherMatchupSummaries,
+  rebuildTeamOffenseDaily,
+} from "../_shared/mlbStatRebuild.ts";
+
+// How many days of game logs to backfill on each run. v1: 20 covers L15
+// rolling windows + a few extra days of buffer for late-arriving boxscores.
+const GAMELOG_LOOKBACK_DAYS = 20;
+// Window for matchup/team rebuilds (separate from game-log ingestion window).
+const ROLLING_WINDOW_DAYS = 15;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -354,6 +366,23 @@ serve(async (req) => {
   steps.push(gamesResult.games);
   steps.push(gamesResult.context);
   steps.push(await ingestProbablePitchers(supabase, gamesResult.pitcherIds));
+
+  // ─── Step 5: Game-log ingestion (hitter + pitcher) ───────
+  const todayStr = todayET();
+  const logResult = await ingestGameLogsWindow(supabase, todayStr, GAMELOG_LOOKBACK_DAYS);
+  steps.push(logResult.hitter);
+  steps.push(logResult.pitcher);
+
+  // ─── Step 6: Rolling stats / matchup / team offense rebuilds ───
+  // These read from the logs we just upserted.
+  const [rolling, matchup, teamOff] = await Promise.all([
+    rebuildRollingStats(supabase, todayStr, ROLLING_WINDOW_DAYS),
+    rebuildPitcherMatchupSummaries(supabase, todayStr, ROLLING_WINDOW_DAYS),
+    rebuildTeamOffenseDaily(supabase, todayStr, ROLLING_WINDOW_DAYS),
+  ]);
+  steps.push(rolling);
+  steps.push(matchup);
+  steps.push(teamOff);
 
   const totalRows = steps.reduce((acc, s) => acc + (s.rows || 0), 0);
   const hasError = steps.some((s) => s.error);
