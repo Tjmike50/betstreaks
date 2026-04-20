@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Flame, TrendingUp, Calendar, Star, Lock, Share2 } from "lucide-react";
 import type { Streak } from "@/types/streak";
 import { getStatFriendlyLabel, isComboStat } from "@/lib/comboStats";
+import { STAT_CODE_TO_LABEL } from "@/lib/lineFirstStreaks";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { useToast } from "@/hooks/use-toast";
@@ -51,7 +52,9 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
     isRecentGame;
   const isBestBet = meetsBestBetCriteria && !isStale;
 
-  // Get bet label: special formatting for teams, combos, and stats
+  // Get bet label: prefer the actual sportsbook line whenever we have it,
+  // so users always see the exact threshold they can bet (e.g.
+  // "Over 19.5 Points") instead of generic milestones like "PTS 5+".
   const getBetLabel = () => {
     if (isTeam) {
       if (streak.stat === "ML") {
@@ -64,13 +67,19 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
         return `Team PTS ≤ ${streak.threshold}`;
       }
     }
-    
+
     // For locked combos, only show the stat label without threshold
     if (isLocked) {
       return getStatFriendlyLabel(streak.stat);
     }
-    
-    // Use friendly label for combos (e.g., "PTS+AST 18+") or regular stats
+
+    // Sportsbook-line-first label: "Over 19.5 Points"
+    if (streak.book_threshold != null && !streak.book_informational) {
+      const friendly = STAT_CODE_TO_LABEL[streak.stat] ?? getStatFriendlyLabel(streak.stat);
+      return `Over ${streak.book_threshold} ${friendly}`;
+    }
+
+    // Fallback: legacy milestone format (used only when no live book line exists).
     const statLabel = getStatFriendlyLabel(streak.stat);
     return `${statLabel} ${streak.threshold}+`;
   };
@@ -276,21 +285,11 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
           )}
         </div>
 
-        {/* Bet Label */}
+        {/* Bet Label — sportsbook-line-first when a real line is available. */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex items-center gap-2 bg-primary/15 text-primary px-3 py-1.5 rounded-lg">
             <span className="font-semibold">{getBetLabel()}</span>
           </div>
-          {/* Sportsbook-line-first hint */}
-          {!isTeam && streak.book_threshold != null && (
-            <Badge
-              variant="outline"
-              className="text-[10px] border-streak-green/40 text-streak-green"
-              title="Matches a real sportsbook line you can bet"
-            >
-              Book: Over {streak.book_threshold}
-            </Badge>
-          )}
           {!isTeam && streak.book_informational && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -310,57 +309,46 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
           )}
         </div>
 
-        {/* Stats Grid */}
+        {/* Stats Grid — phrased vs the actual book line ("hit in X of Y"). */}
         <div className="space-y-2 text-sm">
-          {/* Active Streak */}
-          <div className="flex items-center gap-2 text-streak-green">
-            <Flame className="h-4 w-4" />
-            <span className="font-medium">
-              Active streak: {streak.streak_len} games
-            </span>
-          </div>
-
-          {/* Season Hit Rate */}
-          <div className="flex items-center gap-2 text-streak-blue">
-            <TrendingUp className="h-4 w-4" />
-            <span>
-              Season: {Math.round(streak.season_win_pct)}%{" "}
-              <span className="text-muted-foreground">
-                ({streak.season_wins}/{streak.season_games})
+          {streak.streak_len > 0 && (
+            <div className="flex items-center gap-2 text-streak-green">
+              <Flame className="h-4 w-4" />
+              <span className="font-medium">
+                Hit in {streak.streak_len} straight games
               </span>
-            </span>
-          </div>
+            </div>
+          )}
 
-          {/* Last 10 Hit Rate */}
           {streak.last10_games > 0 && (
             <div className="flex items-center gap-2 text-streak-blue">
               <TrendingUp className="h-4 w-4" />
               <span>
-                L10: {streak.last10_hit_pct != null ? Math.round(streak.last10_hit_pct) : Math.round((streak.last10_hits / streak.last10_games) * 100)}%{" "}
+                Hit in {streak.last10_hits} of last {streak.last10_games}{" "}
                 <span className="text-muted-foreground">
-                  ({streak.last10_hits}/{streak.last10_games})
+                  ({streak.last10_hit_pct != null ? Math.round(streak.last10_hit_pct) : Math.round((streak.last10_hits / streak.last10_games) * 100)}%)
                 </span>
               </span>
             </div>
           )}
 
-          {/* Last 5 Hit Rate */}
           {streak.last5_games > 0 && (
             <div className="flex items-center gap-2 text-streak-blue">
               <TrendingUp className="h-4 w-4" />
               <span>
-                L5: {streak.last5_hit_pct != null ? Math.round(streak.last5_hit_pct) : Math.round((streak.last5_hits / streak.last5_games) * 100)}%{" "}
+                L5: {streak.last5_hits}/{streak.last5_games}{" "}
                 <span className="text-muted-foreground">
-                  ({streak.last5_hits}/{streak.last5_games})
+                  ({streak.last5_hit_pct != null ? Math.round(streak.last5_hit_pct) : Math.round((streak.last5_hits / streak.last5_games) * 100)}%)
                 </span>
               </span>
             </div>
           )}
 
-          {/* Last Game */}
           <div className="flex items-center gap-2 text-muted-foreground">
             <Calendar className="h-4 w-4" />
-            <span>Last game: {formatDate(streak.last_game)}</span>
+            <span>
+              Season: {streak.season_wins}/{streak.season_games} ({Math.round(streak.season_win_pct)}%) · Last game {formatDate(streak.last_game)}
+            </span>
           </div>
         </div>
       </CardContent>

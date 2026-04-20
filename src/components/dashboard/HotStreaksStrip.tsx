@@ -4,7 +4,7 @@
 // =============================================================================
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Flame } from "lucide-react";
-import { useStreaks } from "@/hooks/useStreaks";
+import { useLineFirstStreaks } from "@/hooks/useLineFirstStreaks";
 import { useSport } from "@/contexts/SportContext";
 import { StreakCard } from "@/components/StreakCard";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,7 +30,7 @@ const MAX_ROWS = 3;
 export function HotStreaksStrip() {
   const navigate = useNavigate();
   const { config } = useSport();
-  const { data: streaks, isLoading } = useStreaks(HOT_STREAKS_FILTERS);
+  const { data: streaks, isLoading } = useLineFirstStreaks(HOT_STREAKS_FILTERS);
 
   const isOffseason = config.seasonState === "offseason";
   const top = (streaks ?? []).slice(0, MAX_ROWS);
