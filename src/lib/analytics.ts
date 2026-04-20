@@ -52,7 +52,7 @@ export async function trackEvent(
       .insert([{
         event_name: event,
         user_id: userId ?? undefined,
-        metadata: meta ?? undefined,
+        metadata: (meta ?? undefined) as never,
       }]);
 
     if (error) {
