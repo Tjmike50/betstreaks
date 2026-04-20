@@ -175,7 +175,12 @@ export async function ingestGameLogsForDate(
         const { error } = await supabase
           .from("mlb_hitter_game_logs")
           .upsert(slice, { onConflict: "game_id,player_id" });
-        if (error) throw error;
+        if (error) {
+          console.error(
+            `[mlb-gamelogs] hitter upsert FAILED date=${dateStr} chunk=${i} size=${slice.length}: ${error.message ?? error}`,
+          );
+          throw error;
+        }
       }
       result.hitter.rows = hitterRows.length;
     } catch (e: any) {
