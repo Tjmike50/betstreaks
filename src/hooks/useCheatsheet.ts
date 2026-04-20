@@ -71,40 +71,13 @@ const DEFAULT_LIMIT = 50;
 // MLB v1 anchor props supported by score-mlb-anchors.
 const MLB_ANCHOR_STATS = ["HITS", "TOTAL_BASES", "STRIKEOUTS"] as const;
 
-const SELECT_COLUMNS = [
-  "id",
-  "player_id",
-  "player_name",
-  "team_abbr",
-  "opponent_abbr",
-  "home_away",
-  "stat_type",
-  "threshold",
-  "confidence_score",
-  "value_score",
-  "consistency_score",
-  "volatility_score",
-  "score_overall",
-  "score_recent_form",
-  "score_matchup",
-  "score_opportunity",
-  "score_consistency",
-  "score_value",
-  "score_risk",
-  "confidence_tier",
-  "summary_json",
-  "last5_avg",
-  "last10_avg",
-  "season_avg",
-  "last5_hit_rate",
-  "last10_hit_rate",
-  "season_hit_rate",
-  "vs_opponent_hit_rate",
-  "vs_opponent_games",
-  "reason_tags",
-  "game_date",
-  "sport",
-].join(", ");
+const SELECT_COLUMNS =
+  "id, player_id, player_name, team_abbr, opponent_abbr, home_away, stat_type, threshold, " +
+  "confidence_score, value_score, consistency_score, volatility_score, " +
+  "score_overall, score_recent_form, score_matchup, score_opportunity, score_consistency, score_value, score_risk, " +
+  "confidence_tier, summary_json, " +
+  "last5_avg, last10_avg, season_avg, last5_hit_rate, last10_hit_rate, season_hit_rate, " +
+  "vs_opponent_hit_rate, vs_opponent_games, reason_tags, game_date, sport";
 
 /**
  * MLB-aware scope filter. NBA narrows to postseason teams, WNBA accepts any
