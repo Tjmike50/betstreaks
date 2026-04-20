@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import {
+  getMlbBuilderCandidates,
+  inferMlbSide,
+  mlbStatLabel,
+  type MlbCandidate,
+} from "../_shared/mlbCandidates.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -599,10 +605,17 @@ serve(async (req) => {
     const { prompt, slipCount = 1, filters = null, sport: rawSport } = await req.json();
     if (!prompt) throw new Error("prompt is required");
 
-    // Phase 1 multi-sport: accept "NBA" | "WNBA". Default NBA for backward compatibility.
-    const sport: "NBA" | "WNBA" = rawSport === "WNBA" ? "WNBA" : "NBA";
-    const oddsApiSport = sport === "WNBA" ? "basketball_wnba" : "basketball_nba";
-    const sportLabel = sport === "WNBA" ? "WNBA" : "NBA";
+    // Multi-sport: accept "NBA" | "WNBA" | "MLB". Default NBA for backward compatibility.
+    const upperSport = String(rawSport ?? "").toUpperCase();
+    const sport: "NBA" | "WNBA" | "MLB" =
+      upperSport === "WNBA" ? "WNBA" : upperSport === "MLB" ? "MLB" : "NBA";
+    const oddsApiSport =
+      sport === "WNBA"
+        ? "basketball_wnba"
+        : sport === "MLB"
+        ? "baseball_mlb"
+        : "basketball_nba";
+    const sportLabel = sport;
 
     // --- Auth & usage limits ---
     const { data: { user } } = await supabase.auth.getUser();
