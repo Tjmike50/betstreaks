@@ -871,6 +871,22 @@ serve(async (req) => {
     const rk = scoreRisk(rolling, sampleSize);
     const vl = scoreValue(rolling, line.threshold);
 
+    // STRIKEOUTS stabilization: pitchers have small samples in early season
+    // (2-3 starts). Blend recent_form with the pitcher's longer-window
+    // strikeouts_avg (from matchup summaries) at 50/50 when sample_size < 5,
+    // so high-K pitchers don't get harshly tiered down for low recent samples.
+    if (statKey === "STRIKEOUTS" && sampleSize < 5) {
+      const own = pitcherMatchupById.get(line.player_id!) ?? null;
+      const seasonK = own?.strikeouts_avg != null ? Number(own.strikeouts_avg) : null;
+      if (seasonK != null && line.threshold > 0) {
+        const ratio = seasonK / line.threshold;
+        const seasonScore = clamp(35 + (ratio - 0.5) * 40);
+        const blended = (rf.score + seasonScore) / 2;
+        rf.score = blended;
+        rf.note = `${rf.note} +K-stabilize(season=${round1(seasonK)})`;
+      }
+    }
+
     // Opportunity + matchup vary by role.
     let opp: { score: number; note: string };
     let mu: { score: number; note: string };
@@ -977,6 +993,17 @@ serve(async (req) => {
       tier,
     };
 
+    // Resolve team / opponent / home_away from the team-id map built earlier.
+    const myTeamId = profile?.mlb_team_id ?? null;
+    const teamAbbr = myTeamId != null ? teamIdToAbbr.get(myTeamId) ?? null : null;
+    const gameInfo = myTeamId != null ? teamGameInfo.get(myTeamId) ?? null : null;
+    const opponentAbbr = gameInfo
+      ? (myTeamId === gameInfo.homeId ? gameInfo.awayAbbr : gameInfo.homeAbbr)
+      : null;
+    const homeAway = gameInfo
+      ? (myTeamId === gameInfo.homeId ? "home" : "away")
+      : null;
+
     rowsToUpsert.push({
       sport: "MLB",
       game_date: gameDate,
@@ -984,6 +1011,9 @@ serve(async (req) => {
       player_name: line.player_name,
       stat_type: statKey,                 // store internal key, not Odds-API key
       threshold: line.threshold,
+      team_abbr: teamAbbr,
+      opponent_abbr: opponentAbbr,
+      home_away: homeAway,
       // Legacy NBA-shaped fields (kept null for MLB v1 — they aren't used downstream for MLB).
       confidence_score: round1(overall),  // mirror so legacy reads still work
       value_score: round1(vl.score),
