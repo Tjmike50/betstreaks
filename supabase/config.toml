@@ -54,3 +54,6 @@ verify_jwt = false
 [functions.refresh-mlb-data]
 verify_jwt = false
 
+[functions.score-mlb-anchors]
+verify_jwt = false
+

@@ -1077,6 +1077,7 @@ export type Database = {
           away_games: number | null
           away_hit_rate: number | null
           confidence_score: number | null
+          confidence_tier: string | null
           consistency_score: number | null
           game_date: string
           home_avg: number | null
@@ -1095,11 +1096,19 @@ export type Database = {
           player_id: number
           player_name: string
           reason_tags: Json | null
+          score_consistency: number | null
+          score_matchup: number | null
+          score_opportunity: number | null
+          score_overall: number | null
+          score_recent_form: number | null
+          score_risk: number | null
+          score_value: number | null
           scored_at: string
           season_avg: number | null
           season_hit_rate: number | null
           sport: string
           stat_type: string
+          summary_json: Json | null
           team_abbr: string | null
           threshold: number
           total_games: number | null
@@ -1114,6 +1123,7 @@ export type Database = {
           away_games?: number | null
           away_hit_rate?: number | null
           confidence_score?: number | null
+          confidence_tier?: string | null
           consistency_score?: number | null
           game_date?: string
           home_avg?: number | null
@@ -1132,11 +1142,19 @@ export type Database = {
           player_id: number
           player_name: string
           reason_tags?: Json | null
+          score_consistency?: number | null
+          score_matchup?: number | null
+          score_opportunity?: number | null
+          score_overall?: number | null
+          score_recent_form?: number | null
+          score_risk?: number | null
+          score_value?: number | null
           scored_at?: string
           season_avg?: number | null
           season_hit_rate?: number | null
           sport?: string
           stat_type: string
+          summary_json?: Json | null
           team_abbr?: string | null
           threshold: number
           total_games?: number | null
@@ -1151,6 +1169,7 @@ export type Database = {
           away_games?: number | null
           away_hit_rate?: number | null
           confidence_score?: number | null
+          confidence_tier?: string | null
           consistency_score?: number | null
           game_date?: string
           home_avg?: number | null
@@ -1169,11 +1188,19 @@ export type Database = {
           player_id?: number
           player_name?: string
           reason_tags?: Json | null
+          score_consistency?: number | null
+          score_matchup?: number | null
+          score_opportunity?: number | null
+          score_overall?: number | null
+          score_recent_form?: number | null
+          score_risk?: number | null
+          score_value?: number | null
           scored_at?: string
           season_avg?: number | null
           season_hit_rate?: number | null
           sport?: string
           stat_type?: string
+          summary_json?: Json | null
           team_abbr?: string | null
           threshold?: number
           total_games?: number | null
