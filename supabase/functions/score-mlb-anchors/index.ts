@@ -428,9 +428,29 @@ serve(async (req) => {
     );
   }
 
-  // De-dupe (player_id, stat_type, threshold) — prefer consensus, then any.
+  // De-dupe (player, stat_type, threshold) — prefer consensus, then any.
+  // BLOCKER PATCH (v1): Odds API line snapshots arrive with player_id=null
+  // because we don't have a SportsDataIO → Odds API name→id bridge yet.
+  // To keep the v1 end-to-end pipeline producing usable score rows we
+  // synthesize a stable negative bigint id from a hash of player_name so
+  // (player_id, stat_type, threshold) upserts remain idempotent and never
+  // collide with real positive SportsDataIO PlayerIDs.
+  function synthIdForName(name: string): number {
+    // FNV-1a 32-bit hash → flipped to negative bigint range.
+    let h = 2166136261;
+    for (let i = 0; i < name.length; i++) {
+      h ^= name.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    // Map to negative range [-2^31 .. -1] so it never collides with real ids.
+    return -((h % 2_000_000_000) + 1);
+  }
   const dedup = new Map<string, LineSnapshot>();
   for (const s of (snaps ?? []) as Array<LineSnapshot & { sportsbook: string }>) {
+    if (s.player_id == null && s.player_name) {
+      // Patch the snapshot in-place so downstream code can use s.player_id!.
+      (s as LineSnapshot).player_id = synthIdForName(s.player_name);
+    }
     if (s.player_id == null) continue;
     const key = `${s.player_id}|${s.stat_type}|${s.threshold}`;
     const existing = dedup.get(key);
