@@ -386,6 +386,246 @@ Write a short slip_name and a 1-2 sentence reasoning explaining why these legs w
   }
 }
 
+// =============================================================================
+// MLB v1 daily-pick runner
+// -----------------------------------------------------------------------------
+// Loads candidates from the MLB feed (anchor props, confidence_tier in
+// elite/strong, score_overall >= 60), diversifies by player + game, then
+// writes one ai_daily_picks row + ai_daily_pick_legs.
+//
+// What's real:
+//   • Candidate sourcing from player_prop_scores via getMlbDailyPickCandidates.
+//   • Deterministic leg selection with player + game diversity.
+//   • Persistence + idempotency (handled by caller via existing-pick check).
+//   • Templated reasoning + risk label derived from score_overall.
+//
+// What's stubbed (intentional for v1):
+//   • No DraftKings odds enrichment (MLB line_snapshots not wired yet).
+//   • No AI prose layer for MLB (deterministic name + reasoning only).
+// =============================================================================
+interface MlbDailyPickArgs {
+  // deno-lint-ignore no-explicit-any
+  supabase: any;
+  sport: "MLB";
+  gameDate: string;
+  legCount: number;
+  force: boolean;
+  previousPickId: string | null;
+  adminUserId: string | null;
+  startTime: number;
+}
+
+const MLB_RISK_LABEL = (avgOverall: number): "safe" | "balanced" | "aggressive" => {
+  if (avgOverall >= 75) return "safe";
+  if (avgOverall >= 65) return "balanced";
+  return "aggressive";
+};
+
+function pickMlbLegs(rows: MlbCandidate[], legCount: number): MlbCandidate[] {
+  // Already sorted by score_overall desc by the feed. Diversify by player +
+  // game (team_abbr+opponent_abbr key), then relax if needed to hit legCount.
+  const sorted = [...rows];
+  const picked: MlbCandidate[] = [];
+  const seenPlayers = new Set<number>();
+  const seenGames = new Set<string>();
+  const seenStats = new Set<string>();
+
+  // Pass 1: full diversity (player, game, stat).
+  for (const row of sorted) {
+    if (picked.length >= legCount) break;
+    const gameKey = [row.team_abbr, row.opponent_abbr].sort().join("@");
+    if (seenPlayers.has(row.player_id)) continue;
+    if (seenGames.has(gameKey)) continue;
+    if (seenStats.has(row.stat_type)) continue;
+    picked.push(row);
+    seenPlayers.add(row.player_id);
+    seenGames.add(gameKey);
+    seenStats.add(row.stat_type);
+  }
+
+  // Pass 2: relax stat diversity.
+  if (picked.length < legCount) {
+    for (const row of sorted) {
+      if (picked.length >= legCount) break;
+      const gameKey = [row.team_abbr, row.opponent_abbr].sort().join("@");
+      if (seenPlayers.has(row.player_id)) continue;
+      if (seenGames.has(gameKey)) continue;
+      picked.push(row);
+      seenPlayers.add(row.player_id);
+      seenGames.add(gameKey);
+    }
+  }
+
+  // Pass 3: relax game uniqueness.
+  if (picked.length < legCount) {
+    for (const row of sorted) {
+      if (picked.length >= legCount) break;
+      if (seenPlayers.has(row.player_id)) continue;
+      picked.push(row);
+      seenPlayers.add(row.player_id);
+    }
+  }
+
+  return picked;
+}
+
+async function runMlbDailyPick(args: MlbDailyPickArgs): Promise<Response> {
+  const { supabase, sport, gameDate, legCount, force, previousPickId, adminUserId, startTime } = args;
+
+  const candidates = await getMlbDailyPickCandidates(supabase, {
+    gameDate,
+    acceptedTiers: ["elite", "strong"],
+    minOverall: 60,
+    limit: 30,
+  });
+
+  console.log(
+    `[generate-daily-pick/MLB] ${gameDate}: ${candidates.length} strict candidates`,
+  );
+
+  if (candidates.length === 0) {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        skipped: true,
+        reason: "no_candidates",
+        sport,
+        pick_date: gameDate,
+        message: `No MLB anchor candidates met elite/strong tier on ${gameDate}.`,
+        duration_ms: Date.now() - startTime,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const legs = pickMlbLegs(candidates, legCount);
+  if (legs.length === 0) {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        skipped: true,
+        reason: "no_eligible_legs",
+        sport,
+        pick_date: gameDate,
+        message: `Found ${candidates.length} MLB candidates but diversity rules left zero legs.`,
+        duration_ms: Date.now() - startTime,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const avgOverall =
+    legs.reduce((s, l) => s + (l.score_overall ?? 0), 0) / legs.length;
+  const riskLabel = MLB_RISK_LABEL(avgOverall);
+  const slipName = buildSlipName(sport, gameDate);
+  const stats = [...new Set(legs.map((l) => mlbStatLabel(l.stat_type)))].join(", ");
+  const reasoning = `Auto-selected from today's top MLB anchor props (avg overall ${avgOverall.toFixed(0)}). Mix of ${stats}. Based on recent form, matchup, and opportunity. Not financial advice — please bet responsibly.`;
+
+  const { data: insertedPick, error: insertPickError } = await supabase
+    .from("ai_daily_picks")
+    .insert({
+      sport,
+      pick_date: gameDate,
+      risk_label: riskLabel,
+      slip_name: slipName,
+      reasoning,
+      estimated_odds: null,
+      generation_source: "auto",
+    })
+    .select("id")
+    .single();
+
+  if (insertPickError) {
+    if (insertPickError.code === "23505") {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          skipped: true,
+          reason: "race_conflict",
+          sport,
+          pick_date: gameDate,
+          duration_ms: Date.now() - startTime,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    throw insertPickError;
+  }
+
+  const pickId = insertedPick.id as string;
+
+  const legRows = legs.map((leg, idx) => {
+    const side = inferMlbSide(leg);
+    return {
+      daily_pick_id: pickId,
+      leg_order: idx + 1,
+      player_name: leg.player_name,
+      team_abbr: leg.team_abbr,
+      stat_type: leg.stat_type,
+      pick: side,
+      line: String(leg.threshold),
+      odds: null,
+      reasoning: `Overall ${(leg.score_overall ?? 0).toFixed(0)} · tier ${leg.confidence_tier ?? "n/a"} · recent ${(leg.last10_avg ?? leg.season_avg ?? 0).toFixed(1)}`,
+    };
+  });
+
+  const { error: insertLegsError } = await supabase
+    .from("ai_daily_pick_legs")
+    .insert(legRows);
+
+  if (insertLegsError) {
+    await supabase.from("ai_daily_picks").delete().eq("id", pickId);
+    throw insertLegsError;
+  }
+
+  console.log(
+    `[generate-daily-pick/MLB] Created pick ${pickId} for ${sport} ${gameDate} with ${legs.length} legs (risk=${riskLabel}, avgOverall=${avgOverall.toFixed(1)})`,
+  );
+
+  if (force && adminUserId) {
+    try {
+      await supabase.from("analytics_events").insert({
+        event_name: "admin_regenerate_daily_pick",
+        user_id: adminUserId,
+        metadata: {
+          sport,
+          pick_date: gameDate,
+          previous_pick_id: previousPickId,
+          new_pick_id: pickId,
+          leg_count: legs.length,
+          risk_label: riskLabel,
+          avg_overall: Number(avgOverall.toFixed(1)),
+          mode: "mlb_v1_anchor",
+        },
+      });
+    } catch (auditErr) {
+      console.error("[generate-daily-pick/MLB] audit log write failed:", auditErr);
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      created: true,
+      forced: force,
+      previous_pick_id: previousPickId,
+      pick_id: pickId,
+      sport,
+      pick_date: gameDate,
+      slip_name: slipName,
+      risk_label: riskLabel,
+      leg_count: legs.length,
+      avg_overall: Number(avgOverall.toFixed(1)),
+      estimated_odds: null,
+      odds_hit_count: 0,
+      prose_source: "deterministic",
+      mode: "mlb_v1_anchor",
+      duration_ms: Date.now() - startTime,
+    }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
