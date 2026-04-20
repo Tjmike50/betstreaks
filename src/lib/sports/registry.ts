@@ -4,7 +4,7 @@
 // Phase 1 enables NBA + WNBA. Future leagues (MLB/NHL) can be added here
 // without touching consumer code.
 
-export type SportKey = "NBA" | "WNBA";
+export type SportKey = "NBA" | "WNBA" | "MLB";
 
 export type SeasonState = "preseason" | "regular" | "postseason" | "offseason";
 
@@ -58,6 +58,16 @@ const WNBA_STATS: StatCategory[] = [
   { key: "BLK", label: "BLK", longLabel: "Blocks" },
 ];
 
+// MLB stat catalog — placeholder; refine when MLB features ship.
+const MLB_STATS: StatCategory[] = [
+  { key: "H", label: "H", longLabel: "Hits" },
+  { key: "HR", label: "HR", longLabel: "Home Runs" },
+  { key: "RBI", label: "RBI", longLabel: "Runs Batted In" },
+  { key: "R", label: "R", longLabel: "Runs" },
+  { key: "SB", label: "SB", longLabel: "Stolen Bases" },
+  { key: "K", label: "K", longLabel: "Strikeouts (Pitcher)" },
+];
+
 export const SPORTS: Record<SportKey, SportConfig> = {
   NBA: {
     key: "NBA",
@@ -83,9 +93,21 @@ export const SPORTS: Record<SportKey, SportConfig> = {
     defaultSportsbook: "draftkings",
     teamCount: 13,
   },
+  MLB: {
+    key: "MLB",
+    name: "MLB",
+    shortName: "MLB",
+    tagline: "MLB Season",
+    emoji: "⚾",
+    enabled: true,
+    seasonState: "regular",
+    stats: MLB_STATS,
+    defaultSportsbook: "draftkings",
+    teamCount: 30,
+  },
 };
 
-export const SPORT_KEYS: SportKey[] = ["NBA", "WNBA"];
+export const SPORT_KEYS: SportKey[] = ["NBA", "WNBA", "MLB"];
 
 export const ENABLED_SPORTS: SportConfig[] = SPORT_KEYS.map((k) => SPORTS[k]).filter(
   (s) => s.enabled,
