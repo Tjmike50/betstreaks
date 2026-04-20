@@ -6,6 +6,10 @@ import {
   mlbStatLabel,
   type MlbCandidate,
 } from "../_shared/mlbCandidates.ts";
+import {
+  enrichMlbAnchorLegs,
+  parlayAmerican,
+} from "../_shared/mlbOddsEnrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
