@@ -155,14 +155,20 @@ async function ingestPlayers(supabase: Supa): Promise<StepResult> {
         const status = (p?.Status ?? "").toString().toLowerCase();
         return status !== "retired" && status !== "deceased";
       })
-      .map((p) => ({
-        player_id: Number(p.PlayerID),
-        mlb_team_id: Number.isFinite(Number(p?.TeamID)) ? Number(p.TeamID) : null,
-        bats: normHand(p?.BatHand),
-        throws: normHand(p?.ThrowHand),
-        primary_role: rolePrimary(p?.PositionCategory, p?.Position),
-        is_probable_pitcher: false,
-      }));
+      .map((p) => {
+        const first = (p?.FirstName ?? "").toString().trim();
+        const last = (p?.LastName ?? "").toString().trim();
+        const full = (p?.Name ?? `${first} ${last}`).toString().trim() || null;
+        return {
+          player_id: Number(p.PlayerID),
+          player_name: full,
+          mlb_team_id: Number.isFinite(Number(p?.TeamID)) ? Number(p.TeamID) : null,
+          bats: normHand(p?.BatHand),
+          throws: normHand(p?.ThrowHand),
+          primary_role: rolePrimary(p?.PositionCategory, p?.Position),
+          is_probable_pitcher: false,
+        };
+      });
 
     if (rows.length === 0) {
       return { step: "mlb_player_profiles", rows: 0, skipped: true, reason: "no active players" };

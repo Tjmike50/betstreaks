@@ -793,6 +793,7 @@ export type Database = {
           is_probable_pitcher: boolean
           mlb_team_id: number | null
           player_id: number
+          player_name: string | null
           primary_role: string | null
           throws: string | null
           updated_at: string
@@ -803,6 +804,7 @@ export type Database = {
           is_probable_pitcher?: boolean
           mlb_team_id?: number | null
           player_id: number
+          player_name?: string | null
           primary_role?: string | null
           throws?: string | null
           updated_at?: string
@@ -813,6 +815,7 @@ export type Database = {
           is_probable_pitcher?: boolean
           mlb_team_id?: number | null
           player_id?: number
+          player_name?: string | null
           primary_role?: string | null
           throws?: string | null
           updated_at?: string

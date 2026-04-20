@@ -429,27 +429,87 @@ serve(async (req) => {
   }
 
   // De-dupe (player, stat_type, threshold) — prefer consensus, then any.
-  // BLOCKER PATCH (v1): Odds API line snapshots arrive with player_id=null
-  // because we don't have a SportsDataIO → Odds API name→id bridge yet.
-  // To keep the v1 end-to-end pipeline producing usable score rows we
-  // synthesize a stable negative bigint id from a hash of player_name so
-  // (player_id, stat_type, threshold) upserts remain idempotent and never
-  // collide with real positive SportsDataIO PlayerIDs.
+  //
+  // PRIMARY PATH: Odds API snapshots arrive with player_id=null. Resolve the
+  // sportsbook player_name to a real SportsDataIO PlayerID via
+  // mlb_player_profiles (case + diacritic-insensitive). This is what allows
+  // rolling stats / hitter logs / pitcher logs to actually JOIN.
+  //
+  // FALLBACK: If no profile match, synthesize a stable negative bigint id from
+  // a hash of player_name so (player_id, stat_type, threshold) upserts remain
+  // idempotent. These rows will be neutral/pass (no joinable stats) but won't
+  // collide with real positive SportsDataIO ids.
+  function normName(name: string): string {
+    return name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // strip diacritics
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, " ")    // strip Jr./III/punctuation
+      .replace(/\s+/g, " ")
+      .trim();
+  }
   function synthIdForName(name: string): number {
-    // FNV-1a 32-bit hash → flipped to negative bigint range.
     let h = 2166136261;
     for (let i = 0; i < name.length; i++) {
       h ^= name.charCodeAt(i);
       h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
     }
-    // Map to negative range [-2^31 .. -1] so it never collides with real ids.
     return -((h % 2_000_000_000) + 1);
   }
+
+  // Build a name→player_id index from mlb_player_profiles for the names we
+  // actually need to resolve. Limit the candidate pool by collecting unique
+  // names from snapshots first.
+  const snapNames = [
+    ...new Set(
+      ((snaps ?? []) as Array<{ player_name: string | null }>)
+        .map((s) => s?.player_name?.trim())
+        .filter((n): n is string => !!n),
+    ),
+  ];
+  const nameToPid = new Map<string, number>();
+  if (snapNames.length > 0) {
+    // Page through profiles to bypass Supabase's default 1000-row cap
+    // (mlb_player_profiles has ~7k active rows). We need ALL of them so
+    // sportsbook names with diacritics / punctuation match correctly via
+    // the normalized index.
+    const PAGE = 1000;
+    let from = 0;
+    for (let page = 0; page < 20; page++) {
+      const { data: nameRows, error: nameErr } = await supabase
+        .from("mlb_player_profiles")
+        .select("player_id,player_name")
+        .not("player_name", "is", null)
+        .order("player_id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (nameErr) {
+        console.error(`[score-mlb-anchors] profile name page ${page} failed: ${nameErr.message}`);
+        break;
+      }
+      const rows = (nameRows ?? []) as Array<{ player_id: number; player_name: string }>;
+      for (const r of rows) {
+        const k = normName(r.player_name);
+        if (k && !nameToPid.has(k)) nameToPid.set(k, Number(r.player_id));
+      }
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+    console.log(`[score-mlb-anchors] name index built: ${nameToPid.size} entries`);
+  }
+
+  let resolvedReal = 0;
+  let resolvedSynth = 0;
   const dedup = new Map<string, LineSnapshot>();
   for (const s of (snaps ?? []) as Array<LineSnapshot & { sportsbook: string }>) {
     if (s.player_id == null && s.player_name) {
-      // Patch the snapshot in-place so downstream code can use s.player_id!.
-      (s as LineSnapshot).player_id = synthIdForName(s.player_name);
+      const realPid = nameToPid.get(normName(s.player_name));
+      if (realPid && realPid > 0) {
+        (s as LineSnapshot).player_id = realPid;
+        resolvedReal++;
+      } else {
+        (s as LineSnapshot).player_id = synthIdForName(s.player_name);
+        resolvedSynth++;
+      }
     }
     if (s.player_id == null) continue;
     const key = `${s.player_id}|${s.stat_type}|${s.threshold}`;
@@ -457,6 +517,9 @@ serve(async (req) => {
     if (!existing || s.sportsbook === "consensus") dedup.set(key, s);
   }
   const lines = [...dedup.values()];
+  console.log(
+    `[score-mlb-anchors] name-resolution date=${gameDate} snaps=${(snaps ?? []).length} unique_names=${snapNames.length} resolved_real=${resolvedReal} resolved_synth=${resolvedSynth} lines=${lines.length}`,
+  );
 
   if (lines.length === 0) {
     return new Response(
