@@ -35,20 +35,42 @@ const WNBA_TEAM_ABBRS: Record<string, string> = {
 
 // Phase 1 sport registry (mirrors src/lib/sports/registry.ts).
 // When WNBA goes in-season, flip seasonState below to enable ingestion.
-type SportKey = "NBA" | "WNBA";
-const SPORT_CONFIG: Record<SportKey, {
+type SportKey = "NBA" | "WNBA" | "MLB";
+
+interface SportConfig {
   oddsApiSport: string;
   teamMap: Record<string, string>;
   refreshStatusId: number;
   refreshStatusLabel: string;
   seasonState: "preseason" | "regular" | "postseason" | "offseason";
-}> = {
+  /** Comma-separated player-prop market list passed to get-odds. */
+  propMarkets: string;
+  /**
+   * Stat-type rewrite. NBA/WNBA convert market keys to friendly labels
+   * (e.g. player_points → "Points") because their scorer reads friendly
+   * labels. MLB keeps the raw Odds API market keys (e.g. "batter_hits")
+   * because score-mlb-anchors queries line_snapshots by market key.
+   */
+  statRewrite: Record<string, string> | "passthrough";
+}
+
+const NBA_PROP_MARKETS = "player_points,player_rebounds,player_assists,player_threes";
+const NBA_STAT_REWRITE: Record<string, string> = {
+  player_points: "Points",
+  player_rebounds: "Rebounds",
+  player_assists: "Assists",
+  player_threes: "3-Pointers",
+};
+
+const SPORT_CONFIG: Record<SportKey, SportConfig> = {
   NBA: {
     oddsApiSport: "basketball_nba",
     teamMap: NBA_TEAM_ABBRS,
     refreshStatusId: 3,
     refreshStatusLabel: "NBA_LINES",
     seasonState: "postseason",
+    propMarkets: NBA_PROP_MARKETS,
+    statRewrite: NBA_STAT_REWRITE,
   },
   WNBA: {
     oddsApiSport: "basketball_wnba",
@@ -56,14 +78,24 @@ const SPORT_CONFIG: Record<SportKey, {
     refreshStatusId: 13,
     refreshStatusLabel: "WNBA_LINES",
     seasonState: "offseason",
+    propMarkets: NBA_PROP_MARKETS,
+    statRewrite: NBA_STAT_REWRITE,
   },
-};
-
-const STAT_MAP: Record<string, string> = {
-  player_points: "Points",
-  player_rebounds: "Rebounds",
-  player_assists: "Assists",
-  player_threes: "3-Pointers",
+  MLB: {
+    oddsApiSport: MLB_ODDS_API_SPORT, // "baseball_mlb"
+    teamMap: {}, // MLB team registry not wired yet — leave abbrs null in games_today.
+    refreshStatusId: 23,
+    refreshStatusLabel: "MLB_LINES",
+    seasonState: "regular",
+    // v1 scope: only the 3 anchor markets currently scored by score-mlb-anchors.
+    // (batter_hits, batter_total_bases, pitcher_strikeouts)
+    propMarkets: [
+      "batter_hits",
+      "batter_total_bases",
+      "pitcher_strikeouts",
+    ].join(","),
+    statRewrite: "passthrough",
+  },
 };
 
 /**
