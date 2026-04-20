@@ -1,31 +1,39 @@
 // =============================================================================
-// MLB Candidate Feed — first AI candidate layer for BetStreaks (v1).
+// MLB Candidate Feed — v1 (anchors + 4 expansion props).
 //
-// Reads from `player_prop_scores` (sport='MLB', anchor stats only) and exposes
-// two entry points used by the AI Builder + Daily Pick edge functions:
+// Reads from `player_prop_scores` (sport='MLB') and exposes two entry points:
 //
 //   • getMlbBuilderCandidates(client, opts)  → broader pool for AI Builder.
 //   • getMlbDailyPickCandidates(client, opts) → stricter pool for Daily Pick.
 //
 // Scope (v1):
 //   - Sport: MLB only.
-//   - Stats: HITS, TOTAL_BASES, STRIKEOUTS (the 3 anchor props currently
-//     scored by `score-mlb-anchors`). Other 4 MLB props (HR, ER, BB, H allowed)
-//     are intentionally excluded until they're scored.
+//   - Stats: HITS, TOTAL_BASES, STRIKEOUTS (anchors) +
+//            HOME_RUNS, EARNED_RUNS_ALLOWED, WALKS_ALLOWED, HITS_ALLOWED.
 //   - Source: `player_prop_scores` rows with sport='MLB' for the requested
-//     game_date.
+//     game_date, scored by score-mlb-anchors.
 //
-// Filtering / ranking is intentionally lean and practical for v1. The fields
-// returned are sufficient for downstream LLM prompting (player, stat, line,
-// score axes, confidence tier, summary_json) and for matching back to
-// line_snapshots when odds enrichment is added later.
+// Per-stat strictness (locked for v1 to avoid product pollution):
+//   - HOME_RUNS: very selective (elite/strong only, high min_overall).
+//   - WALKS_ALLOWED: selective (elite/strong, mid-high min_overall).
+//   - EARNED_RUNS_ALLOWED / HITS_ALLOWED: lean tier acceptable if score clean.
+//   - Anchors (HITS / TOTAL_BASES / STRIKEOUTS): lowest gates — they are the
+//     reliable backbone of the product.
 // =============================================================================
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 
-/** MLB v1 anchor stats supported by the scorer + this candidate feed. */
-export const MLB_ANCHOR_STATS = ["HITS", "TOTAL_BASES", "STRIKEOUTS"] as const;
+/** All MLB v1 stats supported by score-mlb-anchors. */
+export const MLB_ANCHOR_STATS = [
+  "HITS",
+  "TOTAL_BASES",
+  "STRIKEOUTS",
+  "HOME_RUNS",
+  "EARNED_RUNS_ALLOWED",
+  "WALKS_ALLOWED",
+  "HITS_ALLOWED",
+] as const;
 export type MlbAnchorStat = (typeof MLB_ANCHOR_STATS)[number];
 
 /** Confidence tiers written by score-mlb-anchors. */
@@ -36,11 +44,41 @@ export const MLB_STAT_LABELS: Record<string, string> = {
   HITS: "Hits",
   TOTAL_BASES: "Total Bases",
   STRIKEOUTS: "Strikeouts",
+  HOME_RUNS: "Home Runs",
+  EARNED_RUNS_ALLOWED: "Earned Runs Allowed",
+  WALKS_ALLOWED: "Walks Allowed",
+  HITS_ALLOWED: "Hits Allowed",
 };
 
 export function mlbStatLabel(stat: string): string {
   return MLB_STAT_LABELS[stat.toUpperCase()] ?? stat;
 }
+
+/**
+ * Per-stat strictness profile. Keeps anchors loose so they remain the product
+ * backbone; tightens the 4 new props so noisy rows don't pollute the feed.
+ */
+interface StatProfile {
+  builderMinOverall: number;
+  dailyPickMinOverall: number;
+  /** Tiers acceptable on Daily Pick. Builder always allows lean+ */
+  dailyPickTiers: MlbConfidenceTier[];
+  /** Soft cap to prevent any one stat dominating the slip menu. */
+  builderShareMax: number;
+  dailyPickShareMax: number;
+}
+
+const STAT_PROFILES: Record<MlbAnchorStat, StatProfile> = {
+  // Anchors: backbone of the product.
+  HITS:                { builderMinOverall: 50, dailyPickMinOverall: 55, dailyPickTiers: ["elite", "strong", "lean"], builderShareMax: 0.50, dailyPickShareMax: 0.60 },
+  TOTAL_BASES:         { builderMinOverall: 50, dailyPickMinOverall: 55, dailyPickTiers: ["elite", "strong", "lean"], builderShareMax: 0.50, dailyPickShareMax: 0.60 },
+  STRIKEOUTS:          { builderMinOverall: 55, dailyPickMinOverall: 60, dailyPickTiers: ["elite", "strong"],         builderShareMax: 0.30, dailyPickShareMax: 0.34 },
+  // Expansion: stricter to avoid weak/noisy promotion.
+  HOME_RUNS:           { builderMinOverall: 60, dailyPickMinOverall: 70, dailyPickTiers: ["elite", "strong"],         builderShareMax: 0.20, dailyPickShareMax: 0.20 },
+  WALKS_ALLOWED:       { builderMinOverall: 58, dailyPickMinOverall: 65, dailyPickTiers: ["elite", "strong"],         builderShareMax: 0.20, dailyPickShareMax: 0.25 },
+  EARNED_RUNS_ALLOWED: { builderMinOverall: 55, dailyPickMinOverall: 60, dailyPickTiers: ["elite", "strong", "lean"], builderShareMax: 0.25, dailyPickShareMax: 0.34 },
+  HITS_ALLOWED:        { builderMinOverall: 55, dailyPickMinOverall: 60, dailyPickTiers: ["elite", "strong", "lean"], builderShareMax: 0.25, dailyPickShareMax: 0.34 },
+};
 
 /**
  * Shape returned to callers. Mirrors the columns required by downstream AI
@@ -87,7 +125,7 @@ interface BaseOpts {
   gameDate?: string;
   /** Hard cap on rows returned. */
   limit?: number;
-  /** Override which anchor stats to include. Defaults to all 3. */
+  /** Override which stats to include. Defaults to all 7. */
   stats?: readonly MlbAnchorStat[];
 }
 
@@ -96,8 +134,8 @@ function todayUtc(): string {
 }
 
 /**
- * Common DB load — handles `sport='MLB'`, anchor-stat scoping, date filter,
- * over-fetch, and a sane outer cap. Filtering/ranking is applied by the two
+ * Common DB load — handles `sport='MLB'`, stat scoping, date filter,
+ * over-fetch, and a sane outer cap. Filtering/ranking is applied by the
  * public entry points below.
  */
 async function loadMlbScoredRows(
@@ -114,7 +152,6 @@ async function loadMlbScoredRows(
     .eq("sport", "MLB")
     .eq("game_date", gameDate)
     .in("stat_type", stats as string[])
-    // Pull more than needed; the entry points re-rank + slice.
     .order("score_overall", { ascending: false, nullsFirst: false })
     .limit(cap);
 
@@ -128,10 +165,8 @@ async function loadMlbScoredRows(
 }
 
 /**
- * Drop the obvious junk before either feed sees it. Currently only excludes
- * the `pass` tier (clearly weak/noisy candidates) and rows missing a usable
- * threshold. Kept conservative for v1 so we don't accidentally starve the
- * builder during early MLB ingestion.
+ * Drop the obvious junk before either feed sees it. Excludes the `pass` tier,
+ * stale synthetic-id rows (player_id < 0), and rows with no usable threshold.
  */
 function dropWeak(rows: MlbCandidate[]): MlbCandidate[] {
   return rows.filter(
@@ -145,135 +180,6 @@ function dropWeak(rows: MlbCandidate[]): MlbCandidate[] {
       // junk — they never have rolling stats joined. Exclude from both feeds.
       r.player_id > 0,
   );
-}
-
-// ---------------------------------------------------------------------------
-// AI Builder feed
-// ---------------------------------------------------------------------------
-
-export interface BuilderFeedOpts extends BaseOpts {
-  /**
-   * Minimum overall score to keep. Default 50 — the LLM still needs enough
-   * candidates to choose from for a multi-leg slip.
-   */
-  minOverall?: number;
-  /**
-   * Max candidates per player to keep variety (across stat types). Default 2.
-   */
-  maxPerPlayer?: number;
-  /** Final cap on returned rows. Default 60. */
-  limit?: number;
-}
-
-/**
- * Broader candidate pool for the AI Builder. Practical filtering:
- *   • only MLB anchor props
- *   • exclude `confidence_tier='pass'`
- *   • require `score_overall >= minOverall` (default 50)
- *   • cap per player so the LLM doesn't see the same name 5 times
- *   • rank by score_overall, then confidence_tier, then score_value
- */
-export async function getMlbBuilderCandidates(
-  client: SupabaseLike,
-  opts: BuilderFeedOpts = {},
-): Promise<MlbCandidate[]> {
-  const minOverall = opts.minOverall ?? 50;
-  const maxPerPlayer = Math.max(1, opts.maxPerPlayer ?? 2);
-  const finalLimit = Math.max(1, opts.limit ?? 60);
-
-  const raw = await loadMlbScoredRows(client, {
-    gameDate: opts.gameDate,
-    stats: opts.stats,
-    // Over-fetch so per-player capping has room to work.
-    limit: Math.min(finalLimit * 6, 600),
-  });
-
-  const filtered = dropWeak(raw).filter(
-    (r) => (r.score_overall ?? 0) >= minOverall,
-  );
-
-  filtered.sort((a, b) => {
-    const ao = a.score_overall ?? 0;
-    const bo = b.score_overall ?? 0;
-    if (bo !== ao) return bo - ao;
-    const at = tierWeight(a.confidence_tier);
-    const bt = tierWeight(b.confidence_tier);
-    if (bt !== at) return bt - at;
-    return (b.score_value ?? 0) - (a.score_value ?? 0);
-  });
-
-  // Per-player cap.
-  const perPlayer = new Map<number, number>();
-  const out: MlbCandidate[] = [];
-  for (const c of filtered) {
-    const seen = perPlayer.get(c.player_id) ?? 0;
-    if (seen >= maxPerPlayer) continue;
-    perPlayer.set(c.player_id, seen + 1);
-    out.push(c);
-    if (out.length >= finalLimit) break;
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Daily Pick feed
-// ---------------------------------------------------------------------------
-
-export interface DailyPickFeedOpts extends BaseOpts {
-  /** Acceptable confidence tiers. Default ['elite','strong','lean']. */
-  acceptedTiers?: MlbConfidenceTier[];
-  /** Minimum overall score. Default 55 (anchor-v1: lean is acceptable). */
-  minOverall?: number;
-  /** Final cap on returned rows. Default 25. */
-  limit?: number;
-  /**
-   * STRIKEOUTS coverage is still sparse in anchor-v1 (few pitcher rolling rows
-   * + neutral matchup data). Drop them from Daily Pick by default so we don't
-   * promote low-signal K legs. AI Builder still sees them for variety.
-   */
-  excludeWeakStrikeouts?: boolean;
-}
-
-/**
- * Stricter candidate pool for Daily Pick. Anchor-v1 calibration:
- *   • only MLB anchor props (HITS, TOTAL_BASES; STRIKEOUTS dropped by default)
- *   • `confidence_tier in (elite, strong, lean)` — lean is acceptable now
- *     that name resolution is real and tiers actually mean something
- *   • `score_overall >= 55` by default
- *   • ranked by score_overall (tier-weighted tiebreak)
- */
-export async function getMlbDailyPickCandidates(
-  client: SupabaseLike,
-  opts: DailyPickFeedOpts = {},
-): Promise<MlbCandidate[]> {
-  const acceptedTiers = opts.acceptedTiers ?? ["elite", "strong", "lean"];
-  const minOverall = opts.minOverall ?? 55;
-  const finalLimit = Math.max(1, opts.limit ?? 25);
-  const excludeWeakK = opts.excludeWeakStrikeouts ?? true;
-
-  const raw = await loadMlbScoredRows(client, {
-    gameDate: opts.gameDate,
-    stats: opts.stats,
-    limit: Math.min(finalLimit * 8, 500),
-  });
-
-  const filtered = dropWeak(raw).filter((r) => {
-    if (r.player_id <= 0) return false; // anchor-v1: stale synth ids never reach Daily Pick
-    if ((r.score_overall ?? 0) < minOverall) return false;
-    if (!r.confidence_tier) return false;
-    if (!acceptedTiers.includes(r.confidence_tier)) return false;
-    if (excludeWeakK && r.stat_type === "STRIKEOUTS") return false;
-    return true;
-  });
-
-  filtered.sort((a, b) => {
-    const ao = a.score_overall ?? 0;
-    const bo = b.score_overall ?? 0;
-    if (bo !== ao) return bo - ao;
-    return tierWeight(b.confidence_tier) - tierWeight(a.confidence_tier);
-  });
-
-  return filtered.slice(0, finalLimit);
 }
 
 function tierWeight(tier: MlbConfidenceTier | null): number {
@@ -290,10 +196,185 @@ function tierWeight(tier: MlbConfidenceTier | null): number {
 }
 
 /**
- * Decide Over/Under from rolling averages — same heuristic as the existing
- * basketball Daily Pick uses, adapted for MLB. If recent form is well below
- * the line we suggest Under; otherwise Over (the default for MLB props,
- * since most positive scores point that way for hitters/pitchers alike).
+ * Apply per-stat share caps so no single stat (especially HR/BB-allowed)
+ * dominates the returned pool. `caps` maps stat → max share (0..1) of the
+ * total returned set.
+ */
+function applyStatShareCap(
+  rows: MlbCandidate[],
+  caps: Record<MlbAnchorStat, number>,
+  finalLimit: number,
+): MlbCandidate[] {
+  const perStatLimit = new Map<string, number>();
+  for (const stat of MLB_ANCHOR_STATS) {
+    perStatLimit.set(stat, Math.max(1, Math.floor(caps[stat] * finalLimit)));
+  }
+  const perStatCount = new Map<string, number>();
+  const out: MlbCandidate[] = [];
+  for (const c of rows) {
+    const max = perStatLimit.get(c.stat_type) ?? finalLimit;
+    const cur = perStatCount.get(c.stat_type) ?? 0;
+    if (cur >= max) continue;
+    perStatCount.set(c.stat_type, cur + 1);
+    out.push(c);
+    if (out.length >= finalLimit) break;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// AI Builder feed
+// ---------------------------------------------------------------------------
+
+export interface BuilderFeedOpts extends BaseOpts {
+  /**
+   * Floor for `score_overall`. Per-stat profiles override this upward —
+   * anchors keep this floor, expansion props raise it.
+   */
+  minOverall?: number;
+  /** Max candidates per player to keep variety (across stat types). */
+  maxPerPlayer?: number;
+  /** Final cap on returned rows. */
+  limit?: number;
+}
+
+/**
+ * Broader candidate pool for the AI Builder. Practical filtering:
+ *   • only MLB v1 stats (7 props)
+ *   • exclude `confidence_tier='pass'` and synthetic-id rows
+ *   • require per-stat min score_overall (anchors looser, expansion stricter)
+ *   • cap per player so the LLM doesn't see the same name 5 times
+ *   • per-stat share caps so HR/BB-allowed don't drown out anchors
+ */
+export async function getMlbBuilderCandidates(
+  client: SupabaseLike,
+  opts: BuilderFeedOpts = {},
+): Promise<MlbCandidate[]> {
+  const baselineMin = opts.minOverall ?? 50;
+  const maxPerPlayer = Math.max(1, opts.maxPerPlayer ?? 2);
+  const finalLimit = Math.max(1, opts.limit ?? 60);
+
+  const raw = await loadMlbScoredRows(client, {
+    gameDate: opts.gameDate,
+    stats: opts.stats,
+    // Over-fetch so per-player + per-stat capping has room to work.
+    limit: Math.min(finalLimit * 8, 800),
+  });
+
+  const filtered = dropWeak(raw).filter((r) => {
+    const profile = STAT_PROFILES[r.stat_type as MlbAnchorStat];
+    const minOverall = profile
+      ? Math.max(profile.builderMinOverall, baselineMin)
+      : baselineMin;
+    return (r.score_overall ?? 0) >= minOverall;
+  });
+
+  filtered.sort((a, b) => {
+    const ao = a.score_overall ?? 0;
+    const bo = b.score_overall ?? 0;
+    if (bo !== ao) return bo - ao;
+    const at = tierWeight(a.confidence_tier);
+    const bt = tierWeight(b.confidence_tier);
+    if (bt !== at) return bt - at;
+    return (b.score_value ?? 0) - (a.score_value ?? 0);
+  });
+
+  // Per-player cap.
+  const perPlayer = new Map<number, number>();
+  const perPlayerCapped: MlbCandidate[] = [];
+  for (const c of filtered) {
+    const seen = perPlayer.get(c.player_id) ?? 0;
+    if (seen >= maxPerPlayer) continue;
+    perPlayer.set(c.player_id, seen + 1);
+    perPlayerCapped.push(c);
+  }
+
+  // Per-stat share caps to protect anchor visibility.
+  const caps: Record<MlbAnchorStat, number> = Object.fromEntries(
+    (Object.entries(STAT_PROFILES) as [MlbAnchorStat, StatProfile][]).map(
+      ([k, p]) => [k, p.builderShareMax],
+    ),
+  ) as Record<MlbAnchorStat, number>;
+  return applyStatShareCap(perPlayerCapped, caps, finalLimit);
+}
+
+// ---------------------------------------------------------------------------
+// Daily Pick feed
+// ---------------------------------------------------------------------------
+
+export interface DailyPickFeedOpts extends BaseOpts {
+  /** Acceptable confidence tiers (overrides per-stat profile if provided). */
+  acceptedTiers?: MlbConfidenceTier[];
+  /** Baseline minimum overall score; per-stat profile takes the max. */
+  minOverall?: number;
+  /** Final cap on returned rows. Default 25. */
+  limit?: number;
+  /**
+   * STRIKEOUTS coverage is still sparse in v1. Drop them from Daily Pick by
+   * default so we don't promote low-signal K legs. AI Builder still sees them.
+   */
+  excludeWeakStrikeouts?: boolean;
+}
+
+/**
+ * Stricter candidate pool for Daily Pick. v1 calibration:
+ *   • only MLB v1 stats (7 props)
+ *   • per-stat tier + min-overall profile (HR very strict, anchors looser)
+ *   • per-stat share caps so HR/BB-allowed can't dominate the pick
+ *   • ranked by score_overall (tier-weighted tiebreak)
+ */
+export async function getMlbDailyPickCandidates(
+  client: SupabaseLike,
+  opts: DailyPickFeedOpts = {},
+): Promise<MlbCandidate[]> {
+  const overrideTiers = opts.acceptedTiers ?? null;
+  const baselineMin = opts.minOverall ?? 55;
+  const finalLimit = Math.max(1, opts.limit ?? 25);
+  const excludeWeakK = opts.excludeWeakStrikeouts ?? true;
+
+  const raw = await loadMlbScoredRows(client, {
+    gameDate: opts.gameDate,
+    stats: opts.stats,
+    limit: Math.min(finalLimit * 12, 600),
+  });
+
+  const filtered = dropWeak(raw).filter((r) => {
+    if (excludeWeakK && r.stat_type === "STRIKEOUTS") return false;
+    if (!r.confidence_tier) return false;
+
+    const profile = STAT_PROFILES[r.stat_type as MlbAnchorStat];
+    const minOverall = profile
+      ? Math.max(profile.dailyPickMinOverall, baselineMin)
+      : baselineMin;
+    const acceptedTiers = overrideTiers ?? profile?.dailyPickTiers ?? [
+      "elite",
+      "strong",
+    ];
+
+    if ((r.score_overall ?? 0) < minOverall) return false;
+    if (!acceptedTiers.includes(r.confidence_tier)) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const ao = a.score_overall ?? 0;
+    const bo = b.score_overall ?? 0;
+    if (bo !== ao) return bo - ao;
+    return tierWeight(b.confidence_tier) - tierWeight(a.confidence_tier);
+  });
+
+  const caps: Record<MlbAnchorStat, number> = Object.fromEntries(
+    (Object.entries(STAT_PROFILES) as [MlbAnchorStat, StatProfile][]).map(
+      ([k, p]) => [k, p.dailyPickShareMax],
+    ),
+  ) as Record<MlbAnchorStat, number>;
+  return applyStatShareCap(filtered, caps, finalLimit);
+}
+
+/**
+ * Decide Over/Under from rolling averages. For pitcher "allowed" props,
+ * we still infer Over when recent allowed > line * 0.85 (i.e. trending into
+ * trouble), Under otherwise. Anchors keep the original heuristic.
  */
 export function inferMlbSide(c: MlbCandidate): "Over" | "Under" {
   const recent = c.last10_avg ?? c.season_avg ?? 0;

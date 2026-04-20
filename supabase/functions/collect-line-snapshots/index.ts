@@ -87,12 +87,16 @@ const SPORT_CONFIG: Record<SportKey, SportConfig> = {
     refreshStatusId: 23,
     refreshStatusLabel: "MLB_LINES",
     seasonState: "regular",
-    // v1 scope: only the 3 anchor markets currently scored by score-mlb-anchors.
-    // (batter_hits, batter_total_bases, pitcher_strikeouts)
+    // v1 scope: all 7 MLB markets scored by score-mlb-anchors
+    // (3 anchors + HR/ER/BB/H allowed expansion).
     propMarkets: [
       "batter_hits",
       "batter_total_bases",
+      "batter_home_runs",
       "pitcher_strikeouts",
+      "pitcher_earned_runs",
+      "pitcher_walks",
+      "pitcher_hits_allowed",
     ].join(","),
     statRewrite: "passthrough",
   },

@@ -52,7 +52,7 @@ export interface MlbOddsLookupResult {
   matched: boolean;
 }
 
-/** Internal anchor key → Odds API market label (e.g. "HITS" → "batter_hits"). */
+/** Internal MLB v1 stat key → Odds API market label. Accepts all 7 props. */
 function oddsMarketForAnchor(stat: string): string | null {
   const upper = stat.toUpperCase();
   if (!(MLB_ANCHOR_STATS as readonly string[]).includes(upper)) return null;

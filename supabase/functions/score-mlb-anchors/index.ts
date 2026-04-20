@@ -56,8 +56,19 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ── v1 anchors only ──
-const ANCHOR_KEYS: MlbStatKey[] = ["HITS", "TOTAL_BASES", "STRIKEOUTS"];
+// ── v1 props (anchors + 4 expansion props) ──
+// Anchors: HITS, TOTAL_BASES, STRIKEOUTS (battle-tested in anchor-v1).
+// Expansion: HOME_RUNS, EARNED_RUNS_ALLOWED, WALKS_ALLOWED, HITS_ALLOWED
+//   — same scoring framework, prop-specific matchup + risk weights.
+const ANCHOR_KEYS: MlbStatKey[] = [
+  "HITS",
+  "TOTAL_BASES",
+  "STRIKEOUTS",
+  "HOME_RUNS",
+  "EARNED_RUNS_ALLOWED",
+  "WALKS_ALLOWED",
+  "HITS_ALLOWED",
+];
 
 // ── Per-prop weighting (sums to ~1.0 per prop across positive axes) ──
 // risk is subtracted, so its weight is the penalty magnitude.
@@ -95,11 +106,15 @@ const WEIGHT_PROFILES: Record<MlbStatKey, WeightProfile> = {
     value: 0.10,
     risk_penalty: 0.12,
   },
-  // Other 4 props are not scored in v1 but kept here so type stays exhaustive.
-  HOME_RUNS:           { recent_form: 0.25, matchup: 0.25, opportunity: 0.15, consistency: 0.10, value: 0.25, risk_penalty: 0.25 },
-  EARNED_RUNS_ALLOWED: { recent_form: 0.25, matchup: 0.30, opportunity: 0.20, consistency: 0.15, value: 0.10, risk_penalty: 0.20 },
-  WALKS_ALLOWED:       { recent_form: 0.30, matchup: 0.20, opportunity: 0.20, consistency: 0.20, value: 0.10, risk_penalty: 0.15 },
-  HITS_ALLOWED:        { recent_form: 0.27, matchup: 0.28, opportunity: 0.20, consistency: 0.15, value: 0.10, risk_penalty: 0.18 },
+  // Expansion props (v1, scored alongside anchors with prop-specific weights).
+  // HOME_RUNS — high variance: prioritize matchup + value, heavy risk penalty.
+  HOME_RUNS:           { recent_form: 0.20, matchup: 0.28, opportunity: 0.12, consistency: 0.05, value: 0.25, risk_penalty: 0.30 },
+  // EARNED_RUNS_ALLOWED — prioritize matchup + recent form + workload, blow-up penalty.
+  EARNED_RUNS_ALLOWED: { recent_form: 0.28, matchup: 0.30, opportunity: 0.20, consistency: 0.12, value: 0.10, risk_penalty: 0.22 },
+  // WALKS_ALLOWED — prioritize control trend + opp walk tendency + consistency.
+  WALKS_ALLOWED:       { recent_form: 0.32, matchup: 0.22, opportunity: 0.15, consistency: 0.21, value: 0.10, risk_penalty: 0.18 },
+  // HITS_ALLOWED — prioritize recent form + workload + opp contact + consistency.
+  HITS_ALLOWED:        { recent_form: 0.30, matchup: 0.25, opportunity: 0.18, consistency: 0.17, value: 0.10, risk_penalty: 0.18 },
 };
 
 // Neutral fallback for any axis when data is missing.
@@ -318,6 +333,133 @@ function scoreMatchupPitcher(
 }
 
 /**
+ * Matchup (batter HOME_RUNS):
+ *   Use opposing pitcher's home_runs_allowed_avg + park factor.
+ *   Higher allowed HR = better matchup. v1 baseline ≈ 1.0 HR allowed/start.
+ */
+function scoreMatchupHomeRun(
+  pitcherSummary: PitcherMatchup | null,
+  oppTeamOff: TeamOffenseRow | null,
+  ctx: MlbGameContext | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (pitcherSummary?.home_runs_allowed_avg != null) {
+    const hra = Number(pitcherSummary.home_runs_allowed_avg);
+    // 0.6→40, 1.0→55, 1.4→70, 1.8→85.
+    score = clamp(40 + (hra - 0.6) * 37.5);
+    notes.push(`HRa=${round1(hra)}`);
+  } else if (oppTeamOff?.isolated_power != null) {
+    // Fall back to opponent ISO as a coarse power proxy (high ISO ≈ HR threat).
+    const iso = Number(oppTeamOff.isolated_power);
+    score = clamp(40 + (iso - 0.14) * 250);
+    notes.push(`oppISO=${round1(iso * 1000) / 1000}`);
+  } else {
+    notes.push("no HR matchup data");
+  }
+  // Park factor: HR-friendly parks boost the score significantly.
+  const pf = ctx?.game_context_json?.park_factor;
+  if (typeof pf === "number" && Number.isFinite(pf)) {
+    score = clamp(score + (pf - 1) * 30);
+    notes.push(`park=${round1(pf)}`);
+  }
+  return { score, note: notes.join(" ") || "HR matchup neutral" };
+}
+
+/**
+ * Matchup (pitcher WALKS_ALLOWED):
+ *   Use opposing team walk_rate. Higher BB-rate = MORE walks allowed
+ *   = a better Over for this prop, and a worse Under.
+ *   Score reflects "expected walks allowed", so high = leans Over.
+ */
+function scoreMatchupWalksAllowed(
+  oppTeamOff: TeamOffenseRow | null,
+  pitcherSummary: PitcherMatchup | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (oppTeamOff?.walk_rate != null) {
+    const bbRate = Number(oppTeamOff.walk_rate);
+    // League BB-rate ≈ 0.085. 0.11 → 70, 0.06 → 35.
+    score = clamp(50 + (bbRate - 0.085) * 600);
+    notes.push(`oppBB=${round1(bbRate * 100)}%`);
+  } else if (pitcherSummary?.walks_allowed_avg != null) {
+    // Fall back to pitcher's own recent BB-allowed average.
+    const bb = Number(pitcherSummary.walks_allowed_avg);
+    score = clamp(35 + bb * 12);
+    notes.push(`pBB=${round1(bb)}`);
+  } else {
+    notes.push("no BB matchup data");
+  }
+  return { score, note: notes.join(" ") || "BB matchup neutral" };
+}
+
+/**
+ * Matchup (pitcher HITS_ALLOWED):
+ *   Use opposing team OPS / hits_per_game as contact proxy.
+ *   Higher = MORE hits allowed expected.
+ */
+function scoreMatchupHitsAllowed(
+  oppTeamOff: TeamOffenseRow | null,
+  pitcherSummary: PitcherMatchup | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (oppTeamOff?.hits_per_game != null) {
+    const hpg = Number(oppTeamOff.hits_per_game);
+    // League ≈ 8.3 hits/game. 9.5 → 65, 7.0 → 35.
+    score = clamp(50 + (hpg - 8.3) * 12);
+    notes.push(`oppHpG=${round1(hpg)}`);
+  } else if (pitcherSummary?.hits_allowed_avg != null) {
+    const ha = Number(pitcherSummary.hits_allowed_avg);
+    score = clamp(35 + ha * 4);
+    notes.push(`pHa=${round1(ha)}`);
+  } else {
+    notes.push("no H matchup data");
+  }
+  return { score, note: notes.join(" ") || "H matchup neutral" };
+}
+
+/**
+ * Matchup (pitcher EARNED_RUNS_ALLOWED):
+ *   Blend opposing team OPS + runs_per_game as run-scoring proxy.
+ *   Higher = MORE ER expected from this pitcher.
+ */
+function scoreMatchupEarnedRuns(
+  oppTeamOff: TeamOffenseRow | null,
+  pitcherSummary: PitcherMatchup | null,
+  ctx: MlbGameContext | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (oppTeamOff?.runs_per_game != null) {
+    const rpg = Number(oppTeamOff.runs_per_game);
+    // League ≈ 4.5 R/G. 5.5 → 65, 3.5 → 35.
+    score = clamp(50 + (rpg - 4.5) * 15);
+    notes.push(`oppRpG=${round1(rpg)}`);
+    if (oppTeamOff.ops != null) {
+      // Light OPS nudge ±10.
+      const ops = Number(oppTeamOff.ops);
+      score = clamp(score + (ops - 0.72) * 30);
+      notes.push(`oppOPS=${round1(ops * 1000) / 1000}`);
+    }
+  } else if (pitcherSummary?.earned_runs_allowed_avg != null) {
+    const er = Number(pitcherSummary.earned_runs_allowed_avg);
+    score = clamp(35 + er * 10);
+    notes.push(`pER=${round1(er)}`);
+  } else {
+    notes.push("no ER matchup data");
+  }
+  // Hitter-friendly parks raise expected ER.
+  const pf = ctx?.game_context_json?.park_factor;
+  if (typeof pf === "number" && Number.isFinite(pf)) {
+    score = clamp(score + (pf - 1) * 15);
+    notes.push(`park=${round1(pf)}`);
+  }
+  return { score, note: notes.join(" ") || "ER matchup neutral" };
+}
+
+/**
  * Value: how far the rolling mean projection sits from the threshold.
  * Larger overstep / understep → higher value. Symmetric for v1.
  */
@@ -372,6 +514,18 @@ interface PitcherMatchup {
   hits_allowed_avg: number | null;
   earned_runs_allowed_avg: number | null;
   strikeouts_avg: number | null;
+  walks_allowed_avg: number | null;
+  home_runs_allowed_avg: number | null;
+}
+
+interface TeamOffenseRow {
+  team_id: number;
+  strikeout_rate: number | null;
+  walk_rate: number | null;
+  runs_per_game: number | null;
+  hits_per_game: number | null;
+  isolated_power: number | null;
+  ops: number | null;
 }
 
 interface MlbGameContext {
@@ -624,7 +778,9 @@ serve(async (req) => {
   if (probablePitcherIds.size > 0) {
     const { data: pms } = await supabase
       .from("mlb_pitcher_matchup_summaries")
-      .select("pitcher_id,hits_allowed_avg,earned_runs_allowed_avg,strikeouts_avg,as_of_date")
+      .select(
+        "pitcher_id,hits_allowed_avg,earned_runs_allowed_avg,strikeouts_avg,walks_allowed_avg,home_runs_allowed_avg,as_of_date",
+      )
       .in("pitcher_id", [...probablePitcherIds])
       .lte("as_of_date", gameDate)
       .order("as_of_date", { ascending: false });
@@ -635,25 +791,32 @@ serve(async (req) => {
     }
   }
 
-  // Opposing-team K-rate for STRIKEOUTS prop matchup.
-  // (Best-effort: we only have access to mlb_team_offense_daily by team_id; we
-  // resolve the opposing team via the most-recent pitcher_log opponent_team_id.)
+  // Opposing-team offense (K-rate, BB-rate, runs, hits, OPS, ISO) for pitcher
+  // and HOME_RUNS matchup scoring. We resolve the opposing team via the most
+  // recent pitcher_log opponent_team_id, falling back to the batter's profile
+  // team for HR matchup.
   const oppTeamIds = new Set<number>();
   for (const log of pitcherLogs ?? []) {
     if (log.opponent_team_id) oppTeamIds.add(log.opponent_team_id);
   }
-  let teamKRateById = new Map<number, number>();
+  // Also include hitter teams so HR matchup can resolve opposing pitcher's team.
+  for (const p of profiles ?? []) {
+    if (p.mlb_team_id) oppTeamIds.add(p.mlb_team_id);
+  }
+  const teamOffenseById = new Map<number, TeamOffenseRow>();
   if (oppTeamIds.size > 0) {
     const { data: offRows } = await supabase
       .from("mlb_team_offense_daily")
-      .select("team_id,strikeout_rate,as_of_date,split_type")
+      .select(
+        "team_id,strikeout_rate,walk_rate,runs_per_game,hits_per_game,isolated_power,ops,as_of_date,split_type",
+      )
       .in("team_id", [...oppTeamIds])
       .eq("split_type", "overall")
       .lte("as_of_date", gameDate)
       .order("as_of_date", { ascending: false });
-    for (const r of offRows ?? []) {
-      if (!teamKRateById.has(r.team_id) && r.strikeout_rate != null) {
-        teamKRateById.set(r.team_id, Number(r.strikeout_rate));
+    for (const r of (offRows ?? []) as Array<TeamOffenseRow & { as_of_date: string }>) {
+      if (!teamOffenseById.has(r.team_id)) {
+        teamOffenseById.set(r.team_id, r);
       }
     }
   }
@@ -686,38 +849,50 @@ serve(async (req) => {
       const logs = pitcherLogsByPlayer.get(line.player_id!) ?? [];
       opp = scoreOpportunityPitcher(logs);
 
-      // Find this pitcher's game context today, if any.
-      let oppTeamId: number | null = null;
+      // Find this pitcher's game context today, if any. Resolve opposing team
+      // via the most recent log opponent (works for in-season pitchers).
+      let oppTeamId: number | null = logs[0]?.opponent_team_id ?? null;
+      let pitcherCtx: MlbGameContext | null = null;
       for (const c of ctxByGameId.values()) {
         if (
           c.probable_home_pitcher_id === line.player_id ||
           c.probable_away_pitcher_id === line.player_id
         ) {
-          // Best proxy for opposing team: use the most recent log's opponent.
-          oppTeamId = logs[0]?.opponent_team_id ?? null;
-          mu = scoreMatchupPitcher(
-            oppTeamId != null ? teamKRateById.get(oppTeamId) ?? null : null,
-            c,
-          );
+          pitcherCtx = c;
+          if (oppTeamId == null) oppTeamId = logs[0]?.opponent_team_id ?? null;
           break;
         }
       }
-      // @ts-expect-error mu may be unset above if no context match.
-      if (!mu) mu = scoreMatchupPitcher(null, null);
+      const oppOff = oppTeamId != null ? teamOffenseById.get(oppTeamId) ?? null : null;
+      const ownPitcherMatchup = pitcherMatchupById.get(line.player_id!) ?? null;
+
+      switch (statKey) {
+        case "STRIKEOUTS":
+          mu = scoreMatchupPitcher(oppOff?.strikeout_rate ?? null, pitcherCtx);
+          break;
+        case "WALKS_ALLOWED":
+          mu = scoreMatchupWalksAllowed(oppOff, ownPitcherMatchup);
+          break;
+        case "HITS_ALLOWED":
+          mu = scoreMatchupHitsAllowed(oppOff, ownPitcherMatchup);
+          break;
+        case "EARNED_RUNS_ALLOWED":
+          mu = scoreMatchupEarnedRuns(oppOff, ownPitcherMatchup, pitcherCtx);
+          break;
+        default:
+          mu = scoreMatchupPitcher(null, pitcherCtx);
+      }
     } else {
       const logs = hitterLogsByPlayer.get(line.player_id!) ?? [];
       opp = scoreOpportunityBatter(logs);
 
-      // Find batter's game context (their team plays today) → opposing pitcher.
+      // Find batter's game context → opposing pitcher's matchup summary.
       let oppPitcherSummary: PitcherMatchup | null = null;
       let ctxForGame: MlbGameContext | null = null;
       const myTeamId = profile?.mlb_team_id ?? null;
       if (myTeamId != null) {
         for (const c of ctxByGameId.values()) {
-          // We don't have team_id on game_context directly; defer to best-effort
-          // via probable pitcher list — we look up either pitcher's matchup row
-          // and use the one whose team is NOT this batter's team if known.
-          // For v1 we just pick whichever probable pitcher has a summary row.
+          // v1: pick whichever probable pitcher has a summary row.
           const candidate =
             (c.probable_home_pitcher_id && pitcherMatchupById.get(c.probable_home_pitcher_id)) ||
             (c.probable_away_pitcher_id && pitcherMatchupById.get(c.probable_away_pitcher_id)) ||
@@ -729,11 +904,18 @@ serve(async (req) => {
           }
         }
       }
-      mu = scoreMatchupBatter(
-        oppPitcherSummary,
-        ctxForGame,
-        statKey === "TOTAL_BASES" ? "TOTAL_BASES" : "HITS",
-      );
+
+      if (statKey === "HOME_RUNS") {
+        // For HR matchup we want the OPPOSING team's offense — but here the
+        // batter IS on the offense; we pass the opposing pitcher's stats only.
+        mu = scoreMatchupHomeRun(oppPitcherSummary, null, ctxForGame);
+      } else {
+        mu = scoreMatchupBatter(
+          oppPitcherSummary,
+          ctxForGame,
+          statKey === "TOTAL_BASES" ? "TOTAL_BASES" : "HITS",
+        );
+      }
     }
 
     const w = WEIGHT_PROFILES[statKey];
@@ -749,7 +931,7 @@ serve(async (req) => {
     const tier = tierFor(overall);
 
     const summary = {
-      version: "mlb-anchor-v1",
+      version: "mlb-v1",
       stat_key: statKey,
       threshold: line.threshold,
       sample_size: sampleSize,
