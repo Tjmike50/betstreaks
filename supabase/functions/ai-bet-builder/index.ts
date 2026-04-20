@@ -6,6 +6,10 @@ import {
   mlbStatLabel,
   type MlbCandidate,
 } from "../_shared/mlbCandidates.ts";
+import {
+  enrichMlbAnchorLegs,
+  parlayAmerican,
+} from "../_shared/mlbOddsEnrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -753,9 +757,20 @@ Return strict JSON with shape:
   const candIndex = new Map<string, MlbCandidate>();
   for (const c of candidates) candIndex.set(candKey(c.player_name, c.stat_type, c.threshold), c);
 
-  const validatedSlips: any[] = [];
-  for (const slip of parsed.slips ?? []) {
-    const validLegs: any[] = [];
+  // Pass 1 — collect raw validated leg specs (no odds yet).
+  type RawLegSpec = {
+    slipIdx: number;
+    cand: MlbCandidate;
+    side: "Over" | "Under";
+    reasoning: string;
+  };
+  const rawSlips: Array<{
+    slip: any;
+    legs: RawLegSpec[];
+  }> = [];
+  for (let s = 0; s < (parsed.slips ?? []).length; s++) {
+    const slip = parsed.slips![s];
+    const slipLegs: RawLegSpec[] = [];
     for (const leg of slip.legs ?? []) {
       const lineMatch = String(leg.line ?? "").match(/([\d.]+)/);
       const threshold = lineMatch ? parseFloat(lineMatch[1]) : null;
@@ -766,42 +781,85 @@ Return strict JSON with shape:
         console.log(`[AI-Builder/MLB] reject leg (no candidate): ${leg.player_name} ${leg.stat_type} ${threshold}`);
         continue;
       }
-      const pick = String(leg.pick ?? "Over");
-      validLegs.push({
-        player_name: cand.player_name,
-        team_abbr: cand.team_abbr,
-        stat_type: cand.stat_type,
-        line: `${pick === "Under" ? "Under" : "Over"} ${cand.threshold}`,
-        pick: pick === "Under" ? "Under" : "Over",
-        odds: leg.odds ?? null,
+      const pickRaw = String(leg.pick ?? "Over");
+      const side: "Over" | "Under" = pickRaw === "Under" ? "Under" : "Over";
+      slipLegs.push({
+        slipIdx: s,
+        cand,
+        side,
         reasoning: String(leg.reasoning ?? "").slice(0, 280),
+      });
+    }
+    if (slipLegs.length > 0) rawSlips.push({ slip, legs: slipLegs });
+  }
+
+  // Pass 2 — batch enrich all legs across all slips with one DB round-trip.
+  const flatLegs = rawSlips.flatMap((rs) => rs.legs);
+  const enriched = await enrichMlbAnchorLegs(
+    supabase,
+    flatLegs.map((l) => ({
+      row: {
+        player_name: l.cand.player_name,
+        stat_type: l.cand.stat_type,
+        threshold: Number(l.cand.threshold),
+      },
+      side: l.side,
+    })),
+    gameDate,
+  );
+  const oddsHitTotal = enriched.filter((o) => o.matched).length;
+  console.log(
+    `[AI-Builder/MLB] Odds enrichment: ${oddsHitTotal}/${enriched.length} legs matched`,
+  );
+
+  // Pass 3 — assemble validated slips with real odds + recompute estimated_odds.
+  const validatedSlips: any[] = [];
+  let cursor = 0;
+  for (const { slip, legs } of rawSlips) {
+    const validLegs: any[] = [];
+    const legOdds: Array<string | null> = [];
+    for (const spec of legs) {
+      const o = enriched[cursor++];
+      const odds = o?.odds ?? null;
+      legOdds.push(odds);
+      validLegs.push({
+        player_name: spec.cand.player_name,
+        team_abbr: spec.cand.team_abbr,
+        stat_type: spec.cand.stat_type,
+        line: `${spec.side} ${spec.cand.threshold}`,
+        pick: spec.side,
+        odds,
+        reasoning: spec.reasoning,
         data_context: {
-          score_overall: cand.score_overall,
-          confidence_tier: cand.confidence_tier,
-          score_recent_form: cand.score_recent_form,
-          score_matchup: cand.score_matchup,
-          score_opportunity: cand.score_opportunity,
-          score_consistency: cand.score_consistency,
-          score_value: cand.score_value,
-          score_risk: cand.score_risk,
-          summary_json: cand.summary_json,
-          season_avg: cand.season_avg,
-          last10_avg: cand.last10_avg,
-          opponent: cand.opponent_abbr,
-          home_away: cand.home_away,
-          // Honest about v1 limits — no live MLB odds verification yet.
-          odds_validated: false,
-          odds_source: null,
-          market_confidence: null,
+          score_overall: spec.cand.score_overall,
+          confidence_tier: spec.cand.confidence_tier,
+          score_recent_form: spec.cand.score_recent_form,
+          score_matchup: spec.cand.score_matchup,
+          score_opportunity: spec.cand.score_opportunity,
+          score_consistency: spec.cand.score_consistency,
+          score_value: spec.cand.score_value,
+          score_risk: spec.cand.score_risk,
+          summary_json: spec.cand.summary_json,
+          season_avg: spec.cand.season_avg,
+          last10_avg: spec.cand.last10_avg,
+          opponent: spec.cand.opponent_abbr,
+          home_away: spec.cand.home_away,
+          // Real odds enrichment now wired (collect-line-snapshots sport='MLB').
+          odds_validated: o?.matched ?? false,
+          odds_source: o?.sportsbook ?? null,
+          market_confidence: null, // future: derive from books_count
         },
         bet_type: "player_prop",
       });
     }
     if (validLegs.length === 0) continue;
+    // Prefer a parlay computed from real odds; fall back to whatever the LLM
+    // proposed (kept for slips that were partially or fully unpriced).
+    const computedParlay = parlayAmerican(legOdds);
     validatedSlips.push({
       slip_name: String(slip.slip_name ?? "MLB Slip").slice(0, 80),
       risk_label: ["safe", "balanced", "aggressive"].includes(slip.risk_label) ? slip.risk_label : "balanced",
-      estimated_odds: slip.estimated_odds ?? null,
+      estimated_odds: computedParlay ?? slip.estimated_odds ?? null,
       reasoning: String(slip.reasoning ?? "").slice(0, 400),
       legs: validLegs,
     });

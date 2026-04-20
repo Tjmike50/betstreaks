@@ -24,6 +24,10 @@ import {
   mlbStatLabel,
   type MlbCandidate,
 } from "../_shared/mlbCandidates.ts";
+import {
+  enrichMlbAnchorLegs,
+  parlayAmerican,
+} from "../_shared/mlbOddsEnrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -554,8 +558,39 @@ async function runMlbDailyPick(args: MlbDailyPickArgs): Promise<Response> {
 
   const pickId = insertedPick.id as string;
 
+  // -------------------------------------------------------------------------
+  // Odds enrichment — look up MLB anchor lines collected by collect-line-snapshots
+  // (sport=MLB). Fail-soft: any leg without a matching snapshot stores odds=null.
+  // -------------------------------------------------------------------------
+  const sides = legs.map((leg) => inferMlbSide(leg));
+  const enrichedOdds = await enrichMlbAnchorLegs(
+    supabase,
+    legs.map((leg, i) => ({
+      row: {
+        player_name: leg.player_name,
+        stat_type: leg.stat_type,
+        threshold: Number(leg.threshold),
+      },
+      side: sides[i],
+    })),
+    gameDate,
+  );
+  const oddsHitCount = enrichedOdds.filter((o) => o.matched).length;
+  const estimatedOdds = parlayAmerican(enrichedOdds.map((o) => o.odds));
+  console.log(
+    `[generate-daily-pick/MLB] Odds enrichment: ${oddsHitCount}/${enrichedOdds.length} legs matched · estimated_odds=${estimatedOdds ?? "null"}`,
+  );
+
+  if (estimatedOdds) {
+    await supabase
+      .from("ai_daily_picks")
+      .update({ estimated_odds: estimatedOdds })
+      .eq("id", pickId);
+  }
+
   const legRows = legs.map((leg, idx) => {
-    const side = inferMlbSide(leg);
+    const side = sides[idx];
+    const odds = enrichedOdds[idx]?.odds ?? null;
     return {
       daily_pick_id: pickId,
       leg_order: idx + 1,
@@ -564,8 +599,8 @@ async function runMlbDailyPick(args: MlbDailyPickArgs): Promise<Response> {
       stat_type: leg.stat_type,
       pick: side,
       line: String(leg.threshold),
-      odds: null,
-      reasoning: `Overall ${(leg.score_overall ?? 0).toFixed(0)} · tier ${leg.confidence_tier ?? "n/a"} · recent ${(leg.last10_avg ?? leg.season_avg ?? 0).toFixed(1)}`,
+      odds,
+      reasoning: `Overall ${(leg.score_overall ?? 0).toFixed(0)} · tier ${leg.confidence_tier ?? "n/a"} · recent ${(leg.last10_avg ?? leg.season_avg ?? 0).toFixed(1)}${odds ? ` · ${odds}` : ""}`,
     };
   });
 
@@ -579,7 +614,7 @@ async function runMlbDailyPick(args: MlbDailyPickArgs): Promise<Response> {
   }
 
   console.log(
-    `[generate-daily-pick/MLB] Created pick ${pickId} for ${sport} ${gameDate} with ${legs.length} legs (risk=${riskLabel}, avgOverall=${avgOverall.toFixed(1)})`,
+    `[generate-daily-pick/MLB] Created pick ${pickId} for ${sport} ${gameDate} with ${legs.length} legs (risk=${riskLabel}, avgOverall=${avgOverall.toFixed(1)}, odds_hit=${oddsHitCount}/${legs.length})`,
   );
 
   if (force && adminUserId) {
@@ -616,8 +651,8 @@ async function runMlbDailyPick(args: MlbDailyPickArgs): Promise<Response> {
       risk_label: riskLabel,
       leg_count: legs.length,
       avg_overall: Number(avgOverall.toFixed(1)),
-      estimated_odds: null,
-      odds_hit_count: 0,
+      estimated_odds: estimatedOdds,
+      odds_hit_count: oddsHitCount,
       prose_source: "deterministic",
       mode: "mlb_v1_anchor",
       duration_ms: Date.now() - startTime,

@@ -1,5 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import {
+  MLB_ODDS_API_MARKETS,
+  MLB_ODDS_API_SPORT,
+} from "../_shared/mlbMarketMap.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,20 +35,42 @@ const WNBA_TEAM_ABBRS: Record<string, string> = {
 
 // Phase 1 sport registry (mirrors src/lib/sports/registry.ts).
 // When WNBA goes in-season, flip seasonState below to enable ingestion.
-type SportKey = "NBA" | "WNBA";
-const SPORT_CONFIG: Record<SportKey, {
+type SportKey = "NBA" | "WNBA" | "MLB";
+
+interface SportConfig {
   oddsApiSport: string;
   teamMap: Record<string, string>;
   refreshStatusId: number;
   refreshStatusLabel: string;
   seasonState: "preseason" | "regular" | "postseason" | "offseason";
-}> = {
+  /** Comma-separated player-prop market list passed to get-odds. */
+  propMarkets: string;
+  /**
+   * Stat-type rewrite. NBA/WNBA convert market keys to friendly labels
+   * (e.g. player_points → "Points") because their scorer reads friendly
+   * labels. MLB keeps the raw Odds API market keys (e.g. "batter_hits")
+   * because score-mlb-anchors queries line_snapshots by market key.
+   */
+  statRewrite: Record<string, string> | "passthrough";
+}
+
+const NBA_PROP_MARKETS = "player_points,player_rebounds,player_assists,player_threes";
+const NBA_STAT_REWRITE: Record<string, string> = {
+  player_points: "Points",
+  player_rebounds: "Rebounds",
+  player_assists: "Assists",
+  player_threes: "3-Pointers",
+};
+
+const SPORT_CONFIG: Record<SportKey, SportConfig> = {
   NBA: {
     oddsApiSport: "basketball_nba",
     teamMap: NBA_TEAM_ABBRS,
     refreshStatusId: 3,
     refreshStatusLabel: "NBA_LINES",
     seasonState: "postseason",
+    propMarkets: NBA_PROP_MARKETS,
+    statRewrite: NBA_STAT_REWRITE,
   },
   WNBA: {
     oddsApiSport: "basketball_wnba",
@@ -52,14 +78,24 @@ const SPORT_CONFIG: Record<SportKey, {
     refreshStatusId: 13,
     refreshStatusLabel: "WNBA_LINES",
     seasonState: "offseason",
+    propMarkets: NBA_PROP_MARKETS,
+    statRewrite: NBA_STAT_REWRITE,
   },
-};
-
-const STAT_MAP: Record<string, string> = {
-  player_points: "Points",
-  player_rebounds: "Rebounds",
-  player_assists: "Assists",
-  player_threes: "3-Pointers",
+  MLB: {
+    oddsApiSport: MLB_ODDS_API_SPORT, // "baseball_mlb"
+    teamMap: {}, // MLB team registry not wired yet — leave abbrs null in games_today.
+    refreshStatusId: 23,
+    refreshStatusLabel: "MLB_LINES",
+    seasonState: "regular",
+    // v1 scope: only the 3 anchor markets currently scored by score-mlb-anchors.
+    // (batter_hits, batter_total_bases, pitcher_strikeouts)
+    propMarkets: [
+      "batter_hits",
+      "batter_total_bases",
+      "pitcher_strikeouts",
+    ].join(","),
+    statRewrite: "passthrough",
+  },
 };
 
 /**
@@ -85,8 +121,9 @@ serve(async (req) => {
 
     // Sport selection (default NBA for backward compatibility).
     const reqBody = await req.json().catch(() => ({}));
-    const rawSport = (reqBody?.sport ?? "NBA") as string;
-    const sport: SportKey = rawSport === "WNBA" ? "WNBA" : "NBA";
+    const rawSport = String(reqBody?.sport ?? "NBA").toUpperCase();
+    const sport: SportKey =
+      rawSport === "WNBA" ? "WNBA" : rawSport === "MLB" ? "MLB" : "NBA";
     const cfg = SPORT_CONFIG[sport];
 
     // Offseason short-circuit (saves Odds API quota).
@@ -212,7 +249,7 @@ serve(async (req) => {
     const newRows: any[] = [];
     let skippedDupes = 0;
     let gamesProcessed = 0;
-    const propMarkets = "player_points,player_rebounds,player_assists,player_threes";
+    const propMarkets = cfg.propMarkets;
 
     for (const game of gamesData.slice(0, 5)) {
       const gameDate = gameIdToDate.get(game.id) || todayStr;
@@ -238,7 +275,16 @@ serve(async (req) => {
         const propsData = propsResponse.data || [];
 
         for (const entry of propsData) {
-          const statType = STAT_MAP[entry.marketKey];
+          // NBA/WNBA rewrite friendly labels; MLB stores raw market keys
+          // because score-mlb-anchors queries line_snapshots by market key.
+          let statType: string | null;
+          if (cfg.statRewrite === "passthrough") {
+            statType = MLB_ODDS_API_MARKETS.includes(entry.marketKey)
+              ? entry.marketKey
+              : null;
+          } else {
+            statType = cfg.statRewrite[entry.marketKey] ?? null;
+          }
           if (!statType) continue;
 
           // Group outcomes by player+point to get over/under pair
@@ -337,15 +383,25 @@ serve(async (req) => {
       }
 
       try {
-        console.log(`[${sport}] Pipeline: triggering prop-scoring-engine...`);
-        const scoreRes = await fetch(`${fnBase}/prop-scoring-engine`, {
+        // Route MLB to the new anchor scorer; NBA/WNBA stay on the legacy engine.
+        const scoringFn = sport === "MLB" ? "score-mlb-anchors" : "prop-scoring-engine";
+        console.log(`[${sport}] Pipeline: triggering ${scoringFn}...`);
+        const scoreRes = await fetch(`${fnBase}/${scoringFn}`, {
           method: "POST", headers: svcHeaders,
-          body: JSON.stringify({ score_all_market_players: true, sport }),
-          signal: AbortSignal.timeout(45_000),
+          body: JSON.stringify(
+            sport === "MLB"
+              ? { game_date: todayET }
+              : { score_all_market_players: true, sport },
+          ),
+          signal: AbortSignal.timeout(60_000),
         });
         const scoreBody = await scoreRes.json();
-        pipelineResults.scoring = { ok: true, scored_count: scoreBody.scored_count };
-        console.log(`[${sport}] Pipeline: scoring done — ${scoreBody.scored_count} props scored`);
+        pipelineResults.scoring = {
+          ok: !!scoreBody.ok || scoreBody.scored_count != null,
+          scored_count: scoreBody.scored_count ?? scoreBody.scored ?? null,
+          source: scoringFn,
+        };
+        console.log(`[${sport}] Pipeline: scoring done via ${scoringFn} — ${pipelineResults.scoring.scored_count} props scored`);
       } catch (e) {
         console.error(`[${sport}] Pipeline: scoring failed:`, e);
         pipelineResults.scoring = { ok: false, error: String(e) };
