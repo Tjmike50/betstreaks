@@ -68,12 +68,12 @@ function isPitcherRow(row: any): boolean {
 
 function deriveTotalBases(row: any): number | null {
   const tb = num(row?.TotalBases);
-  if (tb !== null) return tb;
+  if (tb !== null) return Math.trunc(tb);
   const singles = num(row?.Singles) ?? 0;
   const doubles = num(row?.Doubles) ?? 0;
   const triples = num(row?.Triples) ?? 0;
   const hr = num(row?.HomeRuns) ?? 0;
-  return singles + 2 * doubles + 3 * triples + 4 * hr;
+  return Math.trunc(singles + 2 * doubles + 3 * triples + 4 * hr);
 }
 
 /**
