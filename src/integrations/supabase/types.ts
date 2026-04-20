@@ -564,6 +564,372 @@ export type Database = {
         }
         Relationships: []
       }
+      mlb_game_context: {
+        Row: {
+          game_context_json: Json | null
+          game_id: string
+          park_factor_json: Json | null
+          probable_away_pitcher_id: number | null
+          probable_home_pitcher_id: number | null
+          updated_at: string
+          venue_name: string | null
+          weather_json: Json | null
+        }
+        Insert: {
+          game_context_json?: Json | null
+          game_id: string
+          park_factor_json?: Json | null
+          probable_away_pitcher_id?: number | null
+          probable_home_pitcher_id?: number | null
+          updated_at?: string
+          venue_name?: string | null
+          weather_json?: Json | null
+        }
+        Update: {
+          game_context_json?: Json | null
+          game_id?: string
+          park_factor_json?: Json | null
+          probable_away_pitcher_id?: number | null
+          probable_home_pitcher_id?: number | null
+          updated_at?: string
+          venue_name?: string | null
+          weather_json?: Json | null
+        }
+        Relationships: []
+      }
+      mlb_hitter_game_logs: {
+        Row: {
+          at_bats: number | null
+          batting_order: number | null
+          created_at: string
+          doubles: number | null
+          game_date: string
+          game_id: string
+          hits: number | null
+          home_runs: number | null
+          id: string
+          is_home: boolean | null
+          opponent_team_id: number | null
+          opposing_pitcher_id: number | null
+          plate_appearances: number | null
+          player_id: number
+          rbi: number | null
+          runs: number | null
+          singles: number | null
+          stolen_bases: number | null
+          strikeouts: number | null
+          team_id: number | null
+          total_bases: number | null
+          triples: number | null
+          updated_at: string
+          walks: number | null
+        }
+        Insert: {
+          at_bats?: number | null
+          batting_order?: number | null
+          created_at?: string
+          doubles?: number | null
+          game_date: string
+          game_id: string
+          hits?: number | null
+          home_runs?: number | null
+          id?: string
+          is_home?: boolean | null
+          opponent_team_id?: number | null
+          opposing_pitcher_id?: number | null
+          plate_appearances?: number | null
+          player_id: number
+          rbi?: number | null
+          runs?: number | null
+          singles?: number | null
+          stolen_bases?: number | null
+          strikeouts?: number | null
+          team_id?: number | null
+          total_bases?: number | null
+          triples?: number | null
+          updated_at?: string
+          walks?: number | null
+        }
+        Update: {
+          at_bats?: number | null
+          batting_order?: number | null
+          created_at?: string
+          doubles?: number | null
+          game_date?: string
+          game_id?: string
+          hits?: number | null
+          home_runs?: number | null
+          id?: string
+          is_home?: boolean | null
+          opponent_team_id?: number | null
+          opposing_pitcher_id?: number | null
+          plate_appearances?: number | null
+          player_id?: number
+          rbi?: number | null
+          runs?: number | null
+          singles?: number | null
+          stolen_bases?: number | null
+          strikeouts?: number | null
+          team_id?: number | null
+          total_bases?: number | null
+          triples?: number | null
+          updated_at?: string
+          walks?: number | null
+        }
+        Relationships: []
+      }
+      mlb_pitcher_game_logs: {
+        Row: {
+          batters_faced: number | null
+          created_at: string
+          earned_runs_allowed: number | null
+          game_date: string
+          game_id: string
+          hits_allowed: number | null
+          home_runs_allowed: number | null
+          id: string
+          innings_pitched: number | null
+          is_home: boolean | null
+          opponent_team_id: number | null
+          pitch_count: number | null
+          player_id: number
+          strikeouts: number | null
+          team_id: number | null
+          updated_at: string
+          walks_allowed: number | null
+        }
+        Insert: {
+          batters_faced?: number | null
+          created_at?: string
+          earned_runs_allowed?: number | null
+          game_date: string
+          game_id: string
+          hits_allowed?: number | null
+          home_runs_allowed?: number | null
+          id?: string
+          innings_pitched?: number | null
+          is_home?: boolean | null
+          opponent_team_id?: number | null
+          pitch_count?: number | null
+          player_id: number
+          strikeouts?: number | null
+          team_id?: number | null
+          updated_at?: string
+          walks_allowed?: number | null
+        }
+        Update: {
+          batters_faced?: number | null
+          created_at?: string
+          earned_runs_allowed?: number | null
+          game_date?: string
+          game_id?: string
+          hits_allowed?: number | null
+          home_runs_allowed?: number | null
+          id?: string
+          innings_pitched?: number | null
+          is_home?: boolean | null
+          opponent_team_id?: number | null
+          pitch_count?: number | null
+          player_id?: number
+          strikeouts?: number | null
+          team_id?: number | null
+          updated_at?: string
+          walks_allowed?: number | null
+        }
+        Relationships: []
+      }
+      mlb_pitcher_matchup_summaries: {
+        Row: {
+          as_of_date: string
+          created_at: string
+          earned_runs_allowed_avg: number | null
+          hits_allowed_avg: number | null
+          home_runs_allowed_avg: number | null
+          id: string
+          pitcher_id: number
+          strikeouts_avg: number | null
+          updated_at: string
+          vs_left_json: Json | null
+          vs_right_json: Json | null
+          walks_allowed_avg: number | null
+          window_size: number
+        }
+        Insert: {
+          as_of_date: string
+          created_at?: string
+          earned_runs_allowed_avg?: number | null
+          hits_allowed_avg?: number | null
+          home_runs_allowed_avg?: number | null
+          id?: string
+          pitcher_id: number
+          strikeouts_avg?: number | null
+          updated_at?: string
+          vs_left_json?: Json | null
+          vs_right_json?: Json | null
+          walks_allowed_avg?: number | null
+          window_size: number
+        }
+        Update: {
+          as_of_date?: string
+          created_at?: string
+          earned_runs_allowed_avg?: number | null
+          hits_allowed_avg?: number | null
+          home_runs_allowed_avg?: number | null
+          id?: string
+          pitcher_id?: number
+          strikeouts_avg?: number | null
+          updated_at?: string
+          vs_left_json?: Json | null
+          vs_right_json?: Json | null
+          walks_allowed_avg?: number | null
+          window_size?: number
+        }
+        Relationships: []
+      }
+      mlb_player_profiles: {
+        Row: {
+          bats: string | null
+          created_at: string
+          is_probable_pitcher: boolean
+          mlb_team_id: number | null
+          player_id: number
+          primary_role: string | null
+          throws: string | null
+          updated_at: string
+        }
+        Insert: {
+          bats?: string | null
+          created_at?: string
+          is_probable_pitcher?: boolean
+          mlb_team_id?: number | null
+          player_id: number
+          primary_role?: string | null
+          throws?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bats?: string | null
+          created_at?: string
+          is_probable_pitcher?: boolean
+          mlb_team_id?: number | null
+          player_id?: number
+          primary_role?: string | null
+          throws?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      mlb_player_prop_rolling_stats: {
+        Row: {
+          as_of_date: string
+          away_avg: number | null
+          consistency_score: number | null
+          home_avg: number | null
+          id: string
+          market_type_key: string
+          player_id: number
+          sample_size: number
+          updated_at: string
+          volatility_score: number | null
+          vs_left_avg: number | null
+          vs_right_avg: number | null
+          window_l10_avg: number | null
+          window_l10_hit_rate: number | null
+          window_l15_avg: number | null
+          window_l15_hit_rate: number | null
+          window_l5_avg: number | null
+          window_l5_hit_rate: number | null
+        }
+        Insert: {
+          as_of_date: string
+          away_avg?: number | null
+          consistency_score?: number | null
+          home_avg?: number | null
+          id?: string
+          market_type_key: string
+          player_id: number
+          sample_size?: number
+          updated_at?: string
+          volatility_score?: number | null
+          vs_left_avg?: number | null
+          vs_right_avg?: number | null
+          window_l10_avg?: number | null
+          window_l10_hit_rate?: number | null
+          window_l15_avg?: number | null
+          window_l15_hit_rate?: number | null
+          window_l5_avg?: number | null
+          window_l5_hit_rate?: number | null
+        }
+        Update: {
+          as_of_date?: string
+          away_avg?: number | null
+          consistency_score?: number | null
+          home_avg?: number | null
+          id?: string
+          market_type_key?: string
+          player_id?: number
+          sample_size?: number
+          updated_at?: string
+          volatility_score?: number | null
+          vs_left_avg?: number | null
+          vs_right_avg?: number | null
+          window_l10_avg?: number | null
+          window_l10_hit_rate?: number | null
+          window_l15_avg?: number | null
+          window_l15_hit_rate?: number | null
+          window_l5_avg?: number | null
+          window_l5_hit_rate?: number | null
+        }
+        Relationships: []
+      }
+      mlb_team_offense_daily: {
+        Row: {
+          as_of_date: string
+          created_at: string
+          hits_per_game: number | null
+          id: string
+          isolated_power: number | null
+          ops: number | null
+          runs_per_game: number | null
+          split_type: string
+          strikeout_rate: number | null
+          team_id: number
+          updated_at: string
+          walk_rate: number | null
+          window_size: number
+        }
+        Insert: {
+          as_of_date: string
+          created_at?: string
+          hits_per_game?: number | null
+          id?: string
+          isolated_power?: number | null
+          ops?: number | null
+          runs_per_game?: number | null
+          split_type?: string
+          strikeout_rate?: number | null
+          team_id: number
+          updated_at?: string
+          walk_rate?: number | null
+          window_size: number
+        }
+        Update: {
+          as_of_date?: string
+          created_at?: string
+          hits_per_game?: number | null
+          id?: string
+          isolated_power?: number | null
+          ops?: number | null
+          runs_per_game?: number | null
+          split_type?: string
+          strikeout_rate?: number | null
+          team_id?: number
+          updated_at?: string
+          walk_rate?: number | null
+          window_size?: number
+        }
+        Relationships: []
+      }
       odds_cache: {
         Row: {
           away_team: string
