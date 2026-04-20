@@ -18,6 +18,12 @@
 //                          admin user (user_flags.is_admin = true).
 // =============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  getMlbDailyPickCandidates,
+  inferMlbSide,
+  mlbStatLabel,
+  type MlbCandidate,
+} from "../_shared/mlbCandidates.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -407,7 +413,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (sport !== "NBA" && sport !== "WNBA") {
+    if (sport !== "NBA" && sport !== "WNBA" && sport !== "MLB") {
       return new Response(
         JSON.stringify({ ok: false, error: `Unsupported sport: ${sport}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
