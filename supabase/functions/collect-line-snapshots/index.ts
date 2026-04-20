@@ -121,8 +121,9 @@ serve(async (req) => {
 
     // Sport selection (default NBA for backward compatibility).
     const reqBody = await req.json().catch(() => ({}));
-    const rawSport = (reqBody?.sport ?? "NBA") as string;
-    const sport: SportKey = rawSport === "WNBA" ? "WNBA" : "NBA";
+    const rawSport = String(reqBody?.sport ?? "NBA").toUpperCase();
+    const sport: SportKey =
+      rawSport === "WNBA" ? "WNBA" : rawSport === "MLB" ? "MLB" : "NBA";
     const cfg = SPORT_CONFIG[sport];
 
     // Offseason short-circuit (saves Odds API quota).
@@ -248,7 +249,7 @@ serve(async (req) => {
     const newRows: any[] = [];
     let skippedDupes = 0;
     let gamesProcessed = 0;
-    const propMarkets = "player_points,player_rebounds,player_assists,player_threes";
+    const propMarkets = cfg.propMarkets;
 
     for (const game of gamesData.slice(0, 5)) {
       const gameDate = gameIdToDate.get(game.id) || todayStr;
@@ -274,7 +275,16 @@ serve(async (req) => {
         const propsData = propsResponse.data || [];
 
         for (const entry of propsData) {
-          const statType = STAT_MAP[entry.marketKey];
+          // NBA/WNBA rewrite friendly labels; MLB stores raw market keys
+          // because score-mlb-anchors queries line_snapshots by market key.
+          let statType: string | null;
+          if (cfg.statRewrite === "passthrough") {
+            statType = MLB_ODDS_API_MARKETS.includes(entry.marketKey)
+              ? entry.marketKey
+              : null;
+          } else {
+            statType = cfg.statRewrite[entry.marketKey] ?? null;
+          }
           if (!statType) continue;
 
           // Group outcomes by player+point to get over/under pair
