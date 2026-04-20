@@ -15,6 +15,18 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { ingestGameLogsWindow } from "../_shared/mlbGameLogIngest.ts";
+import {
+  rebuildRollingStats,
+  rebuildPitcherMatchupSummaries,
+  rebuildTeamOffenseDaily,
+} from "../_shared/mlbStatRebuild.ts";
+
+// How many days of game logs to backfill on each run. v1: 20 covers L15
+// rolling windows + a few extra days of buffer for late-arriving boxscores.
+const GAMELOG_LOOKBACK_DAYS = 20;
+// Window for matchup/team rebuilds (separate from game-log ingestion window).
+const ROLLING_WINDOW_DAYS = 15;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
