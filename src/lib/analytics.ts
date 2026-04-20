@@ -47,7 +47,7 @@ export async function trackEvent(
     const meta = options.metadata ?? null;
 
     // Insert into local analytics table
-    const { error } = await (supabase as ReturnType<typeof supabase.from>)
+    const { error } = await supabase
       .from("analytics_events")
       .insert({
         event_name: event,

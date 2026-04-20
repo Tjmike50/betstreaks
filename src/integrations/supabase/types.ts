@@ -1150,6 +1150,30 @@ export type Database = {
         }
         Relationships: []
       }
+      nba_players_staging: {
+        Row: {
+          created_at: string
+          external_refs: Json
+          full_name: string
+          id: string
+          team_abbreviation: string | null
+        }
+        Insert: {
+          created_at?: string
+          external_refs?: Json
+          full_name: string
+          id?: string
+          team_abbreviation?: string | null
+        }
+        Update: {
+          created_at?: string
+          external_refs?: Json
+          full_name?: string
+          id?: string
+          team_abbreviation?: string | null
+        }
+        Relationships: []
+      }
       odds_cache: {
         Row: {
           away_team: string
@@ -2436,7 +2460,9 @@ export type Database = {
       }
     }
     Functions: {
+      import_nba_players_from_staging: { Args: never; Returns: Json }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      normalize_person_name: { Args: { input_text: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never
