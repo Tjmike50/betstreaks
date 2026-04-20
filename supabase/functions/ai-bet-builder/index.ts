@@ -644,6 +644,27 @@ serve(async (req) => {
     const todayStr = new Date().toISOString().split("T")[0];
     debug.db_query_date = todayStr;
 
+    // -------------------------------------------------------------------------
+    // MLB v1 short-circuit
+    // -------------------------------------------------------------------------
+    // The basketball pipeline below is heavily NBA/WNBA-specific (basketball
+    // stat maps, player_points/rebounds/etc. markets, postseason scoping,
+    // realistic-threshold ranges). For MLB v1 we bypass it entirely and build
+    // slips directly from the MLB candidate feed (player_prop_scores rows
+    // already produced by score-mlb-anchors). Odds enrichment + verified
+    // market validation will be added once collect-line-snapshots handles MLB.
+    if (sport === "MLB") {
+      return await handleMlbBuilder({
+        prompt,
+        slipCount,
+        supabase,
+        serviceClient,
+        userId: user.id,
+        isPremium,
+        gameDate: todayStr,
+      });
+    }
+
     const betType = filters?.betType || null;
     const includePlayerProps = !betType || betType === "player_props" || betType === "mixed";
     const includeGameLevel = !betType || betType === "moneyline" || betType === "spread" || betType === "totals" || betType === "mixed";
