@@ -60,14 +60,20 @@ export default function WatchlistPage() {
     removeOfflineKey
   } = useWatchlist();
 
-  // Optimized: Fetch watchlist items and all streaks for the active sport in parallel, then match client-side
+  // Sportsbook-line-first: match watchlist items against live line-first
+  // streaks (built from line_snapshots) instead of the legacy streaks table.
   const { data: watchlistData, isLoading, error } = useQuery({
-    queryKey: ["watchlist-optimized", userId, sport],
+    queryKey: ["watchlist-line-first", userId, sport],
     queryFn: async (): Promise<WatchlistData> => {
       if (!userId) return { activeItems: [], inactiveItems: [] };
 
-      // Fetch watchlist items and all streaks for this sport in parallel
-      const [watchlistResult, streaksResult] = await Promise.all([
+      const { buildBookableLines, computeLineSplits, mlbHitterValue, mlbPitcherValue, nbaStatValue } = await import("@/lib/lineFirstStreaks");
+
+      const since = new Date();
+      since.setDate(since.getDate() - 1);
+      const sinceDate = since.toISOString().slice(0, 10);
+
+      const [watchlistResult, linesResult] = await Promise.all([
         supabase
           .from("watchlist_items")
           .select("*")
@@ -75,39 +81,105 @@ export default function WatchlistPage() {
           .eq("sport", sport)
           .order("created_at", { ascending: false }),
         supabase
-          .from("streaks")
-          .select("*")
-          .eq("sport", sport)
+          .from("line_snapshots")
+          .select("player_id, player_name, stat_type, threshold, game_date, sportsbook")
+          .gte("game_date", sinceDate)
+          .limit(20000),
       ]);
 
       if (watchlistResult.error) throw watchlistResult.error;
-      if (!watchlistResult.data || watchlistResult.data.length === 0) {
+      const watchlistItems = (watchlistResult.data ?? []) as WatchlistItem[];
+      if (watchlistItems.length === 0) {
         return { activeItems: [], inactiveItems: [] };
       }
 
-      const watchlistItems = watchlistResult.data as WatchlistItem[];
-      const allStreaks = (streaksResult.data || []) as Streak[];
-
-      // Build a lookup map of streaks by match key
-      const streakMap = new Map<string, Streak>();
-      for (const streak of allStreaks) {
-        const key = getMatchKey(streak);
-        streakMap.set(key, streak);
+      const bookableLines = buildBookableLines((linesResult.data ?? []) as Parameters<typeof buildBookableLines>[0]);
+      // Index lines by player_id|stat for fast lookup
+      const lineByKey = new Map<string, typeof bookableLines[number]>();
+      for (const l of bookableLines) {
+        if (l.player_id != null) lineByKey.set(`${l.player_id}-${l.stat_code}`, l);
       }
 
-      // Match watchlist items to streaks
+      // Pull recent game logs once per sport
+      const playerIds = [...new Set(watchlistItems.map((w) => w.player_id).filter((x): x is number => x != null))];
+      const today = new Date().toISOString().slice(0, 10);
       const activeItems: { watchlistItem: WatchlistItem; streak: Streak }[] = [];
       const inactiveItems: WatchlistItem[] = [];
 
-      for (const item of watchlistItems) {
-        const key = getMatchKey(item);
-        const matchingStreak = streakMap.get(key);
-        
-        if (matchingStreak) {
-          activeItems.push({ watchlistItem: item, streak: matchingStreak });
-        } else {
-          inactiveItems.push(item);
+      if (playerIds.length === 0) {
+        return { activeItems, inactiveItems: watchlistItems };
+      }
+
+      let nbaLogs: Map<number, { game_date: string; pts: number | null; reb: number | null; ast: number | null; fg3m: number | null; blk: number | null; stl: number | null }[]> = new Map();
+      let mlbHitter: Map<number, { game_date: string; hits: number | null; total_bases: number | null; home_runs: number | null }[]> = new Map();
+      let mlbPitcher: Map<number, { game_date: string; strikeouts: number | null; earned_runs_allowed: number | null; walks_allowed: number | null; hits_allowed: number | null }[]> = new Map();
+
+      if (sport === "MLB") {
+        const [h, p] = await Promise.all([
+          supabase.from("mlb_hitter_game_logs").select("player_id, game_date, hits, total_bases, home_runs").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000),
+          supabase.from("mlb_pitcher_game_logs").select("player_id, game_date, strikeouts, earned_runs_allowed, walks_allowed, hits_allowed").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000),
+        ]);
+        for (const r of (h.data ?? []) as (typeof mlbHitter extends Map<number, infer U> ? U[number] & { player_id: number } : never)[]) {
+          const arr = mlbHitter.get(r.player_id) ?? []; arr.push(r); mlbHitter.set(r.player_id, arr);
         }
+        for (const r of (p.data ?? []) as (typeof mlbPitcher extends Map<number, infer U> ? U[number] & { player_id: number } : never)[]) {
+          const arr = mlbPitcher.get(r.player_id) ?? []; arr.push(r); mlbPitcher.set(r.player_id, arr);
+        }
+      } else {
+        const { data } = await supabase.from("player_recent_games").select("player_id, game_date, pts, reb, ast, fg3m, blk, stl").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000);
+        for (const r of (data ?? []) as (typeof nbaLogs extends Map<number, infer U> ? U[number] & { player_id: number } : never)[]) {
+          const arr = nbaLogs.get(r.player_id) ?? []; arr.push(r); nbaLogs.set(r.player_id, arr);
+        }
+      }
+
+      for (const item of watchlistItems) {
+        if (item.player_id == null) { inactiveItems.push(item); continue; }
+        const line = lineByKey.get(`${item.player_id}-${item.stat}`);
+        if (!line) { inactiveItems.push(item); continue; }
+        let values: (number | null)[] = [];
+        let dates: string[] = [];
+        if (sport === "MLB") {
+          const hl = mlbHitter.get(item.player_id);
+          const pl = mlbPitcher.get(item.player_id);
+          if (hl && hl.length) { values = hl.map((g) => mlbHitterValue(g, line.stat_code)); dates = hl.map((g) => g.game_date); }
+          else if (pl && pl.length) { values = pl.map((g) => mlbPitcherValue(g, line.stat_code)); dates = pl.map((g) => g.game_date); }
+        } else {
+          const games = nbaLogs.get(item.player_id) ?? [];
+          values = games.map((g) => nbaStatValue(g, line.stat_code));
+          dates = games.map((g) => g.game_date);
+        }
+        const splits = computeLineSplits(values, dates, line.main_threshold);
+        if (splits.season_games === 0 || splits.streak_len === 0) { inactiveItems.push(item); continue; }
+        activeItems.push({
+          watchlistItem: item,
+          streak: {
+            id: `lf-${item.player_id}-${line.stat_code}-${line.main_threshold}`,
+            player_id: item.player_id,
+            player_name: line.player_name,
+            team_abbr: item.team_abbr,
+            stat: line.stat_code,
+            threshold: line.main_threshold,
+            streak_len: splits.streak_len,
+            streak_start: splits.streak_start || today,
+            streak_win_pct: 100,
+            season_wins: splits.season_wins,
+            season_games: splits.season_games,
+            season_win_pct: splits.season_win_pct,
+            last_game: splits.last_game || today,
+            sport,
+            entity_type: "player",
+            updated_at: today,
+            last10_hits: splits.last10_hits,
+            last10_games: splits.last10_games,
+            last10_hit_pct: splits.last10_hit_pct,
+            last5_hits: splits.last5_hits,
+            last5_games: splits.last5_games,
+            last5_hit_pct: splits.last5_hit_pct,
+            book_threshold: line.main_threshold,
+            book_main_threshold: line.main_threshold,
+            book_informational: false,
+          },
+        });
       }
 
       return { activeItems, inactiveItems };
