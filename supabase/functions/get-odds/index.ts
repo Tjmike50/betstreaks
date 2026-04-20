@@ -42,8 +42,19 @@ async function getOddsFromTheOddsApi(
   const bookmakers = bookmaker || "draftkings,fanduel,betmgm,pointsbetus";
   const now = new Date().toISOString();
 
+  // The Odds API requires player-prop markets (NBA `player_*`, MLB `batter_*` /
+  // `pitcher_*`) to be fetched via the per-event endpoint. Game-level markets
+  // (h2h, spreads, totals) use the league endpoint. Detect by checking whether
+  // ANY market in the comma-joined list looks like a player prop.
+  const marketList = market.split(",").map((m) => m.trim()).filter(Boolean);
+  const isPlayerProp = marketList.some(
+    (m) =>
+      m.startsWith("player_") ||
+      m.startsWith("batter_") ||
+      m.startsWith("pitcher_"),
+  );
   let url: string;
-  if (eventId && market.startsWith("player_")) {
+  if (eventId && isPlayerProp) {
     url = `${base}/sports/${sport}/events/${eventId}/odds?apiKey=${apiKey}&regions=us&markets=${market}&oddsFormat=american&bookmakers=${bookmakers}`;
   } else {
     url = `${base}/sports/${sport}/odds/?apiKey=${apiKey}&regions=us&markets=${market}&oddsFormat=american&bookmakers=${bookmakers}`;
