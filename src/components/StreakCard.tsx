@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Flame, TrendingUp, Calendar, Star, Lock, Share2 } from "lucide-react";
 import type { Streak } from "@/types/streak";
 import { getStatFriendlyLabel, isComboStat } from "@/lib/comboStats";
+import { STAT_CODE_TO_LABEL } from "@/lib/lineFirstStreaks";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { useToast } from "@/hooks/use-toast";
@@ -51,7 +52,9 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
     isRecentGame;
   const isBestBet = meetsBestBetCriteria && !isStale;
 
-  // Get bet label: special formatting for teams, combos, and stats
+  // Get bet label: prefer the actual sportsbook line whenever we have it,
+  // so users always see the exact threshold they can bet (e.g.
+  // "Over 19.5 Points") instead of generic milestones like "PTS 5+".
   const getBetLabel = () => {
     if (isTeam) {
       if (streak.stat === "ML") {
@@ -64,13 +67,19 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
         return `Team PTS ≤ ${streak.threshold}`;
       }
     }
-    
+
     // For locked combos, only show the stat label without threshold
     if (isLocked) {
       return getStatFriendlyLabel(streak.stat);
     }
-    
-    // Use friendly label for combos (e.g., "PTS+AST 18+") or regular stats
+
+    // Sportsbook-line-first label: "Over 19.5 Points"
+    if (streak.book_threshold != null && !streak.book_informational) {
+      const friendly = STAT_CODE_TO_LABEL[streak.stat] ?? getStatFriendlyLabel(streak.stat);
+      return `Over ${streak.book_threshold} ${friendly}`;
+    }
+
+    // Fallback: legacy milestone format (used only when no live book line exists).
     const statLabel = getStatFriendlyLabel(streak.stat);
     return `${statLabel} ${streak.threshold}+`;
   };
