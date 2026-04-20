@@ -778,7 +778,9 @@ serve(async (req) => {
   if (probablePitcherIds.size > 0) {
     const { data: pms } = await supabase
       .from("mlb_pitcher_matchup_summaries")
-      .select("pitcher_id,hits_allowed_avg,earned_runs_allowed_avg,strikeouts_avg,as_of_date")
+      .select(
+        "pitcher_id,hits_allowed_avg,earned_runs_allowed_avg,strikeouts_avg,walks_allowed_avg,home_runs_allowed_avg,as_of_date",
+      )
       .in("pitcher_id", [...probablePitcherIds])
       .lte("as_of_date", gameDate)
       .order("as_of_date", { ascending: false });
@@ -789,25 +791,32 @@ serve(async (req) => {
     }
   }
 
-  // Opposing-team K-rate for STRIKEOUTS prop matchup.
-  // (Best-effort: we only have access to mlb_team_offense_daily by team_id; we
-  // resolve the opposing team via the most-recent pitcher_log opponent_team_id.)
+  // Opposing-team offense (K-rate, BB-rate, runs, hits, OPS, ISO) for pitcher
+  // and HOME_RUNS matchup scoring. We resolve the opposing team via the most
+  // recent pitcher_log opponent_team_id, falling back to the batter's profile
+  // team for HR matchup.
   const oppTeamIds = new Set<number>();
   for (const log of pitcherLogs ?? []) {
     if (log.opponent_team_id) oppTeamIds.add(log.opponent_team_id);
   }
-  let teamKRateById = new Map<number, number>();
+  // Also include hitter teams so HR matchup can resolve opposing pitcher's team.
+  for (const p of profiles ?? []) {
+    if (p.mlb_team_id) oppTeamIds.add(p.mlb_team_id);
+  }
+  const teamOffenseById = new Map<number, TeamOffenseRow>();
   if (oppTeamIds.size > 0) {
     const { data: offRows } = await supabase
       .from("mlb_team_offense_daily")
-      .select("team_id,strikeout_rate,as_of_date,split_type")
+      .select(
+        "team_id,strikeout_rate,walk_rate,runs_per_game,hits_per_game,isolated_power,ops,as_of_date,split_type",
+      )
       .in("team_id", [...oppTeamIds])
       .eq("split_type", "overall")
       .lte("as_of_date", gameDate)
       .order("as_of_date", { ascending: false });
-    for (const r of offRows ?? []) {
-      if (!teamKRateById.has(r.team_id) && r.strikeout_rate != null) {
-        teamKRateById.set(r.team_id, Number(r.strikeout_rate));
+    for (const r of (offRows ?? []) as Array<TeamOffenseRow & { as_of_date: string }>) {
+      if (!teamOffenseById.has(r.team_id)) {
+        teamOffenseById.set(r.team_id, r);
       }
     }
   }
