@@ -49,11 +49,11 @@ export async function trackEvent(
     // Insert into local analytics table
     const { error } = await supabase
       .from("analytics_events")
-      .insert({
+      .insert([{
         event_name: event,
-        user_id: userId,
-        metadata: meta,
-      });
+        user_id: userId ?? undefined,
+        metadata: meta ?? undefined,
+      }]);
 
     if (error) {
       console.warn("Analytics tracking failed:", error.message);
