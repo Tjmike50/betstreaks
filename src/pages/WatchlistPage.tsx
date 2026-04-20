@@ -110,24 +110,27 @@ export default function WatchlistPage() {
         return { activeItems, inactiveItems: watchlistItems };
       }
 
-      let nbaLogs: Map<number, { game_date: string; pts: number | null; reb: number | null; ast: number | null; fg3m: number | null; blk: number | null; stl: number | null }[]> = new Map();
-      let mlbHitter: Map<number, { game_date: string; hits: number | null; total_bases: number | null; home_runs: number | null }[]> = new Map();
-      let mlbPitcher: Map<number, { game_date: string; strikeouts: number | null; earned_runs_allowed: number | null; walks_allowed: number | null; hits_allowed: number | null }[]> = new Map();
+      type NbaRow = { player_id: number; game_date: string; pts: number | null; reb: number | null; ast: number | null; fg3m: number | null; blk: number | null; stl: number | null };
+      type HitterRow = { player_id: number; game_date: string; hits: number | null; total_bases: number | null; home_runs: number | null };
+      type PitcherRow = { player_id: number; game_date: string; strikeouts: number | null; earned_runs_allowed: number | null; walks_allowed: number | null; hits_allowed: number | null };
+      const nbaLogs = new Map<number, Omit<NbaRow, "player_id">[]>();
+      const mlbHitter = new Map<number, Omit<HitterRow, "player_id">[]>();
+      const mlbPitcher = new Map<number, Omit<PitcherRow, "player_id">[]>();
 
       if (sport === "MLB") {
         const [h, p] = await Promise.all([
           supabase.from("mlb_hitter_game_logs").select("player_id, game_date, hits, total_bases, home_runs").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000),
           supabase.from("mlb_pitcher_game_logs").select("player_id, game_date, strikeouts, earned_runs_allowed, walks_allowed, hits_allowed").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000),
         ]);
-        for (const r of (h.data ?? []) as (typeof mlbHitter extends Map<number, infer U> ? U[number] & { player_id: number } : never)[]) {
+        for (const r of (h.data ?? []) as HitterRow[]) {
           const arr = mlbHitter.get(r.player_id) ?? []; arr.push(r); mlbHitter.set(r.player_id, arr);
         }
-        for (const r of (p.data ?? []) as (typeof mlbPitcher extends Map<number, infer U> ? U[number] & { player_id: number } : never)[]) {
+        for (const r of (p.data ?? []) as PitcherRow[]) {
           const arr = mlbPitcher.get(r.player_id) ?? []; arr.push(r); mlbPitcher.set(r.player_id, arr);
         }
       } else {
         const { data } = await supabase.from("player_recent_games").select("player_id, game_date, pts, reb, ast, fg3m, blk, stl").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000);
-        for (const r of (data ?? []) as (typeof nbaLogs extends Map<number, infer U> ? U[number] & { player_id: number } : never)[]) {
+        for (const r of (data ?? []) as NbaRow[]) {
           const arr = nbaLogs.get(r.player_id) ?? []; arr.push(r); nbaLogs.set(r.player_id, arr);
         }
       }
