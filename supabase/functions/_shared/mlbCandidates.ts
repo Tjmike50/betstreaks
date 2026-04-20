@@ -72,7 +72,7 @@ const STAT_PROFILES: Record<MlbAnchorStat, StatProfile> = {
   // Anchors: backbone of the product.
   HITS:                { builderMinOverall: 50, dailyPickMinOverall: 55, dailyPickTiers: ["elite", "strong", "lean"], builderShareMax: 0.50, dailyPickShareMax: 0.60 },
   TOTAL_BASES:         { builderMinOverall: 50, dailyPickMinOverall: 55, dailyPickTiers: ["elite", "strong", "lean"], builderShareMax: 0.50, dailyPickShareMax: 0.60 },
-  STRIKEOUTS:          { builderMinOverall: 55, dailyPickMinOverall: 60, dailyPickTiers: ["elite", "strong"],         builderShareMax: 0.30, dailyPickShareMax: 0.34 },
+  STRIKEOUTS:          { builderMinOverall: 55, dailyPickMinOverall: 58, dailyPickTiers: ["elite", "strong"],         builderShareMax: 0.30, dailyPickShareMax: 0.34 },
   // Expansion: stricter to avoid weak/noisy promotion.
   HOME_RUNS:           { builderMinOverall: 60, dailyPickMinOverall: 70, dailyPickTiers: ["elite", "strong"],         builderShareMax: 0.20, dailyPickShareMax: 0.20 },
   WALKS_ALLOWED:       { builderMinOverall: 58, dailyPickMinOverall: 65, dailyPickTiers: ["elite", "strong"],         builderShareMax: 0.20, dailyPickShareMax: 0.25 },

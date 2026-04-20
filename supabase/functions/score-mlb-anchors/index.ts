@@ -768,6 +768,36 @@ serve(async (req) => {
     if (todaysGameIds.has(c.game_id)) ctxByGameId.set(c.game_id, c);
   }
 
+  // Build teamId → abbr map and per-team game info from today's games + context.
+  // This lets us populate team_abbr / opponent_abbr / home_away on every scored row.
+  const teamIdToAbbr = new Map<number, string>();
+  // teamId → { gameId, homeId, awayId, homeAbbr, awayAbbr }
+  const teamGameInfo = new Map<number, { homeId: number; awayId: number; homeAbbr: string; awayAbbr: string }>();
+  const gamesByIdMap = new Map<string, { home_team_abbr: string | null; away_team_abbr: string | null }>();
+  for (const g of (gamesToday ?? []) as Array<{ id: string; home_team_abbr: string | null; away_team_abbr: string | null }>) {
+    gamesByIdMap.set(g.id, g);
+  }
+  for (const c of ctxByGameId.values()) {
+    const g = gamesByIdMap.get(c.game_id);
+    if (!g || !g.home_team_abbr || !g.away_team_abbr) continue;
+    const ctxJson = c.game_context_json as Record<string, unknown> | null;
+    const homeId = Number(ctxJson?.home_team_id);
+    const awayId = Number(ctxJson?.away_team_id);
+    if (Number.isFinite(homeId) && homeId > 0) {
+      teamIdToAbbr.set(homeId, g.home_team_abbr);
+      teamGameInfo.set(homeId, { homeId, awayId, homeAbbr: g.home_team_abbr, awayAbbr: g.away_team_abbr });
+    }
+    if (Number.isFinite(awayId) && awayId > 0) {
+      teamIdToAbbr.set(awayId, g.away_team_abbr);
+      teamGameInfo.set(awayId, { homeId, awayId, homeAbbr: g.home_team_abbr, awayAbbr: g.away_team_abbr });
+    }
+  }
+  if (teamIdToAbbr.size < 25) {
+    console.warn(
+      `[score-mlb-anchors] teamIdToAbbr only has ${teamIdToAbbr.size} entries — upstream games_today/mlb_game_context may be incomplete`,
+    );
+  }
+
   // Pull pitcher matchup summaries for any probable pitchers we might face.
   const probablePitcherIds = new Set<number>();
   for (const c of ctxByGameId.values()) {
@@ -840,6 +870,22 @@ serve(async (req) => {
     const cs = scoreConsistency(rolling);
     const rk = scoreRisk(rolling, sampleSize);
     const vl = scoreValue(rolling, line.threshold);
+
+    // STRIKEOUTS stabilization: pitchers have small samples in early season
+    // (2-3 starts). Blend recent_form with the pitcher's longer-window
+    // strikeouts_avg (from matchup summaries) at 50/50 when sample_size < 5,
+    // so high-K pitchers don't get harshly tiered down for low recent samples.
+    if (statKey === "STRIKEOUTS" && sampleSize < 5) {
+      const own = pitcherMatchupById.get(line.player_id!) ?? null;
+      const seasonK = own?.strikeouts_avg != null ? Number(own.strikeouts_avg) : null;
+      if (seasonK != null && line.threshold > 0) {
+        const ratio = seasonK / line.threshold;
+        const seasonScore = clamp(35 + (ratio - 0.5) * 40);
+        const blended = (rf.score + seasonScore) / 2;
+        rf.score = blended;
+        rf.note = `${rf.note} +K-stabilize(season=${round1(seasonK)})`;
+      }
+    }
 
     // Opportunity + matchup vary by role.
     let opp: { score: number; note: string };
@@ -947,6 +993,17 @@ serve(async (req) => {
       tier,
     };
 
+    // Resolve team / opponent / home_away from the team-id map built earlier.
+    const myTeamId = profile?.mlb_team_id ?? null;
+    const teamAbbr = myTeamId != null ? teamIdToAbbr.get(myTeamId) ?? null : null;
+    const gameInfo = myTeamId != null ? teamGameInfo.get(myTeamId) ?? null : null;
+    const opponentAbbr = gameInfo
+      ? (myTeamId === gameInfo.homeId ? gameInfo.awayAbbr : gameInfo.homeAbbr)
+      : null;
+    const homeAway = gameInfo
+      ? (myTeamId === gameInfo.homeId ? "home" : "away")
+      : null;
+
     rowsToUpsert.push({
       sport: "MLB",
       game_date: gameDate,
@@ -954,6 +1011,9 @@ serve(async (req) => {
       player_name: line.player_name,
       stat_type: statKey,                 // store internal key, not Odds-API key
       threshold: line.threshold,
+      team_abbr: teamAbbr,
+      opponent_abbr: opponentAbbr,
+      home_away: homeAway,
       // Legacy NBA-shaped fields (kept null for MLB v1 — they aren't used downstream for MLB).
       confidence_score: round1(overall),  // mirror so legacy reads still work
       value_score: round1(vl.score),
