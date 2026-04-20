@@ -383,15 +383,25 @@ serve(async (req) => {
       }
 
       try {
-        console.log(`[${sport}] Pipeline: triggering prop-scoring-engine...`);
-        const scoreRes = await fetch(`${fnBase}/prop-scoring-engine`, {
+        // Route MLB to the new anchor scorer; NBA/WNBA stay on the legacy engine.
+        const scoringFn = sport === "MLB" ? "score-mlb-anchors" : "prop-scoring-engine";
+        console.log(`[${sport}] Pipeline: triggering ${scoringFn}...`);
+        const scoreRes = await fetch(`${fnBase}/${scoringFn}`, {
           method: "POST", headers: svcHeaders,
-          body: JSON.stringify({ score_all_market_players: true, sport }),
-          signal: AbortSignal.timeout(45_000),
+          body: JSON.stringify(
+            sport === "MLB"
+              ? { game_date: todayET }
+              : { score_all_market_players: true, sport },
+          ),
+          signal: AbortSignal.timeout(60_000),
         });
         const scoreBody = await scoreRes.json();
-        pipelineResults.scoring = { ok: true, scored_count: scoreBody.scored_count };
-        console.log(`[${sport}] Pipeline: scoring done — ${scoreBody.scored_count} props scored`);
+        pipelineResults.scoring = {
+          ok: !!scoreBody.ok || scoreBody.scored_count != null,
+          scored_count: scoreBody.scored_count ?? scoreBody.scored ?? null,
+          source: scoringFn,
+        };
+        console.log(`[${sport}] Pipeline: scoring done via ${scoringFn} — ${pipelineResults.scoring.scored_count} props scored`);
       } catch (e) {
         console.error(`[${sport}] Pipeline: scoring failed:`, e);
         pipelineResults.scoring = { ok: false, error: String(e) };
