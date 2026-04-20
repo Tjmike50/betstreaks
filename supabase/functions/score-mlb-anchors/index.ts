@@ -849,38 +849,50 @@ serve(async (req) => {
       const logs = pitcherLogsByPlayer.get(line.player_id!) ?? [];
       opp = scoreOpportunityPitcher(logs);
 
-      // Find this pitcher's game context today, if any.
-      let oppTeamId: number | null = null;
+      // Find this pitcher's game context today, if any. Resolve opposing team
+      // via the most recent log opponent (works for in-season pitchers).
+      let oppTeamId: number | null = logs[0]?.opponent_team_id ?? null;
+      let pitcherCtx: MlbGameContext | null = null;
       for (const c of ctxByGameId.values()) {
         if (
           c.probable_home_pitcher_id === line.player_id ||
           c.probable_away_pitcher_id === line.player_id
         ) {
-          // Best proxy for opposing team: use the most recent log's opponent.
-          oppTeamId = logs[0]?.opponent_team_id ?? null;
-          mu = scoreMatchupPitcher(
-            oppTeamId != null ? teamKRateById.get(oppTeamId) ?? null : null,
-            c,
-          );
+          pitcherCtx = c;
+          if (oppTeamId == null) oppTeamId = logs[0]?.opponent_team_id ?? null;
           break;
         }
       }
-      // @ts-expect-error mu may be unset above if no context match.
-      if (!mu) mu = scoreMatchupPitcher(null, null);
+      const oppOff = oppTeamId != null ? teamOffenseById.get(oppTeamId) ?? null : null;
+      const ownPitcherMatchup = pitcherMatchupById.get(line.player_id!) ?? null;
+
+      switch (statKey) {
+        case "STRIKEOUTS":
+          mu = scoreMatchupPitcher(oppOff?.strikeout_rate ?? null, pitcherCtx);
+          break;
+        case "WALKS_ALLOWED":
+          mu = scoreMatchupWalksAllowed(oppOff, ownPitcherMatchup);
+          break;
+        case "HITS_ALLOWED":
+          mu = scoreMatchupHitsAllowed(oppOff, ownPitcherMatchup);
+          break;
+        case "EARNED_RUNS_ALLOWED":
+          mu = scoreMatchupEarnedRuns(oppOff, ownPitcherMatchup, pitcherCtx);
+          break;
+        default:
+          mu = scoreMatchupPitcher(null, pitcherCtx);
+      }
     } else {
       const logs = hitterLogsByPlayer.get(line.player_id!) ?? [];
       opp = scoreOpportunityBatter(logs);
 
-      // Find batter's game context (their team plays today) → opposing pitcher.
+      // Find batter's game context → opposing pitcher's matchup summary.
       let oppPitcherSummary: PitcherMatchup | null = null;
       let ctxForGame: MlbGameContext | null = null;
       const myTeamId = profile?.mlb_team_id ?? null;
       if (myTeamId != null) {
         for (const c of ctxByGameId.values()) {
-          // We don't have team_id on game_context directly; defer to best-effort
-          // via probable pitcher list — we look up either pitcher's matchup row
-          // and use the one whose team is NOT this batter's team if known.
-          // For v1 we just pick whichever probable pitcher has a summary row.
+          // v1: pick whichever probable pitcher has a summary row.
           const candidate =
             (c.probable_home_pitcher_id && pitcherMatchupById.get(c.probable_home_pitcher_id)) ||
             (c.probable_away_pitcher_id && pitcherMatchupById.get(c.probable_away_pitcher_id)) ||
@@ -892,11 +904,18 @@ serve(async (req) => {
           }
         }
       }
-      mu = scoreMatchupBatter(
-        oppPitcherSummary,
-        ctxForGame,
-        statKey === "TOTAL_BASES" ? "TOTAL_BASES" : "HITS",
-      );
+
+      if (statKey === "HOME_RUNS") {
+        // For HR matchup we want the OPPOSING team's offense — but here the
+        // batter IS on the offense; we pass the opposing pitcher's stats only.
+        mu = scoreMatchupHomeRun(oppPitcherSummary, null, ctxForGame);
+      } else {
+        mu = scoreMatchupBatter(
+          oppPitcherSummary,
+          ctxForGame,
+          statKey === "TOTAL_BASES" ? "TOTAL_BASES" : "HITS",
+        );
+      }
     }
 
     const w = WEIGHT_PROFILES[statKey];
