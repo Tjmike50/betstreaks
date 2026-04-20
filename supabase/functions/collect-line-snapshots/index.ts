@@ -1,5 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import {
+  MLB_ODDS_API_MARKETS,
+  MLB_ODDS_API_SPORT,
+} from "../_shared/mlbMarketMap.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
