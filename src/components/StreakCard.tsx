@@ -285,7 +285,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
           {!isTeam && streak.book_threshold != null && (
             <Badge
               variant="outline"
-              className="text-[10px] border-emerald-500/40 text-emerald-300"
+              className="text-[10px] border-streak-green/40 text-streak-green"
               title="Matches a real sportsbook line you can bet"
             >
               Book: Over {streak.book_threshold}
