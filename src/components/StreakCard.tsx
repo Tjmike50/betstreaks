@@ -277,8 +277,37 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
         </div>
 
         {/* Bet Label */}
-        <div className="inline-flex items-center gap-2 bg-primary/15 text-primary px-3 py-1.5 rounded-lg">
-          <span className="font-semibold">{getBetLabel()}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex items-center gap-2 bg-primary/15 text-primary px-3 py-1.5 rounded-lg">
+            <span className="font-semibold">{getBetLabel()}</span>
+          </div>
+          {/* Sportsbook-line-first hint */}
+          {!isTeam && streak.book_threshold != null && (
+            <Badge
+              variant="outline"
+              className="text-[10px] border-streak-green/40 text-streak-green"
+              title="Matches a real sportsbook line you can bet"
+            >
+              Book: Over {streak.book_threshold}
+            </Badge>
+          )}
+          {!isTeam && streak.book_informational && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] border-muted-foreground/40 text-muted-foreground cursor-help"
+                >
+                  Informational
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                <p className="text-xs">
+                  No live sportsbook line found for this player + stat. Streak shown as historical context only.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         {/* Stats Grid */}

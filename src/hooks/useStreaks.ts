@@ -5,6 +5,7 @@ import { calculateBestBetsScore } from "@/types/streak";
 import { useSport } from "@/contexts/SportContext";
 import { isLeagueTeam, isInScopeTeam } from "@/lib/sports/leagueTeams";
 import type { SportKey } from "@/lib/sports/registry";
+import { useBookableLines, lookupBookableLine } from "@/hooks/useBookableLines";
 
 // Minimum thresholds to hide spam (when advanced mode is OFF)
 const MIN_THRESHOLDS: Record<string, number> = {
@@ -16,7 +17,9 @@ const MIN_THRESHOLDS: Record<string, number> = {
   STL: 1,
 };
 
-// De-duplicate: for each player+stat, keep only the best card
+// De-duplicate: for each player+stat, keep only the best card.
+// When sportsbook lines are loaded, prefer the streak whose threshold matches
+// the book's main line — that's the one users can actually bet.
 function deduplicateStreaks(streaks: Streak[]): Streak[] {
   const bestByPlayerStat = new Map<string, Streak>();
 
@@ -29,6 +32,32 @@ function deduplicateStreaks(streaks: Streak[]): Streak[] {
       continue;
     }
 
+    const existingMatchesBook =
+      existing.book_main_threshold != null &&
+      Math.abs(existing.book_main_threshold - (existing.threshold - 0.5)) < 1e-6;
+    const candidateMatchesBook =
+      streak.book_main_threshold != null &&
+      Math.abs(streak.book_main_threshold - (streak.threshold - 0.5)) < 1e-6;
+
+    // 1) Prefer the streak that matches the book's main line.
+    if (candidateMatchesBook && !existingMatchesBook) {
+      bestByPlayerStat.set(key, streak);
+      continue;
+    }
+    if (!candidateMatchesBook && existingMatchesBook) {
+      continue;
+    }
+
+    // 2) Otherwise prefer bookable streaks over informational ones.
+    if (!streak.book_informational && existing.book_informational) {
+      bestByPlayerStat.set(key, streak);
+      continue;
+    }
+    if (streak.book_informational && !existing.book_informational) {
+      continue;
+    }
+
+    // 3) Fall back to the original "longer streak / higher threshold" tiebreak.
     if (
       streak.streak_len > existing.streak_len ||
       (streak.streak_len === existing.streak_len &&
@@ -44,20 +73,17 @@ function deduplicateStreaks(streaks: Streak[]): Streak[] {
   return Array.from(bestByPlayerStat.values());
 }
 
-function filterByMinThreshold(streaks: Streak[]): Streak[] {
-  return streaks.filter((streak) => {
-    const minThreshold = MIN_THRESHOLDS[streak.stat];
-    if (minThreshold === undefined) return true;
-    return streak.threshold >= minThreshold;
-  });
-}
-
 export function useStreaks(filters: StreakFilters, sportOverride?: SportKey) {
   const { sport: activeSport } = useSport();
   const sport = sportOverride ?? activeSport;
+  // Sportsbook-line-first mode: default ON. Caller can pass
+  // `bookableOnly: false` (e.g. admin / research views) to keep informational
+  // streaks visible.
+  const bookableOnly = filters.bookableOnly !== false;
+  const { data: bookIndex } = useBookableLines();
 
   return useQuery({
-    queryKey: ["streaks", sport, filters],
+    queryKey: ["streaks", sport, filters, bookIndex?.size ?? 0],
     queryFn: async () => {
       let query = supabase
         .from("streaks")
@@ -92,8 +118,51 @@ export function useStreaks(filters: StreakFilters, sportOverride?: SportKey) {
         isLeagueTeam(sport, s.team_abbr) && isInScopeTeam(sport, s.team_abbr)
       );
 
+      // -----------------------------------------------------------------
+      // Sportsbook-line-first annotation. Each player streak is checked
+      // against today's line_snapshots; integer thresholds map to the
+      // adjacent .5 book line (streak 5+ ↔ book "Over 4.5"). Team streaks
+      // (ML / team totals) bypass — no per-player book lines to match.
+      // -----------------------------------------------------------------
+      const isTeamRow = filters.entityType === "team";
+      streaks = streaks.map((s) => {
+        if (isTeamRow) {
+          return {
+            ...s,
+            book_threshold: null,
+            book_main_threshold: null,
+            book_informational: false,
+          };
+        }
+        const { bookThreshold, mainThreshold, hasAnyLine } = lookupBookableLine(
+          bookIndex,
+          s.player_name,
+          s.stat,
+          s.threshold,
+        );
+        return {
+          ...s,
+          book_threshold: bookThreshold,
+          book_main_threshold: mainThreshold,
+          book_informational: !hasAnyLine || bookThreshold == null,
+        };
+      });
+
       if (!filters.advanced) {
-        streaks = filterByMinThreshold(streaks);
+        // Legacy minimum-threshold spam filter still applies as a floor.
+        streaks = streaks.filter((s) => {
+          const min = MIN_THRESHOLDS[s.stat];
+          return min === undefined || s.threshold >= min;
+        });
+      }
+
+      // Sportsbook-line-first gate: when book lines have loaded and the
+      // caller hasn't opted out, drop player streaks that have no live
+      // sportsbook line. We only enforce this once the index is non-empty
+      // so we never wipe the page during initial load or when an upstream
+      // odds provider stalls.
+      if (bookableOnly && bookIndex && bookIndex.size > 0) {
+        streaks = streaks.filter((s) => isTeamRow || !s.book_informational);
       }
 
       streaks = deduplicateStreaks(streaks);
@@ -125,6 +194,12 @@ export function useStreaks(filters: StreakFilters, sportOverride?: SportKey) {
       }
 
       streaks.sort((a, b) => {
+        // Always rank bookable streaks above informational ones, regardless
+        // of the user's chosen sort key.
+        const aInfo = a.book_informational ? 1 : 0;
+        const bInfo = b.book_informational ? 1 : 0;
+        if (aInfo !== bInfo) return aInfo - bInfo;
+
         switch (filters.sortBy) {
           case "season":
             if (b.season_win_pct !== a.season_win_pct)
