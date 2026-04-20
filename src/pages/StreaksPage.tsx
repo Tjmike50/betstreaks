@@ -9,7 +9,7 @@ import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 import { EarlyAccessBanner } from "@/components/EarlyAccessBanner";
 import { PlayoffCTA } from "@/components/PlayoffCTA";
 import { AdminRefreshButton } from "@/components/AdminRefreshButton";
-import { useStreaks } from "@/hooks/useStreaks";
+import { useLineFirstStreaks } from "@/hooks/useLineFirstStreaks";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSport } from "@/contexts/SportContext";
@@ -72,7 +72,7 @@ const Index = () => {
     return localStorage.getItem(ONBOARDING_KEY) !== "true";
   });
 
-  const { data: streaks, isLoading, error } = useStreaks(filters);
+  const { data: streaks, isLoading, error } = useLineFirstStreaks(filters);
   const { isStarred, toggleWatchlist } = useWatchlist();
 
   const handleOnboardingComplete = () => {
