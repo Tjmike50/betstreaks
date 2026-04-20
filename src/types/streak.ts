@@ -21,6 +21,12 @@ export interface Streak {
   last5_hits: number;
   last5_games: number;
   last5_hit_pct: number | null;
+  /** Client-side annotations: real sportsbook line backing this streak. */
+  book_threshold?: number | null;
+  /** Main bookable line for this player+stat (may differ from streak.threshold). */
+  book_main_threshold?: number | null;
+  /** True when no live book line was found for this player+stat (informational only). */
+  book_informational?: boolean;
 }
 
 export type SortOption = "streak" | "season" | "l10" | "recent" | "threshold" | "bestBetsScore";
@@ -39,6 +45,12 @@ export interface StreakFilters {
   thresholdMax: number | null;
   teamFilter: string; // "All" or specific team abbr
   recentOnly: boolean; // Only show cards updated in last 3 days
+  /**
+   * Sportsbook-line-first mode (default true): only show streaks whose
+   * threshold matches a live book line (e.g. streak 5+ ↔ book "Over 4.5").
+   * When false, "informational" streaks are still surfaced but de-prioritized.
+   */
+  bookableOnly?: boolean;
 }
 
 // Threshold ranges by stat type
