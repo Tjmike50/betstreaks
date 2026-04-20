@@ -13,13 +13,14 @@ interface StepResult {
   [key: string]: unknown;
 }
 
-type SportKey = "NBA" | "WNBA";
+type SportKey = "NBA" | "WNBA" | "MLB";
 
-// Mirrors src/lib/sports/registry.ts seasonState — flip when WNBA goes in-season.
+// Mirrors src/lib/sports/registry.ts seasonState — flip when each sport goes in-season.
 // Order matters: NBA runs first so its behavior remains deterministic.
 const PIPELINE_SPORTS: { sport: SportKey; seasonState: "preseason" | "regular" | "postseason" | "offseason" }[] = [
   { sport: "NBA", seasonState: "postseason" },
   { sport: "WNBA", seasonState: "offseason" },
+  { sport: "MLB", seasonState: "regular" },
 ];
 
 /**
@@ -41,7 +42,7 @@ serve(async (req) => {
   // Allow caller to override sport list (e.g. {"sports":["NBA"]}) for ad-hoc runs.
   const overrideBody = await req.json().catch(() => ({}));
   const overrideSports: SportKey[] | null = Array.isArray(overrideBody?.sports) && overrideBody.sports.length > 0
-    ? overrideBody.sports.filter((s: unknown): s is SportKey => s === "NBA" || s === "WNBA")
+    ? overrideBody.sports.filter((s: unknown): s is SportKey => s === "NBA" || s === "WNBA" || s === "MLB")
     : null;
 
   const pipelineStart = Date.now();
@@ -75,22 +76,34 @@ serve(async (req) => {
       if (sport === "WNBA") {
         results.wnba_stats = { status: "skipped", duration_ms: 0, reason: "offseason" };
       }
+      if (sport === "MLB") {
+        results.mlb_stats = { status: "skipped", duration_ms: 0, reason: "offseason" };
+      }
       continue;
     }
 
-    // ── Step 0 (WNBA only): Refresh stats from SportsDataIO before odds collection ──
-    if (sport === "WNBA") {
-      console.log(`[${sport}] Step 0: refresh-wnba-data (stats)...`);
+    // ── Step 0: Sport-specific stats refresh (where applicable) ──
+    // WNBA → refresh-wnba-data, MLB → refresh-mlb-data (skeleton).
+    // NBA stats are refreshed by the legacy Python pipeline outside this function.
+    const sportStatsFn = sport === "WNBA"
+      ? "refresh-wnba-data"
+      : sport === "MLB"
+        ? "refresh-mlb-data"
+        : null;
+
+    if (sportStatsFn) {
+      const statsKey = sport === "WNBA" ? "wnba_stats" : "mlb_stats";
+      console.log(`[${sport}] Step 0: ${sportStatsFn} (stats)...`);
       const step0Start = Date.now();
       try {
-        const res = await fetch(`${fnBase}/refresh-wnba-data`, {
+        const res = await fetch(`${fnBase}/${sportStatsFn}`, {
           method: "POST",
           headers: svcHeaders,
           body: JSON.stringify({}),
           signal: AbortSignal.timeout(120_000),
         });
         const body = await res.json();
-        results.wnba_stats = {
+        results[statsKey] = {
           status: body.ok ? "success" : "failed",
           duration_ms: Date.now() - step0Start,
           total_rows: body.total_rows,
@@ -99,8 +112,8 @@ serve(async (req) => {
         console.log(`[${sport}] Step 0 done: ${body.total_rows ?? 0} rows`);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        allErrors.push(`${sport}.wnba_stats: ${msg}`);
-        results.wnba_stats = { status: "failed", duration_ms: Date.now() - step0Start, error: msg };
+        allErrors.push(`${sport}.${statsKey}: ${msg}`);
+        results[statsKey] = { status: "failed", duration_ms: Date.now() - step0Start, error: msg };
         console.error(`[${sport}] Step 0 failed (non-fatal):`, msg);
       }
     }
