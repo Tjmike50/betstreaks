@@ -469,17 +469,32 @@ serve(async (req) => {
   ];
   const nameToPid = new Map<string, number>();
   if (snapNames.length > 0) {
-    // Pull profiles whose name matches case-insensitively. We fetch ALL profiles
-    // with non-null names in one shot since the table is small (~7k rows) and
-    // SportsDataIO names occasionally differ in punctuation from sportsbook feeds.
-    const { data: nameRows } = await supabase
-      .from("mlb_player_profiles")
-      .select("player_id,player_name")
-      .not("player_name", "is", null);
-    for (const r of (nameRows ?? []) as Array<{ player_id: number; player_name: string }>) {
-      const k = normName(r.player_name);
-      if (k && !nameToPid.has(k)) nameToPid.set(k, Number(r.player_id));
+    // Page through profiles to bypass Supabase's default 1000-row cap
+    // (mlb_player_profiles has ~7k active rows). We need ALL of them so
+    // sportsbook names with diacritics / punctuation match correctly via
+    // the normalized index.
+    const PAGE = 1000;
+    let from = 0;
+    for (let page = 0; page < 20; page++) {
+      const { data: nameRows, error: nameErr } = await supabase
+        .from("mlb_player_profiles")
+        .select("player_id,player_name")
+        .not("player_name", "is", null)
+        .order("player_id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (nameErr) {
+        console.error(`[score-mlb-anchors] profile name page ${page} failed: ${nameErr.message}`);
+        break;
+      }
+      const rows = (nameRows ?? []) as Array<{ player_id: number; player_name: string }>;
+      for (const r of rows) {
+        const k = normName(r.player_name);
+        if (k && !nameToPid.has(k)) nameToPid.set(k, Number(r.player_id));
+      }
+      if (rows.length < PAGE) break;
+      from += PAGE;
     }
+    console.log(`[score-mlb-anchors] name index built: ${nameToPid.size} entries`);
   }
 
   let resolvedReal = 0;
