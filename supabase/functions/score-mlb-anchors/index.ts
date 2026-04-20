@@ -333,6 +333,133 @@ function scoreMatchupPitcher(
 }
 
 /**
+ * Matchup (batter HOME_RUNS):
+ *   Use opposing pitcher's home_runs_allowed_avg + park factor.
+ *   Higher allowed HR = better matchup. v1 baseline ≈ 1.0 HR allowed/start.
+ */
+function scoreMatchupHomeRun(
+  pitcherSummary: PitcherMatchup | null,
+  oppTeamOff: TeamOffenseRow | null,
+  ctx: MlbGameContext | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (pitcherSummary?.home_runs_allowed_avg != null) {
+    const hra = Number(pitcherSummary.home_runs_allowed_avg);
+    // 0.6→40, 1.0→55, 1.4→70, 1.8→85.
+    score = clamp(40 + (hra - 0.6) * 37.5);
+    notes.push(`HRa=${round1(hra)}`);
+  } else if (oppTeamOff?.isolated_power != null) {
+    // Fall back to opponent ISO as a coarse power proxy (high ISO ≈ HR threat).
+    const iso = Number(oppTeamOff.isolated_power);
+    score = clamp(40 + (iso - 0.14) * 250);
+    notes.push(`oppISO=${round1(iso * 1000) / 1000}`);
+  } else {
+    notes.push("no HR matchup data");
+  }
+  // Park factor: HR-friendly parks boost the score significantly.
+  const pf = ctx?.game_context_json?.park_factor;
+  if (typeof pf === "number" && Number.isFinite(pf)) {
+    score = clamp(score + (pf - 1) * 30);
+    notes.push(`park=${round1(pf)}`);
+  }
+  return { score, note: notes.join(" ") || "HR matchup neutral" };
+}
+
+/**
+ * Matchup (pitcher WALKS_ALLOWED):
+ *   Use opposing team walk_rate. Higher BB-rate = MORE walks allowed
+ *   = a better Over for this prop, and a worse Under.
+ *   Score reflects "expected walks allowed", so high = leans Over.
+ */
+function scoreMatchupWalksAllowed(
+  oppTeamOff: TeamOffenseRow | null,
+  pitcherSummary: PitcherMatchup | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (oppTeamOff?.walk_rate != null) {
+    const bbRate = Number(oppTeamOff.walk_rate);
+    // League BB-rate ≈ 0.085. 0.11 → 70, 0.06 → 35.
+    score = clamp(50 + (bbRate - 0.085) * 600);
+    notes.push(`oppBB=${round1(bbRate * 100)}%`);
+  } else if (pitcherSummary?.walks_allowed_avg != null) {
+    // Fall back to pitcher's own recent BB-allowed average.
+    const bb = Number(pitcherSummary.walks_allowed_avg);
+    score = clamp(35 + bb * 12);
+    notes.push(`pBB=${round1(bb)}`);
+  } else {
+    notes.push("no BB matchup data");
+  }
+  return { score, note: notes.join(" ") || "BB matchup neutral" };
+}
+
+/**
+ * Matchup (pitcher HITS_ALLOWED):
+ *   Use opposing team OPS / hits_per_game as contact proxy.
+ *   Higher = MORE hits allowed expected.
+ */
+function scoreMatchupHitsAllowed(
+  oppTeamOff: TeamOffenseRow | null,
+  pitcherSummary: PitcherMatchup | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (oppTeamOff?.hits_per_game != null) {
+    const hpg = Number(oppTeamOff.hits_per_game);
+    // League ≈ 8.3 hits/game. 9.5 → 65, 7.0 → 35.
+    score = clamp(50 + (hpg - 8.3) * 12);
+    notes.push(`oppHpG=${round1(hpg)}`);
+  } else if (pitcherSummary?.hits_allowed_avg != null) {
+    const ha = Number(pitcherSummary.hits_allowed_avg);
+    score = clamp(35 + ha * 4);
+    notes.push(`pHa=${round1(ha)}`);
+  } else {
+    notes.push("no H matchup data");
+  }
+  return { score, note: notes.join(" ") || "H matchup neutral" };
+}
+
+/**
+ * Matchup (pitcher EARNED_RUNS_ALLOWED):
+ *   Blend opposing team OPS + runs_per_game as run-scoring proxy.
+ *   Higher = MORE ER expected from this pitcher.
+ */
+function scoreMatchupEarnedRuns(
+  oppTeamOff: TeamOffenseRow | null,
+  pitcherSummary: PitcherMatchup | null,
+  ctx: MlbGameContext | null,
+): { score: number; note: string } {
+  let score = NEUTRAL;
+  const notes: string[] = [];
+  if (oppTeamOff?.runs_per_game != null) {
+    const rpg = Number(oppTeamOff.runs_per_game);
+    // League ≈ 4.5 R/G. 5.5 → 65, 3.5 → 35.
+    score = clamp(50 + (rpg - 4.5) * 15);
+    notes.push(`oppRpG=${round1(rpg)}`);
+    if (oppTeamOff.ops != null) {
+      // Light OPS nudge ±10.
+      const ops = Number(oppTeamOff.ops);
+      score = clamp(score + (ops - 0.72) * 30);
+      notes.push(`oppOPS=${round1(ops * 1000) / 1000}`);
+    }
+  } else if (pitcherSummary?.earned_runs_allowed_avg != null) {
+    const er = Number(pitcherSummary.earned_runs_allowed_avg);
+    score = clamp(35 + er * 10);
+    notes.push(`pER=${round1(er)}`);
+  } else {
+    notes.push("no ER matchup data");
+  }
+  // Hitter-friendly parks raise expected ER.
+  const pf = ctx?.game_context_json?.park_factor;
+  if (typeof pf === "number" && Number.isFinite(pf)) {
+    score = clamp(score + (pf - 1) * 15);
+    notes.push(`park=${round1(pf)}`);
+  }
+  return { score, note: notes.join(" ") || "ER matchup neutral" };
+}
+
+/**
  * Value: how far the rolling mean projection sits from the threshold.
  * Larger overstep / understep → higher value. Symmetric for v1.
  */
