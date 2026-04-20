@@ -699,6 +699,7 @@ serve(async (req) => {
     { data: pitcherLogs },
     { data: gamesToday },
     { data: ctxRows },
+    { data: ctxAllRows },
   ] = await Promise.all([
     supabase
       .from("mlb_player_profiles")
