@@ -56,8 +56,19 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ── v1 anchors only ──
-const ANCHOR_KEYS: MlbStatKey[] = ["HITS", "TOTAL_BASES", "STRIKEOUTS"];
+// ── v1 props (anchors + 4 expansion props) ──
+// Anchors: HITS, TOTAL_BASES, STRIKEOUTS (battle-tested in anchor-v1).
+// Expansion: HOME_RUNS, EARNED_RUNS_ALLOWED, WALKS_ALLOWED, HITS_ALLOWED
+//   — same scoring framework, prop-specific matchup + risk weights.
+const ANCHOR_KEYS: MlbStatKey[] = [
+  "HITS",
+  "TOTAL_BASES",
+  "STRIKEOUTS",
+  "HOME_RUNS",
+  "EARNED_RUNS_ALLOWED",
+  "WALKS_ALLOWED",
+  "HITS_ALLOWED",
+];
 
 // ── Per-prop weighting (sums to ~1.0 per prop across positive axes) ──
 // risk is subtracted, so its weight is the penalty magnitude.
