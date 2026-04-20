@@ -103,7 +103,7 @@ serve(async (req) => {
           signal: AbortSignal.timeout(120_000),
         });
         const body = await res.json();
-        results.wnba_stats = {
+        results[statsKey] = {
           status: body.ok ? "success" : "failed",
           duration_ms: Date.now() - step0Start,
           total_rows: body.total_rows,
@@ -112,8 +112,8 @@ serve(async (req) => {
         console.log(`[${sport}] Step 0 done: ${body.total_rows ?? 0} rows`);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        allErrors.push(`${sport}.wnba_stats: ${msg}`);
-        results.wnba_stats = { status: "failed", duration_ms: Date.now() - step0Start, error: msg };
+        allErrors.push(`${sport}.${statsKey}: ${msg}`);
+        results[statsKey] = { status: "failed", duration_ms: Date.now() - step0Start, error: msg };
         console.error(`[${sport}] Step 0 failed (non-fatal):`, msg);
       }
     }
