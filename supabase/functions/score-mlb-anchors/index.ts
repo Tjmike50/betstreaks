@@ -106,11 +106,15 @@ const WEIGHT_PROFILES: Record<MlbStatKey, WeightProfile> = {
     value: 0.10,
     risk_penalty: 0.12,
   },
-  // Other 4 props are not scored in v1 but kept here so type stays exhaustive.
-  HOME_RUNS:           { recent_form: 0.25, matchup: 0.25, opportunity: 0.15, consistency: 0.10, value: 0.25, risk_penalty: 0.25 },
-  EARNED_RUNS_ALLOWED: { recent_form: 0.25, matchup: 0.30, opportunity: 0.20, consistency: 0.15, value: 0.10, risk_penalty: 0.20 },
-  WALKS_ALLOWED:       { recent_form: 0.30, matchup: 0.20, opportunity: 0.20, consistency: 0.20, value: 0.10, risk_penalty: 0.15 },
-  HITS_ALLOWED:        { recent_form: 0.27, matchup: 0.28, opportunity: 0.20, consistency: 0.15, value: 0.10, risk_penalty: 0.18 },
+  // Expansion props (v1, scored alongside anchors with prop-specific weights).
+  // HOME_RUNS — high variance: prioritize matchup + value, heavy risk penalty.
+  HOME_RUNS:           { recent_form: 0.20, matchup: 0.28, opportunity: 0.12, consistency: 0.05, value: 0.25, risk_penalty: 0.30 },
+  // EARNED_RUNS_ALLOWED — prioritize matchup + recent form + workload, blow-up penalty.
+  EARNED_RUNS_ALLOWED: { recent_form: 0.28, matchup: 0.30, opportunity: 0.20, consistency: 0.12, value: 0.10, risk_penalty: 0.22 },
+  // WALKS_ALLOWED — prioritize control trend + opp walk tendency + consistency.
+  WALKS_ALLOWED:       { recent_form: 0.32, matchup: 0.22, opportunity: 0.15, consistency: 0.21, value: 0.10, risk_penalty: 0.18 },
+  // HITS_ALLOWED — prioritize recent form + workload + opp contact + consistency.
+  HITS_ALLOWED:        { recent_form: 0.30, matchup: 0.25, opportunity: 0.18, consistency: 0.17, value: 0.10, risk_penalty: 0.18 },
 };
 
 // Neutral fallback for any axis when data is missing.
