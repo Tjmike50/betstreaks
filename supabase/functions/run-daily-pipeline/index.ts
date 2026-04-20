@@ -188,24 +188,30 @@ serve(async (req) => {
     }
 
     // ── Step C: Prop scoring engine ──
-    console.log(`[${sport}] Step C: prop-scoring-engine...`);
+    // MLB uses the dedicated anchor scorer (v1: HITS / TOTAL_BASES / STRIKEOUTS).
+    // NBA / WNBA continue to use the legacy market-first prop-scoring-engine.
+    const scoringFn = sport === "MLB" ? "score-mlb-anchors" : "prop-scoring-engine";
+    const scoringBody = sport === "MLB"
+      ? { game_date: todayET }
+      : { score_all_market_players: true, sport };
+    console.log(`[${sport}] Step C: ${scoringFn}...`);
     const stepCStart = Date.now();
 
     try {
-      const res = await fetch(`${fnBase}/prop-scoring-engine`, {
+      const res = await fetch(`${fnBase}/${scoringFn}`, {
         method: "POST",
         headers: svcHeaders,
-        body: JSON.stringify({ score_all_market_players: true, sport }),
+        body: JSON.stringify(scoringBody),
         signal: AbortSignal.timeout(90_000),
       });
       const body = await res.json();
 
       results.scoring = {
-        status: "success",
+        status: body.ok === false ? "failed" : "success",
         duration_ms: Date.now() - stepCStart,
         players_analyzed: body.players_analyzed,
         scored_count: body.scored_count,
-        scoring_source: body.scoring_source || "market-first",
+        scoring_source: body.scoring_source || (sport === "MLB" ? "mlb-anchor-v1" : "market-first"),
       };
       console.log(`[${sport}] Step C done: ${body.scored_count ?? 0} props scored`);
     } catch (e) {
