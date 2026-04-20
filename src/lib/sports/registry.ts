@@ -58,14 +58,16 @@ const WNBA_STATS: StatCategory[] = [
   { key: "BLK", label: "BLK", longLabel: "Blocks" },
 ];
 
-// MLB stat catalog — placeholder; refine when MLB features ship.
+// MLB v1 prop catalog — official supported props for scoring, research,
+// cheatsheets, AI Builder, and AI Daily Pick. Keys are stable slugs.
 const MLB_STATS: StatCategory[] = [
-  { key: "H", label: "H", longLabel: "Hits" },
-  { key: "HR", label: "HR", longLabel: "Home Runs" },
-  { key: "RBI", label: "RBI", longLabel: "Runs Batted In" },
-  { key: "R", label: "R", longLabel: "Runs" },
-  { key: "SB", label: "SB", longLabel: "Stolen Bases" },
-  { key: "K", label: "K", longLabel: "Strikeouts (Pitcher)" },
+  { key: "HITS", label: "Hits", longLabel: "Hits" },
+  { key: "TOTAL_BASES", label: "Total Bases", longLabel: "Total Bases" },
+  { key: "HOME_RUNS", label: "HR", longLabel: "Home Runs" },
+  { key: "STRIKEOUTS", label: "K", longLabel: "Strikeouts" },
+  { key: "EARNED_RUNS_ALLOWED", label: "ER", longLabel: "Earned Runs Allowed" },
+  { key: "WALKS_ALLOWED", label: "BB", longLabel: "Walks Allowed" },
+  { key: "HITS_ALLOWED", label: "H Allowed", longLabel: "Hits Allowed" },
 ];
 
 export const SPORTS: Record<SportKey, SportConfig> = {
