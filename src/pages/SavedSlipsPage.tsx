@@ -111,7 +111,7 @@ export default function SavedSlipsPage() {
 
   // Per-sport counts for the tab labels.
   const counts = useMemo(() => {
-    const c: Record<SportKey, number> = { NBA: 0, WNBA: 0 };
+    const c: Record<SportKey, number> = { NBA: 0, WNBA: 0, MLB: 0 };
     for (const s of slips) {
       const key = ((s as any).sport as SportKey) || "NBA";
       if (key in c) c[key] += 1;
