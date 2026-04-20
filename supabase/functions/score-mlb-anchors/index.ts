@@ -768,6 +768,36 @@ serve(async (req) => {
     if (todaysGameIds.has(c.game_id)) ctxByGameId.set(c.game_id, c);
   }
 
+  // Build teamId → abbr map and per-team game info from today's games + context.
+  // This lets us populate team_abbr / opponent_abbr / home_away on every scored row.
+  const teamIdToAbbr = new Map<number, string>();
+  // teamId → { gameId, homeId, awayId, homeAbbr, awayAbbr }
+  const teamGameInfo = new Map<number, { homeId: number; awayId: number; homeAbbr: string; awayAbbr: string }>();
+  const gamesByIdMap = new Map<string, { home_team_abbr: string | null; away_team_abbr: string | null }>();
+  for (const g of (gamesToday ?? []) as Array<{ id: string; home_team_abbr: string | null; away_team_abbr: string | null }>) {
+    gamesByIdMap.set(g.id, g);
+  }
+  for (const c of ctxByGameId.values()) {
+    const g = gamesByIdMap.get(c.game_id);
+    if (!g || !g.home_team_abbr || !g.away_team_abbr) continue;
+    const ctxJson = c.game_context_json as Record<string, unknown> | null;
+    const homeId = Number(ctxJson?.home_team_id);
+    const awayId = Number(ctxJson?.away_team_id);
+    if (Number.isFinite(homeId) && homeId > 0) {
+      teamIdToAbbr.set(homeId, g.home_team_abbr);
+      teamGameInfo.set(homeId, { homeId, awayId, homeAbbr: g.home_team_abbr, awayAbbr: g.away_team_abbr });
+    }
+    if (Number.isFinite(awayId) && awayId > 0) {
+      teamIdToAbbr.set(awayId, g.away_team_abbr);
+      teamGameInfo.set(awayId, { homeId, awayId, homeAbbr: g.home_team_abbr, awayAbbr: g.away_team_abbr });
+    }
+  }
+  if (teamIdToAbbr.size < 25) {
+    console.warn(
+      `[score-mlb-anchors] teamIdToAbbr only has ${teamIdToAbbr.size} entries — upstream games_today/mlb_game_context may be incomplete`,
+    );
+  }
+
   // Pull pitcher matchup summaries for any probable pitchers we might face.
   const probablePitcherIds = new Set<number>();
   for (const c of ctxByGameId.values()) {
