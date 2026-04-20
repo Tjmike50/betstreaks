@@ -140,7 +140,10 @@ function dropWeak(rows: MlbCandidate[]): MlbCandidate[] {
       r.threshold != null &&
       Number(r.threshold) > 0 &&
       !!r.player_name &&
-      !!r.stat_type,
+      !!r.stat_type &&
+      // anchor-v1: synth-id rows from the pre-name-resolution era are stale
+      // junk — they never have rolling stats joined. Exclude from both feeds.
+      r.player_id > 0,
   );
 }
 
@@ -217,30 +220,36 @@ export async function getMlbBuilderCandidates(
 // ---------------------------------------------------------------------------
 
 export interface DailyPickFeedOpts extends BaseOpts {
-  /** Acceptable confidence tiers. Default ['elite','strong']. */
+  /** Acceptable confidence tiers. Default ['elite','strong','lean']. */
   acceptedTiers?: MlbConfidenceTier[];
-  /** Minimum overall score. Default 60 (stricter than Builder). */
+  /** Minimum overall score. Default 55 (anchor-v1: lean is acceptable). */
   minOverall?: number;
   /** Final cap on returned rows. Default 25. */
   limit?: number;
+  /**
+   * STRIKEOUTS coverage is still sparse in anchor-v1 (few pitcher rolling rows
+   * + neutral matchup data). Drop them from Daily Pick by default so we don't
+   * promote low-signal K legs. AI Builder still sees them for variety.
+   */
+  excludeWeakStrikeouts?: boolean;
 }
 
 /**
- * Stricter candidate pool for Daily Pick. The Daily Pick generator should
- * only see candidates we'd actually consider featuring publicly:
- *   • only MLB anchor props
- *   • `confidence_tier in (elite, strong)` by default
- *   • `score_overall >= 60` by default
- *   • ranked purely by score_overall (tier-weighted tiebreak)
- *   • no per-player cap here — the generator handles diversification.
+ * Stricter candidate pool for Daily Pick. Anchor-v1 calibration:
+ *   • only MLB anchor props (HITS, TOTAL_BASES; STRIKEOUTS dropped by default)
+ *   • `confidence_tier in (elite, strong, lean)` — lean is acceptable now
+ *     that name resolution is real and tiers actually mean something
+ *   • `score_overall >= 55` by default
+ *   • ranked by score_overall (tier-weighted tiebreak)
  */
 export async function getMlbDailyPickCandidates(
   client: SupabaseLike,
   opts: DailyPickFeedOpts = {},
 ): Promise<MlbCandidate[]> {
-  const acceptedTiers = opts.acceptedTiers ?? ["elite", "strong"];
-  const minOverall = opts.minOverall ?? 60;
+  const acceptedTiers = opts.acceptedTiers ?? ["elite", "strong", "lean"];
+  const minOverall = opts.minOverall ?? 55;
   const finalLimit = Math.max(1, opts.limit ?? 25);
+  const excludeWeakK = opts.excludeWeakStrikeouts ?? true;
 
   const raw = await loadMlbScoredRows(client, {
     gameDate: opts.gameDate,
@@ -249,9 +258,12 @@ export async function getMlbDailyPickCandidates(
   });
 
   const filtered = dropWeak(raw).filter((r) => {
+    if (r.player_id <= 0) return false; // anchor-v1: stale synth ids never reach Daily Pick
     if ((r.score_overall ?? 0) < minOverall) return false;
     if (!r.confidence_tier) return false;
-    return acceptedTiers.includes(r.confidence_tier);
+    if (!acceptedTiers.includes(r.confidence_tier)) return false;
+    if (excludeWeakK && r.stat_type === "STRIKEOUTS") return false;
+    return true;
   });
 
   filtered.sort((a, b) => {
