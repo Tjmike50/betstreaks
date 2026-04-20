@@ -519,6 +519,25 @@ Deno.serve(async (req) => {
       );
     }
 
+    // -------------------------------------------------------------------------
+    // MLB v1 branch — uses the stricter MLB candidate feed (anchor props,
+    // confidence_tier in elite/strong, score_overall >= 60). Skips the
+    // basketball-specific stat map + DraftKings odds enrichment for now;
+    // odds will be wired once collect-line-snapshots handles MLB.
+    // -------------------------------------------------------------------------
+    if (sport === "MLB") {
+      return await runMlbDailyPick({
+        supabase,
+        sport,
+        gameDate,
+        legCount,
+        force,
+        previousPickId,
+        adminUserId,
+        startTime,
+      });
+    }
+
     // Pull candidate prop scores for this sport + date
     const { data: scores, error: scoresError } = await supabase
       .from("player_prop_scores")
