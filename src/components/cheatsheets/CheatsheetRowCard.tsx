@@ -30,21 +30,49 @@ function scoreColor(v: number | null | undefined): string {
   return "text-muted-foreground";
 }
 
+/** Compact stat label — keeps mobile badge from wrapping. */
+function statLabel(stat: string): string {
+  const key = stat.toUpperCase();
+  const map: Record<string, string> = {
+    STRIKEOUTS: "K",
+    EARNED_RUNS_ALLOWED: "ER",
+    WALKS_ALLOWED: "BB",
+    HITS_ALLOWED: "H Allowed",
+    HOME_RUNS: "HR",
+    TOTAL_BASES: "TB",
+    HITS: "Hits",
+  };
+  return map[key] ?? stat;
+}
+
+function buildMatchup(row: CheatsheetRow): string {
+  if (row.opponent_abbr && row.team_abbr) {
+    return `${row.team_abbr} ${row.home_away === "away" ? "@" : "vs"} ${row.opponent_abbr}`;
+  }
+  if (row.team_abbr) return row.team_abbr;
+  return "";
+}
+
 export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
   const navigate = useNavigate();
 
+  // For MLB rows, prefer score_overall over legacy value_score so the
+  // right-side number reflects the multi-axis MLB scoring.
+  const isMLB = (row as { sport?: string }).sport === "MLB";
+  const overall = (row as { score_overall?: number | null }).score_overall ?? null;
+  const valueForHighlight = isMLB && overall != null ? overall : row.value_score;
+
   const highlightValue =
     highlight === "value"
-      ? { label: "Value", val: fmtScore(row.value_score), color: scoreColor(row.value_score) }
+      ? { label: isMLB ? "Score" : "Value", val: fmtScore(valueForHighlight), color: scoreColor(valueForHighlight) }
       : highlight === "confidence"
         ? { label: "Conf.", val: fmtScore(row.confidence_score), color: scoreColor(row.confidence_score) }
         : highlight === "last10"
           ? { label: "L10", val: fmtPct(row.last10_hit_rate), color: scoreColor(row.last10_hit_rate) }
           : { label: "vs Opp", val: fmtPct(row.vs_opponent_hit_rate), color: scoreColor(row.vs_opponent_hit_rate) };
 
-  const matchup = row.opponent_abbr
-    ? `${row.team_abbr ?? "—"} ${row.home_away === "away" ? "@" : "vs"} ${row.opponent_abbr}`
-    : row.team_abbr ?? "";
+  const matchup = buildMatchup(row);
+  const subtitle = matchup ? `Over ${row.threshold} · ${matchup}` : `Over ${row.threshold}`;
 
   return (
     <button
@@ -59,11 +87,11 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
               {row.player_name}
             </span>
             <Badge variant="outline" className="text-[10px] shrink-0">
-              {row.stat_type}
+              {statLabel(row.stat_type)}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground truncate">
-            Over {row.threshold} · {matchup}
+            {subtitle}
           </p>
           <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
             <span>L5: <span className="text-foreground font-medium">{fmtPct(row.last5_hit_rate)}</span></span>
@@ -83,3 +111,4 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
     </button>
   );
 }
+
