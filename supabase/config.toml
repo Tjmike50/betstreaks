@@ -51,3 +51,6 @@ verify_jwt = false
 [functions.generate-daily-pick]
 verify_jwt = false
 
+[functions.refresh-mlb-data]
+verify_jwt = false
+
