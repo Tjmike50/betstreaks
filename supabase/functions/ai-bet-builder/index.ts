@@ -668,8 +668,14 @@ Date: ${gameDate}
 User prompt: ${prompt}
 Slips requested: ${slipCount}
 
-Available MLB candidates (anchor props: Hits / Total Bases / Strikeouts):
+Available MLB candidates (7 v1 props: Hits, Total Bases, Home Runs, Strikeouts, Earned Runs Allowed, Walks Allowed, Hits Allowed):
 ${candidateLines}
+
+Composition rules:
+- Anchor props (Hits, Total Bases, Strikeouts) are the most reliable; lean on them.
+- Home Runs are HIGH variance — use at most one HR leg per slip and only if score is strong.
+- Walks Allowed is selective — only include when matchup + control trend agree.
+- Earned Runs Allowed and Hits Allowed are acceptable when score is clean.
 
 Return strict JSON with shape:
 {
@@ -683,7 +689,7 @@ Return strict JSON with shape:
         {
           "player_name": "string (exact match from list)",
           "team_abbr": "string or null",
-          "stat_type": "HITS" | "TOTAL_BASES" | "STRIKEOUTS",
+          "stat_type": "HITS" | "TOTAL_BASES" | "HOME_RUNS" | "STRIKEOUTS" | "EARNED_RUNS_ALLOWED" | "WALKS_ALLOWED" | "HITS_ALLOWED",
           "line": "Over X.5" | "Under X.5",
           "pick": "Over" | "Under",
           "odds": "string or null",

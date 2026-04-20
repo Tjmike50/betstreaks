@@ -68,8 +68,16 @@ export interface UseCheatsheetOptions {
 
 const DEFAULT_LIMIT = 50;
 
-// MLB v1 anchor props supported by score-mlb-anchors.
-const MLB_ANCHOR_STATS = ["HITS", "TOTAL_BASES", "STRIKEOUTS"] as const;
+// MLB v1 props supported by score-mlb-anchors (3 anchors + 4 expansion).
+const MLB_ANCHOR_STATS = [
+  "HITS",
+  "TOTAL_BASES",
+  "STRIKEOUTS",
+  "HOME_RUNS",
+  "EARNED_RUNS_ALLOWED",
+  "WALKS_ALLOWED",
+  "HITS_ALLOWED",
+] as const;
 
 // Note: kept as a single string literal so supabase-js can infer the row type.
 const SELECT_COLUMNS =
