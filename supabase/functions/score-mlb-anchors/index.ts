@@ -931,7 +931,7 @@ serve(async (req) => {
     const tier = tierFor(overall);
 
     const summary = {
-      version: "mlb-anchor-v1",
+      version: "mlb-v1",
       stat_key: statKey,
       threshold: line.threshold,
       sample_size: sampleSize,
