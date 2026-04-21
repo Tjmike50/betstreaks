@@ -21,10 +21,17 @@ interface SportsDataConfig {
 }
 
 // SportsData.io team abbreviation corrections (their abbrs → ours)
+// SDIO uses shortened forms; our canonical set matches The Odds API / NBA.com
 const NBA_SDIO_TEAM_NORMALIZE: Record<string, string> = {
-  // Most match, but a few differ
-  "GS": "GSW", "SA": "SAS", "NY": "NYK", "NO": "NOP", "CHA": "CHA",
+  "GS":  "GSW",
+  "SA":  "SAS",
+  "NY":  "NYK",
+  "NO":  "NOP",
   "PHO": "PHX",
+  "BKN": "BKN",
+  "CHA": "CHA",
+  "UTA": "UTA",
+  "WAS": "WAS",
 };
 
 const WNBA_SDIO_TEAM_NORMALIZE: Record<string, string> = {
