@@ -75,7 +75,7 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
               {row.player_name}
             </span>
             <Badge variant="outline" className="text-[10px] shrink-0">
-              {statLabel(row.stat_type)}
+              {compactStatLabel(row.stat_type)}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground truncate">
