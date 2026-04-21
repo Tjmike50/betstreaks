@@ -212,6 +212,18 @@ const Index = () => {
               Please try again later
             </p>
           </div>
+        ) : filters.entityType === "team" ? (
+          // Explicit product decision: team streaks are deferred under the
+          // sportsbook-line-first model. We will reintroduce them once team
+          // moneyline / spread / total lines are wired into the same pipeline.
+          <div className="text-center py-12 max-w-md mx-auto space-y-2">
+            <p className="text-foreground font-medium">Team streaks are paused</p>
+            <p className="text-sm text-muted-foreground">
+              BetStreaks is now sportsbook-line-first. Team streaks will return once we tie
+              moneyline, spread, and team total lines into the same model. Browse player
+              streaks for live, bettable lines.
+            </p>
+          </div>
         ) : streaks && streaks.length > 0 ? (
           <div className="space-y-3">
             {streaks.map((streak) => (
@@ -226,12 +238,12 @@ const Index = () => {
         ) : (
           <div className="text-center py-12">
             <p className="text-foreground font-medium">
-              No {sportConfig.name} streaks right now
+              No live sportsbook lines for {sportConfig.name} right now
             </p>
             <p className="text-sm text-muted-foreground mt-2">
               {sportConfig.seasonState === "offseason"
                 ? `${sportConfig.name} is in offseason. Check back when the season resumes.`
-                : "Try adjusting your filters, or check back closer to tip-off."}
+                : "Streaks appear as soon as today's player props post. Check back closer to tip-off."}
             </p>
           </div>
         )}
