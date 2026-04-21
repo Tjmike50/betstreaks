@@ -544,38 +544,65 @@ export type Database = {
         Row: {
           away_score: number | null
           away_team_abbr: string | null
+          canonical_game_key: string | null
           game_date: string
           game_time: string | null
           home_score: number | null
           home_team_abbr: string | null
           id: string
+          is_active: boolean
+          is_postponed: boolean
+          last_verified_at: string | null
+          mismatch_flags: Json
+          schedule_confidence: number
+          source_primary: string
+          source_secondary: string | null
           sport: string
           status: string | null
           updated_at: string
+          verification_status: string
         }
         Insert: {
           away_score?: number | null
           away_team_abbr?: string | null
+          canonical_game_key?: string | null
           game_date: string
           game_time?: string | null
           home_score?: number | null
           home_team_abbr?: string | null
           id: string
+          is_active?: boolean
+          is_postponed?: boolean
+          last_verified_at?: string | null
+          mismatch_flags?: Json
+          schedule_confidence?: number
+          source_primary?: string
+          source_secondary?: string | null
           sport?: string
           status?: string | null
           updated_at?: string
+          verification_status?: string
         }
         Update: {
           away_score?: number | null
           away_team_abbr?: string | null
+          canonical_game_key?: string | null
           game_date?: string
           game_time?: string | null
           home_score?: number | null
           home_team_abbr?: string | null
           id?: string
+          is_active?: boolean
+          is_postponed?: boolean
+          last_verified_at?: string | null
+          mismatch_flags?: Json
+          schedule_confidence?: number
+          source_primary?: string
+          source_secondary?: string | null
           sport?: string
           status?: string | null
           updated_at?: string
+          verification_status?: string
         }
         Relationships: []
       }
