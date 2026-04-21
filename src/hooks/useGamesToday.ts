@@ -14,6 +14,11 @@ export interface GameToday {
   game_date: string;
   game_time: string | null;
   updated_at: string;
+  verification_status: string;
+  schedule_confidence: number;
+  is_active: boolean;
+  is_postponed: boolean;
+  mismatch_flags: unknown[];
 }
 
 // Get date string in YYYY-MM-DD format for the US Eastern timezone, which is
@@ -53,6 +58,7 @@ export function useGamesToday(sportOverride?: SportKey) {
         .select("*")
         .eq("sport", sport)
         .in("game_date", candidateDates)
+        .eq("is_active", true)
         .order("game_time", { ascending: true, nullsFirst: false })
         .order("id", { ascending: true });
 
@@ -62,13 +68,11 @@ export function useGamesToday(sportOverride?: SportKey) {
         (game) => game.home_team_abbr && game.away_team_abbr,
       );
 
-      // Re-bucket each row to its true ET slate date. The upstream feed
-      // dates by UTC, so a 10:40 PM ET tip on Apr 20 gets stored as Apr 21.
+      // Re-bucket each row to its true ET slate date.
       const filtered = rows.filter((g) => {
         if (g.game_date === todayStr) return true;
         if (g.game_date === tomorrowUtcStr && todayStr !== tomorrowUtcStr) {
           const t = (g.game_time || "").toUpperCase();
-          // Late-night ET tip (7pm-12am) belongs to today's slate.
           if (/\b(0?[7-9]|1[0-2]):\d{2}\s*PM\b/.test(t)) return true;
         }
         return false;
@@ -88,14 +92,26 @@ export function useGamesToday(sportOverride?: SportKey) {
     refetch();
   };
 
+  // Separate verified vs unverified for UI consumption
+  const verifiedGames = (data ?? []).filter(
+    (g) => g.verification_status === "verified" || g.verification_status === "missing_secondary",
+  );
+  const unverifiedGames = (data ?? []).filter(
+    (g) => g.verification_status === "mismatch" || g.verification_status === "unverified",
+  );
+
   const debugInfo = {
     sport,
     date: todayStr,
     rawCount: data?.length ?? 0,
+    verifiedCount: verifiedGames.length,
+    unverifiedCount: unverifiedGames.length,
   };
 
   return {
     games: data ?? [],
+    verifiedGames,
+    unverifiedGames,
     isLoading,
     isFetching,
     error,
@@ -104,4 +120,3 @@ export function useGamesToday(sportOverride?: SportKey) {
     debugInfo,
   };
 }
-
