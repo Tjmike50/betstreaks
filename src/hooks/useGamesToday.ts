@@ -16,37 +16,65 @@ export interface GameToday {
   updated_at: string;
 }
 
-// Get local date in YYYY-MM-DD format
-function getLocalDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+// Get date string in YYYY-MM-DD format for the US Eastern timezone, which is
+// the canonical "slate day" for US sports. This avoids late-night ET games
+// (e.g. a 10:40 PM ET tip) being filed under tomorrow's UTC date.
+function getEasternDateString(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
+  const m = parts.find((p) => p.type === "month")?.value ?? "01";
+  const d = parts.find((p) => p.type === "day")?.value ?? "01";
+  return `${y}-${m}-${d}`;
 }
 
 export function useGamesToday(sportOverride?: SportKey) {
   const { sport: activeSport } = useSport();
   const sport = sportOverride ?? activeSport;
-  const todayStr = getLocalDateString(new Date());
+  const todayStr = getEasternDateString(new Date());
+
+  // Also include the next UTC date — late-night ET games (e.g. 10:40 PM ET
+  // tipoff) get stored with the next-day UTC date by the upstream feed.
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowUtcStr = tomorrow.toISOString().slice(0, 10);
+  const todayUtcStr = new Date().toISOString().slice(0, 10);
+  const candidateDates = Array.from(new Set([todayStr, todayUtcStr, tomorrowUtcStr]));
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["games-today", sport, todayStr],
+    queryKey: ["games-today", sport, todayStr, candidateDates.join(",")],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("games_today")
         .select("*")
         .eq("sport", sport)
-        .eq("game_date", todayStr)
+        .in("game_date", candidateDates)
         .order("game_time", { ascending: true, nullsFirst: false })
         .order("id", { ascending: true });
 
       if (error) throw error;
 
-      const validGames = (data as GameToday[]).filter(
-        (game) => game.home_team_abbr && game.away_team_abbr
+      const rows = (data as GameToday[]).filter(
+        (game) => game.home_team_abbr && game.away_team_abbr,
       );
 
-      return validGames;
+      // Re-bucket each row to its true ET slate date. The upstream feed
+      // dates by UTC, so a 10:40 PM ET tip on Apr 20 gets stored as Apr 21.
+      const filtered = rows.filter((g) => {
+        if (g.game_date === todayStr) return true;
+        if (g.game_date === tomorrowUtcStr && todayStr !== tomorrowUtcStr) {
+          const t = (g.game_time || "").toUpperCase();
+          // Late-night ET tip (7pm-12am) belongs to today's slate.
+          if (/\b(0?[7-9]|1[0-2]):\d{2}\s*PM\b/.test(t)) return true;
+        }
+        return false;
+      });
+
+      return filtered;
     },
     staleTime: 1000 * 60 * 2,
   });
