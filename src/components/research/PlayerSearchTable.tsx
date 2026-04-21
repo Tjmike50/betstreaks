@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ResearchPlayerRow } from "@/hooks/useResearchPlayers";
+import { compactStatLabel } from "@/lib/mlbStatLabels";
 
 type SortKey = "name" | "team" | "streak" | "season" | "last10";
 type SortDir = "asc" | "desc";
@@ -157,7 +158,7 @@ export function PlayerSearchTable({ rows, sport }: Props) {
                       {row.player_name}
                     </div>
                     <div className="text-[11px] text-muted-foreground truncate">
-                      {row.top_stat} {row.top_threshold}+ • {row.season_games} G
+                      {compactStatLabel(row.top_stat)} {row.top_threshold}+ • {row.season_games} G
                     </div>
                   </div>
                 </div>
