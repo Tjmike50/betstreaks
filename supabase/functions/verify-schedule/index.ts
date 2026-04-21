@@ -108,15 +108,24 @@ function buildCanonicalKey(sport: string, gameDate: string, awayAbbr: string, ho
 
 /**
  * Parse SportsData.io DateTime to ET game_time string for comparison.
- * SportsData returns UTC ISO strings like "2026-04-21T23:30:00".
+ * IMPORTANT: SportsData.io returns US-sport times in ET (Eastern Time)
+ * WITHOUT a timezone suffix — e.g. "2026-04-21T19:10:00".
+ * We must NOT treat these as UTC. We extract hours/minutes directly.
  */
 function sdioToEtTime(dt: string | null): string | null {
   if (!dt) return null;
   try {
-    const d = new Date(dt.endsWith("Z") ? dt : dt + "Z");
-    return d.toLocaleTimeString("en-US", {
-      hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/New_York",
-    });
+    // Strip any trailing "Z" that might be present (shouldn't be, but be safe)
+    const clean = dt.replace(/Z$/i, "");
+    // Extract time portion directly — it's already in ET
+    const match = clean.match(/T(\d{2}):(\d{2})/);
+    if (!match) return null;
+    let h = parseInt(match[1]);
+    const min = match[2];
+    const ampm = h >= 12 ? "PM" : "AM";
+    if (h === 0) h = 12;
+    else if (h > 12) h -= 12;
+    return `${h.toString().padStart(2, "0")}:${min} ${ampm}`;
   } catch {
     return null;
   }
