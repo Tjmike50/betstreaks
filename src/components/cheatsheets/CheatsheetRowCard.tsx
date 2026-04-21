@@ -30,20 +30,8 @@ function scoreColor(v: number | null | undefined): string {
   return "text-muted-foreground";
 }
 
-/** Compact stat label — keeps mobile badge from wrapping. */
-function statLabel(stat: string): string {
-  const key = stat.toUpperCase();
-  const map: Record<string, string> = {
-    STRIKEOUTS: "K",
-    EARNED_RUNS_ALLOWED: "ER",
-    WALKS_ALLOWED: "BB",
-    HITS_ALLOWED: "H Allowed",
-    HOME_RUNS: "HR",
-    TOTAL_BASES: "TB",
-    HITS: "Hits",
-  };
-  return map[key] ?? stat;
-}
+// Use shared MLB stat label utility
+import { compactStatLabel } from "@/lib/mlbStatLabels";
 
 function buildMatchup(row: CheatsheetRow): string {
   if (row.opponent_abbr && row.team_abbr) {
@@ -87,7 +75,7 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
               {row.player_name}
             </span>
             <Badge variant="outline" className="text-[10px] shrink-0">
-              {statLabel(row.stat_type)}
+              {compactStatLabel(row.stat_type)}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground truncate">
