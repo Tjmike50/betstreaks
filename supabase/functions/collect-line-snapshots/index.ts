@@ -24,7 +24,6 @@ const NBA_TEAM_ABBRS: Record<string, string> = {
   "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
 };
 
-// WNBA team abbreviations as returned by The Odds API "home_team" / "away_team" strings.
 const WNBA_TEAM_ABBRS: Record<string, string> = {
   "Atlanta Dream": "ATL", "Chicago Sky": "CHI", "Connecticut Sun": "CON",
   "Dallas Wings": "DAL", "Golden State Valkyries": "GSV", "Indiana Fever": "IND",
@@ -33,8 +32,6 @@ const WNBA_TEAM_ABBRS: Record<string, string> = {
   "Washington Mystics": "WAS",
 };
 
-// Phase 1 sport registry (mirrors src/lib/sports/registry.ts).
-// When WNBA goes in-season, flip seasonState below to enable ingestion.
 type SportKey = "NBA" | "WNBA" | "MLB";
 
 interface SportConfig {
@@ -43,14 +40,7 @@ interface SportConfig {
   refreshStatusId: number;
   refreshStatusLabel: string;
   seasonState: "preseason" | "regular" | "postseason" | "offseason";
-  /** Comma-separated player-prop market list passed to get-odds. */
   propMarkets: string;
-  /**
-   * Stat-type rewrite. NBA/WNBA convert market keys to friendly labels
-   * (e.g. player_points → "Points") because their scorer reads friendly
-   * labels. MLB keeps the raw Odds API market keys (e.g. "batter_hits")
-   * because score-mlb-anchors queries line_snapshots by market key.
-   */
   statRewrite: Record<string, string> | "passthrough";
 }
 
@@ -82,34 +72,183 @@ const SPORT_CONFIG: Record<SportKey, SportConfig> = {
     statRewrite: NBA_STAT_REWRITE,
   },
   MLB: {
-    oddsApiSport: MLB_ODDS_API_SPORT, // "baseball_mlb"
-    teamMap: {}, // MLB team registry not wired yet — leave abbrs null in games_today.
+    oddsApiSport: MLB_ODDS_API_SPORT,
+    teamMap: {},
     refreshStatusId: 23,
     refreshStatusLabel: "MLB_LINES",
     seasonState: "regular",
-    // v1 scope: all 7 MLB markets scored by score-mlb-anchors
-    // (3 anchors + HR/ER/BB/H allowed expansion).
     propMarkets: [
-      "batter_hits",
-      "batter_total_bases",
-      "batter_home_runs",
-      "pitcher_strikeouts",
-      "pitcher_earned_runs",
-      "pitcher_walks",
+      "batter_hits", "batter_total_bases", "batter_home_runs",
+      "pitcher_strikeouts", "pitcher_earned_runs", "pitcher_walks",
       "pitcher_hits_allowed",
     ].join(","),
     statRewrite: "passthrough",
   },
 };
 
+// ─── Canonical key helpers ────────────────────────────────────────────────────
+
+/** Build deterministic canonical key: SPORT_YYYY-MM-DD_AWAY_HOME */
+function buildCanonicalKey(sport: string, gameDate: string, awayAbbr: string | null, homeAbbr: string | null): string | null {
+  if (!awayAbbr || !homeAbbr) return null;
+  return `${sport}_${gameDate}_${awayAbbr}_${homeAbbr}`;
+}
+
+// ─── Verification & confidence helpers ────────────────────────────────────────
+
+interface GameCandidate {
+  id: string;
+  sport: string;
+  game_date: string;
+  home_team_abbr: string | null;
+  away_team_abbr: string | null;
+  game_time: string | null;
+  status: string;
+  commence_time_iso: string;
+  source: string;
+  canonical_game_key: string | null;
+}
+
+interface VerifiedGameRow {
+  id: string;
+  sport: string;
+  game_date: string;
+  home_team_abbr: string | null;
+  away_team_abbr: string | null;
+  game_time: string | null;
+  status: string | null;
+  canonical_game_key: string | null;
+  source_primary: string;
+  source_secondary: string | null;
+  verification_status: "verified" | "unverified" | "mismatch" | "missing_secondary";
+  schedule_confidence: number;
+  mismatch_flags: unknown[];
+  is_active: boolean;
+  is_postponed: boolean;
+  last_verified_at: string;
+  updated_at: string;
+}
+
 /**
- * Automated line snapshot collector.
- * 
- * Now uses the get-odds edge function for provider-agnostic fetching with
- * automatic failover and caching. Falls back gracefully when all providers are down.
+ * Resolve duplicates: when multiple candidates share a canonical_game_key,
+ * keep the one with the most complete data; prefer h2h provider entries.
  *
- * Scheduled 3x on game days: ~11am ET (open), ~3pm ET (mid), ~6pm ET (pre-tip).
+ * Merge rule: winner keeps its own fields; loser contributes source_secondary.
  */
+function resolveDuplicates(candidates: GameCandidate[]): Map<string, { winner: GameCandidate; dupeCount: number; mismatchFlags: string[] }> {
+  const byKey = new Map<string, GameCandidate[]>();
+  for (const c of candidates) {
+    const key = c.canonical_game_key;
+    if (!key) continue;
+    const arr = byKey.get(key) || [];
+    arr.push(c);
+    byKey.set(key, arr);
+  }
+
+  const resolved = new Map<string, { winner: GameCandidate; dupeCount: number; mismatchFlags: string[] }>();
+
+  for (const [key, group] of byKey.entries()) {
+    const flags: string[] = [];
+
+    if (group.length > 1) {
+      flags.push(`duplicate_candidates_detected:${group.length}`);
+
+      // Check for time disagreements
+      const times = new Set(group.map(g => g.commence_time_iso));
+      if (times.size > 1) flags.push("start_time_disagrees");
+
+      // Check for team disagreements
+      const homes = new Set(group.map(g => g.home_team_abbr));
+      const aways = new Set(group.map(g => g.away_team_abbr));
+      if (homes.size > 1) flags.push("home_team_disagrees");
+      if (aways.size > 1) flags.push("away_team_disagrees");
+    }
+
+    // Winner selection:
+    // 1. Prefer candidates with both team abbreviations populated
+    // 2. Prefer candidates with earlier commence_time (first seen = most trusted)
+    // 3. Tie-break by id (deterministic)
+    const sorted = [...group].sort((a, b) => {
+      const aComplete = (a.home_team_abbr && a.away_team_abbr) ? 1 : 0;
+      const bComplete = (b.home_team_abbr && b.away_team_abbr) ? 1 : 0;
+      if (bComplete !== aComplete) return bComplete - aComplete; // complete first
+      if (a.commence_time_iso !== b.commence_time_iso) return a.commence_time_iso.localeCompare(b.commence_time_iso);
+      return a.id.localeCompare(b.id);
+    });
+
+    resolved.set(key, { winner: sorted[0], dupeCount: group.length, mismatchFlags: flags });
+  }
+
+  return resolved;
+}
+
+/**
+ * Assign verification_status & schedule_confidence based on available signals.
+ *
+ * Confidence scoring (0–100):
+ *   Base 50 = came from odds API (primary source)
+ *   +20 = both team abbreviations resolved
+ *   +15 = game_time populated
+ *   +10 = no mismatch flags
+ *   +5  = status is "Scheduled" (not unknown)
+ *   −20 = has duplicate_candidates_detected flag
+ *   −10 = start_time_disagrees
+ *   −15 = team disagrees
+ */
+function computeVerification(
+  candidate: GameCandidate,
+  mismatchFlags: string[],
+  dupeCount: number,
+  existingRow: { verification_status: string; source_secondary: string | null } | null,
+): { verification_status: string; schedule_confidence: number; source_secondary: string | null } {
+  let confidence = 50; // base: from odds API
+
+  if (candidate.home_team_abbr && candidate.away_team_abbr) confidence += 20;
+  if (candidate.game_time) confidence += 15;
+  if (candidate.status === "Scheduled") confidence += 5;
+  if (mismatchFlags.length === 0) confidence += 10;
+
+  // Penalties
+  if (mismatchFlags.some(f => f.startsWith("duplicate_candidates_detected"))) confidence -= 20;
+  if (mismatchFlags.includes("start_time_disagrees")) confidence -= 10;
+  if (mismatchFlags.includes("home_team_disagrees") || mismatchFlags.includes("away_team_disagrees")) confidence -= 15;
+
+  confidence = Math.max(0, Math.min(100, confidence));
+
+  // If there's an existing row with a secondary source, preserve it
+  const sourceSecondary = existingRow?.source_secondary || (dupeCount > 1 ? "odds_api_duplicate" : null);
+
+  let verificationStatus: string;
+  if (mismatchFlags.length > 0) {
+    verificationStatus = "mismatch";
+  } else if (!sourceSecondary) {
+    verificationStatus = "missing_secondary";
+  } else {
+    verificationStatus = "verified";
+  }
+
+  // If already verified by a previous pass and nothing conflicts, keep it
+  if (existingRow?.verification_status === "verified" && mismatchFlags.length === 0) {
+    verificationStatus = "verified";
+    confidence = Math.max(confidence, 85);
+  }
+
+  return { verification_status: verificationStatus, schedule_confidence: confidence, source_secondary: sourceSecondary };
+}
+
+/**
+ * Determine is_active and is_postponed from status string.
+ */
+function deriveActiveFlags(status: string | null): { is_active: boolean; is_postponed: boolean } {
+  const s = (status || "").toLowerCase();
+  if (s.includes("postponed") || s.includes("ppd")) return { is_active: false, is_postponed: true };
+  if (s.includes("cancel") || s.includes("suspended")) return { is_active: false, is_postponed: false };
+  if (s.includes("final") || s.includes("completed")) return { is_active: false, is_postponed: false };
+  return { is_active: true, is_postponed: false };
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -123,14 +262,13 @@ serve(async (req) => {
       "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
     };
 
-    // Sport selection (default NBA for backward compatibility).
     const reqBody = await req.json().catch(() => ({}));
     const rawSport = String(reqBody?.sport ?? "NBA").toUpperCase();
     const sport: SportKey =
       rawSport === "WNBA" ? "WNBA" : rawSport === "MLB" ? "MLB" : "NBA";
     const cfg = SPORT_CONFIG[sport];
 
-    // Offseason short-circuit (saves Odds API quota).
+    // Offseason short-circuit
     if (cfg.seasonState === "offseason") {
       console.log(`[${sport}] seasonState=offseason — skipping line collection.`);
       await supabase.from("refresh_status").upsert(
@@ -146,7 +284,7 @@ serve(async (req) => {
     const todayStr = new Date().toISOString().split("T")[0];
     console.log(`[${sport}] Collecting line snapshots for ${todayStr}...`);
 
-    // 1. Fetch today's games via get-odds (game-level h2h)
+    // ── 1. Fetch today's games via get-odds (game-level h2h) ──
     let gamesOddsResponse: any;
     try {
       const res = await fetch(`${fnBase}/get-odds`, {
@@ -194,8 +332,11 @@ serve(async (req) => {
       );
     }
 
-    // 1b. Upsert games_today
-    const gamesTodayRows: any[] = [];
+    // ── 1b. Build game candidates with canonical keys ──
+    const candidates: GameCandidate[] = [];
+    const gameIdToDate = new Map<string, string>();
+    const allGameDates = new Set<string>();
+
     for (const game of gamesData) {
       const commence = new Date(game.commence_time);
       const gameDate = commence.toISOString().split("T")[0];
@@ -204,7 +345,10 @@ serve(async (req) => {
       const gameTime = commence.toLocaleTimeString("en-US", {
         hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/New_York",
       });
-      gamesTodayRows.push({
+
+      const canonicalKey = buildCanonicalKey(sport, gameDate, awayAbbr, homeAbbr);
+
+      candidates.push({
         id: game.id,
         sport,
         game_date: gameDate,
@@ -212,29 +356,105 @@ serve(async (req) => {
         away_team_abbr: awayAbbr,
         game_time: gameTime,
         status: "Scheduled",
-        updated_at: new Date().toISOString(),
+        commence_time_iso: commence.toISOString(),
+        source: `odds_api_${oddsProvider}`,
+        canonical_game_key: canonicalKey,
+      });
+
+      gameIdToDate.set(game.id, gameDate);
+      allGameDates.add(gameDate);
+    }
+
+    // ── 1c. Duplicate resolution ──
+    const resolved = resolveDuplicates(candidates);
+    // Also include candidates that don't have a canonical key (MLB with no team map)
+    const orphanCandidates = candidates.filter(c => !c.canonical_game_key);
+
+    // Fetch existing games_today rows for this sport + dates to preserve verification state
+    const { data: existingGames } = await supabase
+      .from("games_today")
+      .select("id, canonical_game_key, verification_status, source_secondary, source_primary")
+      .eq("sport", sport)
+      .in("game_date", [...allGameDates]);
+
+    const existingByKey = new Map<string, { verification_status: string; source_secondary: string | null }>();
+    const existingById = new Map<string, { verification_status: string; source_secondary: string | null }>();
+    for (const row of existingGames || []) {
+      if (row.canonical_game_key) existingByKey.set(row.canonical_game_key, row);
+      existingById.set(row.id, row);
+    }
+
+    // ── 1d. Build final upsert rows with all verification fields ──
+    const now = new Date().toISOString();
+    const gamesTodayRows: VerifiedGameRow[] = [];
+    let dupesMerged = 0;
+
+    for (const [key, { winner, dupeCount, mismatchFlags }] of resolved.entries()) {
+      if (dupeCount > 1) dupesMerged += dupeCount - 1;
+      const existing = existingByKey.get(key) || existingById.get(winner.id) || null;
+      const { verification_status, schedule_confidence, source_secondary } = computeVerification(winner, mismatchFlags, dupeCount, existing);
+      const { is_active, is_postponed } = deriveActiveFlags(winner.status);
+
+      gamesTodayRows.push({
+        id: winner.id,
+        sport: winner.sport,
+        game_date: winner.game_date,
+        home_team_abbr: winner.home_team_abbr,
+        away_team_abbr: winner.away_team_abbr,
+        game_time: winner.game_time,
+        status: winner.status,
+        canonical_game_key: key,
+        source_primary: `odds_api_${oddsProvider}`,
+        source_secondary,
+        verification_status,
+        schedule_confidence,
+        mismatch_flags: mismatchFlags.length > 0 ? mismatchFlags.map(f => ({ flag: f, detected_at: now })) : [],
+        is_active,
+        is_postponed,
+        last_verified_at: now,
+        updated_at: now,
       });
     }
+
+    // Handle orphan candidates (no canonical key — e.g. MLB without team map)
+    for (const c of orphanCandidates) {
+      const existing = existingById.get(c.id) || null;
+      const flags = ["missing_team_abbreviations"];
+      const { verification_status, schedule_confidence, source_secondary } = computeVerification(c, flags, 1, existing);
+      const { is_active, is_postponed } = deriveActiveFlags(c.status);
+
+      gamesTodayRows.push({
+        id: c.id,
+        sport: c.sport,
+        game_date: c.game_date,
+        home_team_abbr: c.home_team_abbr,
+        away_team_abbr: c.away_team_abbr,
+        game_time: c.game_time,
+        status: c.status,
+        canonical_game_key: null,
+        source_primary: `odds_api_${oddsProvider}`,
+        source_secondary,
+        verification_status,
+        schedule_confidence: Math.min(schedule_confidence, 40), // cap for orphans
+        mismatch_flags: flags.map(f => ({ flag: f, detected_at: now })),
+        is_active,
+        is_postponed,
+        last_verified_at: now,
+        updated_at: now,
+      });
+    }
+
     if (gamesTodayRows.length > 0) {
       const { error: gtErr } = await supabase
         .from("games_today")
-        .upsert(gamesTodayRows, { onConflict: "id" });
+        .upsert(gamesTodayRows as any[], { onConflict: "id" });
       if (gtErr) console.error("games_today upsert error:", gtErr);
-      else console.log(`Upserted ${gamesTodayRows.length} games_today rows`);
+      else console.log(`Upserted ${gamesTodayRows.length} games_today rows (${dupesMerged} dupes merged)`);
     }
 
-    // Build game_id → game_date map
-    const gameIdToDate = new Map<string, string>();
-    const allGameDates = new Set<string>();
-    for (const game of gamesData) {
-      const commence = new Date(game.commence_time);
-      const etDate = commence.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-      gameIdToDate.set(game.id, etDate);
-      allGameDates.add(etDate);
-    }
     console.log(`Game dates: ${[...allGameDates].sort().join(", ")}`);
 
-    // 2. Fetch existing snapshots for deduplication
+    // ── 2. Fetch existing snapshots for deduplication ──
     const { data: existingSnaps } = await supabase
       .from("line_snapshots")
       .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook, game_date")
@@ -249,7 +469,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Fetch player props for up to 5 games via get-odds
+    // ── 3. Fetch player props for up to 5 games via get-odds ──
     const newRows: any[] = [];
     let skippedDupes = 0;
     let gamesProcessed = 0;
@@ -279,19 +499,14 @@ serve(async (req) => {
         const propsData = propsResponse.data || [];
 
         for (const entry of propsData) {
-          // NBA/WNBA rewrite friendly labels; MLB stores raw market keys
-          // because score-mlb-anchors queries line_snapshots by market key.
           let statType: string | null;
           if (cfg.statRewrite === "passthrough") {
-            statType = MLB_ODDS_API_MARKETS.includes(entry.marketKey)
-              ? entry.marketKey
-              : null;
+            statType = MLB_ODDS_API_MARKETS.includes(entry.marketKey) ? entry.marketKey : null;
           } else {
             statType = cfg.statRewrite[entry.marketKey] ?? null;
           }
           if (!statType) continue;
 
-          // Group outcomes by player+point to get over/under pair
           const outcomesByPlayer: Record<string, { over?: string; under?: string; point?: number; player?: string }> = {};
           for (const o of entry.outcomes || []) {
             const desc = (o as any).description || o.name;
@@ -338,7 +553,7 @@ serve(async (req) => {
 
     console.log(`New snapshots: ${newRows.length}, skipped dupes: ${skippedDupes}, games: ${gamesProcessed}`);
 
-    // 4. Insert new snapshots in batches
+    // ── 4. Insert new snapshots in batches ──
     let insertErrors = 0;
     for (let i = 0; i < newRows.length; i += 200) {
       const batch = newRows.slice(i, i + 200);
@@ -349,13 +564,13 @@ serve(async (req) => {
       }
     }
 
-    // 5. Update refresh_status
+    // ── 5. Update refresh_status ──
     await supabase.from("refresh_status").upsert(
       { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
       { onConflict: "id" }
     );
 
-    // 6. Count total snapshots
+    // ── 6. Count total snapshots ──
     const { count: totalToday } = await supabase
       .from("line_snapshots")
       .select("id", { count: "exact", head: true })
@@ -366,7 +581,7 @@ serve(async (req) => {
       dateCounts[row.game_date] = (dateCounts[row.game_date] || 0) + 1;
     }
 
-    // 7. Chain pipeline
+    // ── 7. Chain pipeline ──
     const pipelineResults: Record<string, any> = {};
     const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
@@ -387,7 +602,6 @@ serve(async (req) => {
       }
 
       try {
-        // Route MLB to the new anchor scorer; NBA/WNBA stay on the legacy engine.
         const scoringFn = sport === "MLB" ? "score-mlb-anchors" : "prop-scoring-engine";
         console.log(`[${sport}] Pipeline: triggering ${scoringFn}...`);
         const scoreRes = await fetch(`${fnBase}/${scoringFn}`, {
@@ -414,6 +628,18 @@ serve(async (req) => {
       pipelineResults.skipped = "no games today or no games processed";
     }
 
+    // Verification summary for response
+    const verificationSummary = {
+      total_rows: gamesTodayRows.length,
+      dupes_merged: dupesMerged,
+      by_status: {
+        verified: gamesTodayRows.filter(r => r.verification_status === "verified").length,
+        unverified: gamesTodayRows.filter(r => r.verification_status === "unverified").length,
+        mismatch: gamesTodayRows.filter(r => r.verification_status === "mismatch").length,
+        missing_secondary: gamesTodayRows.filter(r => r.verification_status === "missing_secondary").length,
+      },
+    };
+
     const result = {
       ok: insertErrors === 0,
       game_dates: [...allGameDates].sort(),
@@ -425,6 +651,7 @@ serve(async (req) => {
       odds_provider: oddsProvider,
       odds_fallback: oddsFallback,
       odds_stale: oddsStale,
+      verification: verificationSummary,
       pipeline: pipelineResults,
       refreshed_at: new Date().toISOString(),
     };
