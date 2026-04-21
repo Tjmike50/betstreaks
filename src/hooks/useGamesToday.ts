@@ -35,7 +35,15 @@ function getEasternDateString(date: Date): string {
 export function useGamesToday(sportOverride?: SportKey) {
   const { sport: activeSport } = useSport();
   const sport = sportOverride ?? activeSport;
-  const todayStr = getLocalDateString(new Date());
+  const todayStr = getEasternDateString(new Date());
+
+  // Also include the next UTC date — late-night ET games (e.g. 10:40 PM ET
+  // tipoff) get stored with the next-day UTC date by the upstream feed.
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowUtcStr = tomorrow.toISOString().slice(0, 10);
+  const todayUtcStr = new Date().toISOString().slice(0, 10);
+  const candidateDates = Array.from(new Set([todayStr, todayUtcStr, tomorrowUtcStr]));
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["games-today", sport, todayStr],
