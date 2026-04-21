@@ -16,12 +16,20 @@ export interface GameToday {
   updated_at: string;
 }
 
-// Get local date in YYYY-MM-DD format
-function getLocalDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+// Get date string in YYYY-MM-DD format for the US Eastern timezone, which is
+// the canonical "slate day" for US sports. This avoids late-night ET games
+// (e.g. a 10:40 PM ET tip) being filed under tomorrow's UTC date.
+function getEasternDateString(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
+  const m = parts.find((p) => p.type === "month")?.value ?? "01";
+  const d = parts.find((p) => p.type === "day")?.value ?? "01";
+  return `${y}-${m}-${d}`;
 }
 
 export function useGamesToday(sportOverride?: SportKey) {
