@@ -2460,9 +2460,46 @@ export type Database = {
       }
     }
     Functions: {
+      complete_odds_source_run: {
+        Args: { p_request_count?: number; p_run_id: string }
+        Returns: undefined
+      }
+      create_odds_source_run: {
+        Args: { p_market_group: string; p_source_name: string; p_sport: string }
+        Returns: string
+      }
+      fail_odds_source_run: {
+        Args: {
+          p_error_text: string
+          p_request_count?: number
+          p_run_id: string
+        }
+        Returns: undefined
+      }
       import_nba_players_from_staging: { Args: never; Returns: Json }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      log_odds_raw_response: {
+        Args: {
+          p_endpoint: string
+          p_request_url: string
+          p_response_json: Json
+          p_source_name: string
+          p_source_run_id: string
+        }
+        Returns: string
+      }
       normalize_person_name: { Args: { input_text: string }; Returns: string }
+      resolve_nba_player_id: { Args: { p_full_name: string }; Returns: string }
+      upsert_nba_event: {
+        Args: {
+          p_away_team_abbreviation: string
+          p_commence_time: string
+          p_external_event_key: string
+          p_home_team_abbreviation: string
+          p_status?: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
