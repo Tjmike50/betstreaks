@@ -215,22 +215,19 @@ function computeVerification(
 
   confidence = Math.max(0, Math.min(100, confidence));
 
-  // If there's an existing row with a secondary source, preserve it
-  const sourceSecondary = existingRow?.source_secondary || (dupeCount > 1 ? "odds_api_duplicate" : null);
+  // Preserve existing source_secondary if set by verify-schedule
+  const sourceSecondary = existingRow?.source_secondary || null;
 
   let verificationStatus: string;
   if (mismatchFlags.length > 0) {
     verificationStatus = "mismatch";
-  } else if (!sourceSecondary) {
-    verificationStatus = "missing_secondary";
-  } else {
-    verificationStatus = "verified";
-  }
-
-  // If already verified by a previous pass and nothing conflicts, keep it
-  if (existingRow?.verification_status === "verified" && mismatchFlags.length === 0) {
+  } else if (existingRow?.verification_status === "verified" && mismatchFlags.length === 0) {
+    // Preserve verified status from a previous verify-schedule pass
     verificationStatus = "verified";
     confidence = Math.max(confidence, 85);
+  } else {
+    // Single source only — cannot claim verified; wait for verify-schedule
+    verificationStatus = "unverified";
   }
 
   return { verification_status: verificationStatus, schedule_confidence: confidence, source_secondary: sourceSecondary };
