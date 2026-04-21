@@ -160,6 +160,36 @@ serve(async (req) => {
 
     const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
+    // ── Step A2: Cross-source schedule verification ──
+    console.log(`[${sport}] Step A2: verify-schedule...`);
+    const stepA2Start = Date.now();
+
+    try {
+      const res = await fetch(`${fnBase}/verify-schedule`, {
+        method: "POST",
+        headers: svcHeaders,
+        body: JSON.stringify({ sports: [sport], game_date: todayET }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const body = await res.json();
+      const sportResult = body.sports?.[sport] || {};
+
+      results.schedule_verification = {
+        status: sportResult.error ? "failed" : "success",
+        duration_ms: Date.now() - stepA2Start,
+        verified: sportResult.verified,
+        mismatched: sportResult.mismatched,
+        missing_secondary: sportResult.missing_secondary,
+        secondary_only: sportResult.secondary_only,
+      };
+      console.log(`[${sport}] Step A2 done: ${sportResult.verified ?? 0} verified, ${sportResult.mismatched ?? 0} mismatched`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      allErrors.push(`${sport}.schedule_verification: ${msg}`);
+      results.schedule_verification = { status: "failed", duration_ms: Date.now() - stepA2Start, error: msg };
+      console.error(`[${sport}] Step A2 failed (non-fatal):`, msg);
+    }
+
     // ── Step B: Refresh availability ──
     console.log(`[${sport}] Step B: refresh-availability...`);
     const stepBStart = Date.now();
