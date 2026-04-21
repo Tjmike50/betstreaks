@@ -2487,6 +2487,10 @@ export type Database = {
       }
     }
     Functions: {
+      batch_try_ingest_nba_market_payloads: {
+        Args: { p_payloads: Json; p_source_name: string }
+        Returns: Json
+      }
       complete_odds_source_run: {
         Args: { p_request_count?: number; p_run_id: string }
         Returns: undefined
@@ -2504,6 +2508,8 @@ export type Database = {
         Returns: undefined
       }
       import_nba_players_from_staging: { Args: never; Returns: Json }
+      ingest_nba_event_payload: { Args: { p_payload: Json }; Returns: string }
+      ingest_nba_market_payload: { Args: { p_payload: Json }; Returns: string }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       log_odds_raw_response: {
         Args: {
@@ -2516,7 +2522,15 @@ export type Database = {
         Returns: string
       }
       normalize_person_name: { Args: { input_text: string }; Returns: string }
+      queue_unmatched_nba_market_payload: {
+        Args: { p_payload: Json; p_source_name: string }
+        Returns: string
+      }
       resolve_nba_player_id: { Args: { p_full_name: string }; Returns: string }
+      try_ingest_nba_market_payload: {
+        Args: { p_payload: Json; p_source_name: string }
+        Returns: Json
+      }
       upsert_nba_event: {
         Args: {
           p_away_team_abbreviation: string
@@ -2524,6 +2538,19 @@ export type Database = {
           p_external_event_key: string
           p_home_team_abbreviation: string
           p_status?: string
+        }
+        Returns: string
+      }
+      upsert_nba_market: {
+        Args: {
+          p_event_id: string
+          p_line: number
+          p_market_type: string
+          p_over_odds_american: number
+          p_player_name: string
+          p_source_updated_at?: string
+          p_sportsbook_key: string
+          p_under_odds_american: number
         }
         Returns: string
       }
