@@ -2485,6 +2485,41 @@ export type Database = {
           },
         ]
       }
+      player_market_board: {
+        Row: {
+          average_line: number | null
+          best_over_line: number | null
+          best_over_odds_american: number | null
+          best_over_sportsbook_name: string | null
+          best_under_line: number | null
+          best_under_odds_american: number | null
+          best_under_sportsbook_name: string | null
+          book_count: number | null
+          event_id: string | null
+          latest_source_updated_at: string | null
+          market_type: string | null
+          max_line: number | null
+          min_line: number | null
+          player_id: string | null
+          player_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "markets_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "markets_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       batch_try_ingest_nba_market_payloads: {
@@ -2506,6 +2541,26 @@ export type Database = {
           p_run_id: string
         }
         Returns: undefined
+      }
+      get_event_player_market_board: {
+        Args: { p_event_id: string }
+        Returns: {
+          average_line: number
+          best_over_line: number
+          best_over_odds_american: number
+          best_over_sportsbook_name: string
+          best_under_line: number
+          best_under_odds_american: number
+          best_under_sportsbook_name: string
+          book_count: number
+          event_id: string
+          latest_source_updated_at: string
+          market_type: string
+          max_line: number
+          min_line: number
+          player_id: string
+          player_name: string
+        }[]
       }
       import_nba_players_from_staging: { Args: never; Returns: Json }
       ingest_nba_event_payload: { Args: { p_payload: Json }; Returns: string }
