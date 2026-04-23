@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useSport } from "@/contexts/SportContext";
 
 interface GameCardProps {
   id: string;
@@ -14,10 +15,22 @@ interface GameCardProps {
   gameTime: string | null;
 }
 
-const getTeamLogoUrl = (teamAbbr: string | null) => {
+/**
+ * Sport-aware team logo URL. Falls back to ESPN CDN paths per league.
+ */
+function getTeamLogoUrl(sport: string, teamAbbr: string | null): string | null {
   if (!teamAbbr) return null;
-  return `https://a.espncdn.com/i/teamlogos/nba/500/${teamAbbr.toLowerCase()}.png`;
-};
+  const abbr = teamAbbr.toLowerCase();
+  switch (sport.toUpperCase()) {
+    case "MLB":
+      return `https://a.espncdn.com/i/teamlogos/mlb/500/${abbr}.png`;
+    case "WNBA":
+      return `https://a.espncdn.com/i/teamlogos/wnba/500/${abbr}.png`;
+    case "NBA":
+    default:
+      return `https://a.espncdn.com/i/teamlogos/nba/500/${abbr}.png`;
+  }
+}
 
 type GameStatus = "final" | "live" | "scheduled";
 
@@ -41,6 +54,7 @@ export function GameCard({
   gameTime,
 }: GameCardProps) {
   const navigate = useNavigate();
+  const { sport } = useSport();
 
   const handleTeamClick = (teamAbbr: string | null, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -68,7 +82,7 @@ export function GameCard({
             >
               <Avatar className="h-8 w-8">
                 <AvatarImage 
-                  src={getTeamLogoUrl(awayTeamAbbr)} 
+                  src={getTeamLogoUrl(sport, awayTeamAbbr) ?? undefined} 
                   alt={awayTeamAbbr || "Away team"} 
                 />
                 <AvatarFallback className="text-xs font-medium bg-muted">
@@ -90,7 +104,7 @@ export function GameCard({
             >
               <Avatar className="h-8 w-8">
                 <AvatarImage 
-                  src={getTeamLogoUrl(homeTeamAbbr)} 
+                  src={getTeamLogoUrl(sport, homeTeamAbbr) ?? undefined} 
                   alt={homeTeamAbbr || "Home team"} 
                 />
                 <AvatarFallback className="text-xs font-medium bg-muted">
