@@ -1196,14 +1196,12 @@ serve(async (req) => {
       if (homeAbbr) teamsPlayingToday.add(homeAbbr);
       if (awayAbbr) teamsPlayingToday.add(awayAbbr);
     }
-    // Query games_today with a date range to handle UTC vs local timezone mismatch
-    const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-    const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split("T")[0];
-    const { data: gamesTodayRows } = await serviceClient.from("games_today")
-      .select("id, home_team_abbr, away_team_abbr, game_date")
-      .gte("game_date", yesterdayStr)
-      .lte("game_date", tomorrowStr);
-    for (const g of gamesTodayRows || []) {
+    // Use trusted verified slate for the operational ET date
+    const { data: gamesTodayRows } = await serviceClient.rpc("get_trusted_games_today", {
+      p_sport: sport.toUpperCase(),
+      p_timezone: "America/New_York",
+    });
+    for (const g of (gamesTodayRows as any[]) || []) {
       if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
       if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
     }
