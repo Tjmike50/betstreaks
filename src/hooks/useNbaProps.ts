@@ -53,11 +53,17 @@ export function useNbaProps({ enabled = true }: UseNbaPropsOptions = {}) {
   });
 }
 
-/** Aggregate prop rows into per-game summaries */
-export function summarizeByGame(rows: NbaPropRow[]): Map<string, GamePropSummary> {
+/** Build a matchup key from team abbreviations for cross-table matching */
+export function matchupKey(awayAbbr: string, homeAbbr: string): string {
+  return `${awayAbbr}@${homeAbbr}`;
+}
+
+/** Aggregate prop rows into per-matchup summaries (keyed by "AWAY@HOME") */
+export function summarizeByMatchup(rows: NbaPropRow[]): Map<string, GamePropSummary> {
   const map = new Map<string, GamePropSummary>();
   for (const r of rows) {
-    let entry = map.get(r.event_id);
+    const key = matchupKey(r.away_team_abbr, r.home_team_abbr);
+    let entry = map.get(key);
     if (!entry) {
       entry = {
         eventId: r.event_id,
@@ -67,7 +73,7 @@ export function summarizeByGame(rows: NbaPropRow[]): Map<string, GamePropSummary
         playerCount: 0,
         marketTypes: [],
       };
-      map.set(r.event_id, entry);
+      map.set(key, entry);
     }
     entry.propCount++;
     if (!entry.marketTypes.includes(r.market_type)) {
@@ -75,8 +81,12 @@ export function summarizeByGame(rows: NbaPropRow[]): Map<string, GamePropSummary
     }
   }
   // compute distinct player counts
-  for (const [eventId, entry] of map) {
-    const players = new Set(rows.filter(r => r.event_id === eventId).map(r => r.player_id));
+  for (const [key, entry] of map) {
+    const players = new Set(
+      rows
+        .filter((r) => matchupKey(r.away_team_abbr, r.home_team_abbr) === key)
+        .map((r) => r.player_id),
+    );
     entry.playerCount = players.size;
   }
   return map;
