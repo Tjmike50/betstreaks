@@ -1,15 +1,11 @@
 // =============================================================================
 // StreakDetailPage — sportsbook-line-first.
 //
-// We no longer read from the legacy `streaks` table by id. Instead we resolve
-// the requested (player, stat) against today's `line_snapshots`, build a
-// `Streak` row on the fly using the same logic as `useLineFirstStreaks`, and
-// render it.
+// NBA: resolves (player, stat) against today's `get_today_nba_props` RPC.
+// MLB/WNBA: falls back to legacy `line_snapshots` until their normalized
+// layers are wired.
 //
-// Team streaks are intentionally NOT supported in this surface for now — see
-// the explicit early-return below. Until we ship a team-line-first model
-// (team totals / spreads / ML lines), surfacing legacy team milestone streaks
-// here would contradict the rest of the app.
+// Team streaks are intentionally NOT supported in this surface for now.
 // =============================================================================
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -28,6 +24,7 @@ import {
   mlbHitterValue,
   mlbPitcherValue,
   nbaStatValue,
+  type BookableLine,
   type LineSnapshotRow,
   type MlbHitterLog,
   type MlbPitcherLog,
@@ -36,6 +33,26 @@ import {
 
 const MLB_HITTER_CODES = new Set(["HITS", "TOTAL_BASES", "HOME_RUNS"]);
 const MLB_PITCHER_CODES = new Set(["STRIKEOUTS", "EARNED_RUNS_ALLOWED", "WALKS_ALLOWED", "HITS_ALLOWED"]);
+
+const MARKET_TYPE_TO_STAT_CODE: Record<string, string> = {
+  player_points: "PTS",
+  player_rebounds: "REB",
+  player_assists: "AST",
+  player_threes: "3PM",
+  player_blocks: "BLK",
+  player_steals: "STL",
+};
+
+interface NbaPropRow {
+  player_name: string;
+  market_type: string;
+  line: number | null;
+  book_count: number | null;
+}
+
+function roundToNearestHalf(value: number): number {
+  return Math.round(value * 2) / 2;
+}
 
 const StreakDetailPage = () => {
   const [searchParams] = useSearchParams();
