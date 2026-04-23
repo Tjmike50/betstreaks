@@ -1,10 +1,9 @@
 // =============================================================================
 // useLineFirstStreaks — sportsbook-line-first replacement for useStreaks.
 //
-// Source of truth: line_snapshots (today). For every (player, stat_code)
-// with a real bookable line we fetch recent game logs and compute the
-// streak / hit-rate vs the actual book threshold. The legacy `streaks`
-// table (integer-milestone streaks) is no longer the user-facing default.
+// NBA source of truth: get_today_nba_props RPC (internal normalized odds layer).
+// WNBA / MLB fallback: legacy line_snapshots path until their normalized layers
+// are wired the same way.
 // =============================================================================
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,7 +37,132 @@ interface PlayerTeamRow {
   team_abbr: string | null;
 }
 
-async function loadBookableLines(sport: SportKey, daysBack = 1): Promise<BookableLine[]> {
+interface NbaPropRow {
+  event_id: string;
+  player_id: string;
+  player_name: string;
+  market_type: string;
+  line: number | null;
+  book_count: number | null;
+  home_team_abbr: string | null;
+  away_team_abbr: string | null;
+  commence_time: string | null;
+}
+
+const MARKET_TYPE_TO_STAT_CODE: Record<string, string> = {
+  player_points: "PTS",
+  player_rebounds: "REB",
+  player_assists: "AST",
+  player_threes: "3PM",
+  player_blocks: "BLK",
+  player_steals: "STL",
+};
+
+function getETDate(): string {
+  return new Date().toLocaleDateString("en-CA", {
+    timeZone: "America/New_York",
+  });
+}
+
+function roundToNearestHalf(value: number): number {
+  return Math.round(value * 2) / 2;
+}
+
+async function attachLatestNumericPlayerIdsByName(playerNames: string[]): Promise<Map<string, number>> {
+  if (playerNames.length === 0) return new Map();
+
+  const uniqueNames = [...new Set(playerNames.filter(Boolean))];
+  const { data, error } = await supabase
+    .from("player_recent_games")
+    .select("player_id, player_name, game_date")
+    .in("player_name", uniqueNames)
+    .order("game_date", { ascending: false })
+    .limit(10000);
+
+  if (error) throw error;
+
+  const out = new Map<string, number>();
+  for (const row of (data ?? []) as {
+    player_id: number;
+    player_name: string;
+    game_date: string;
+  }[]) {
+    if (!out.has(row.player_name) && row.player_id != null) {
+      out.set(row.player_name, row.player_id);
+    }
+  }
+  return out;
+}
+
+async function loadNbaBookableLinesFromRpc(): Promise<BookableLine[]> {
+  const { data, error } = await supabase.rpc("get_today_nba_props");
+  if (error) throw error;
+
+  const rows = ((data ?? []) as unknown as NbaPropRow[]).filter(
+    (row) =>
+      !!row.player_name &&
+      !!row.market_type &&
+      row.line != null &&
+      Number.isFinite(Number(row.line)) &&
+      !!MARKET_TYPE_TO_STAT_CODE[row.market_type],
+  );
+
+  if (rows.length === 0) return [];
+
+  const numericIdByName = await attachLatestNumericPlayerIdsByName(rows.map((row) => row.player_name));
+
+  // Deduplicate by player_name + market_type and keep the row with the highest
+  // book_count, then latest commence_time as a tiebreaker.
+  const byKey = new Map<string, NbaPropRow>();
+  for (const row of rows) {
+    const key = `${row.player_name}__${row.market_type}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, row);
+      continue;
+    }
+
+    const prevBooks = Number(prev.book_count ?? 0);
+    const nextBooks = Number(row.book_count ?? 0);
+
+    if (nextBooks > prevBooks) {
+      byKey.set(key, row);
+      continue;
+    }
+
+    if (nextBooks === prevBooks && (row.commence_time ?? "") > (prev.commence_time ?? "")) {
+      byKey.set(key, row);
+    }
+  }
+
+  const today = getETDate();
+  const lines: BookableLine[] = [];
+
+  for (const row of byKey.values()) {
+    const numericPlayerId = numericIdByName.get(row.player_name);
+    if (numericPlayerId == null) continue;
+
+    lines.push({
+      player_id: numericPlayerId,
+      player_name: row.player_name,
+      stat_code: MARKET_TYPE_TO_STAT_CODE[row.market_type],
+      main_threshold: roundToNearestHalf(Number(row.line)),
+      game_date: today,
+      books_count: Number(row.book_count ?? 0),
+    } as BookableLine);
+  }
+
+  lines.sort((a, b) => {
+    if ((a.game_date ?? "") !== (b.game_date ?? "")) {
+      return (a.game_date ?? "") < (b.game_date ?? "") ? 1 : -1;
+    }
+    return Number(b.books_count ?? 0) - Number(a.books_count ?? 0);
+  });
+
+  return lines.slice(0, MAX_LINES_PER_SPORT);
+}
+
+async function loadBookableLinesFromSnapshots(sport: SportKey, daysBack = 1): Promise<BookableLine[]> {
   const since = new Date();
   since.setDate(since.getDate() - daysBack);
   const sinceDate = since.toISOString().slice(0, 10);
@@ -48,33 +172,38 @@ async function loadBookableLines(sport: SportKey, daysBack = 1): Promise<Bookabl
     .select("player_id, player_name, stat_type, threshold, game_date, sportsbook")
     .gte("game_date", sinceDate)
     .limit(20000);
+
   if (error) throw error;
 
-  const allowed =
-    sport === "MLB"
-      ? new Set([...MLB_HITTER_CODES, ...MLB_PITCHER_CODES])
-      : NBA_CODES; // NBA + WNBA share the same per-stat codes
+  const allowed = sport === "MLB" ? new Set([...MLB_HITTER_CODES, ...MLB_PITCHER_CODES]) : NBA_CODES; // WNBA shares the same per-stat codes as NBA on this legacy path
 
   const filtered = (data ?? []) as LineSnapshotRow[];
   const lines = buildBookableLines(filtered).filter((l) => allowed.has(l.stat_code));
-  // sort by recency + book coverage so we keep the most actionable
+
   lines.sort((a, b) => {
     if (a.game_date !== b.game_date) return a.game_date < b.game_date ? 1 : -1;
     return b.books_count - a.books_count;
   });
+
   return lines.slice(0, MAX_LINES_PER_SPORT);
 }
 
-async function attachTeamAbbrs(
-  playerIds: number[],
-  sport: SportKey,
-): Promise<Map<number, string | null>> {
+async function loadBookableLines(sport: SportKey, daysBack = 1): Promise<BookableLine[]> {
+  // NBA is now sourced from the normalized internal RPC.
+  if (sport === "NBA") {
+    return loadNbaBookableLinesFromRpc();
+  }
+
+  // WNBA / MLB remain on the legacy snapshot path until their normalized
+  // internal sources are wired up.
+  return loadBookableLinesFromSnapshots(sport, daysBack);
+}
+
+async function attachTeamAbbrs(playerIds: number[], sport: SportKey): Promise<Map<number, string | null>> {
   if (playerIds.length === 0) return new Map();
   const map = new Map<number, string | null>();
 
   if (sport === "MLB") {
-    // mlb_player_profiles → mlb_team_id; we don't have a team_abbr column there,
-    // so fall back to the most recent game log's team via games_today.
     const { data } = await supabase
       .from("player_prop_scores")
       .select("player_id, team_abbr")
@@ -82,6 +211,7 @@ async function attachTeamAbbrs(
       .eq("sport", "MLB")
       .order("scored_at", { ascending: false })
       .limit(2000);
+
     for (const row of (data ?? []) as PlayerTeamRow[]) {
       if (!map.has(row.player_id) && row.team_abbr) {
         map.set(row.player_id, row.team_abbr);
@@ -94,12 +224,17 @@ async function attachTeamAbbrs(
       .in("player_id", playerIds)
       .order("game_date", { ascending: false })
       .limit(5000);
-    for (const row of (data ?? []) as { player_id: number; team_abbr: string | null }[]) {
+
+    for (const row of (data ?? []) as {
+      player_id: number;
+      team_abbr: string | null;
+    }[]) {
       if (!map.has(row.player_id) && row.team_abbr) {
         map.set(row.player_id, row.team_abbr);
       }
     }
   }
+
   return map;
 }
 
@@ -113,6 +248,7 @@ async function buildNbaStreaks(lines: BookableLine[], sport: SportKey): Promise<
     .in("player_id", ids)
     .order("game_date", { ascending: false })
     .limit(10000);
+
   if (error) throw error;
 
   const byPlayer = new Map<number, NbaGameLog[]>();
@@ -130,6 +266,7 @@ async function buildNbaStreaks(lines: BookableLine[], sport: SportKey): Promise<
     if (line.player_id == null) continue;
     const games = byPlayer.get(line.player_id) ?? [];
     if (games.length === 0) continue;
+
     const dates = games.map((g) => g.game_date);
     const values = games.map((g) => nbaStatValue(g, line.stat_code));
     const splits = computeLineSplits(values, dates, line.main_threshold);
@@ -165,6 +302,7 @@ async function buildNbaStreaks(lines: BookableLine[], sport: SportKey): Promise<
       book_informational: false,
     });
   }
+
   return out;
 }
 
@@ -192,17 +330,23 @@ async function buildMlbStreaks(lines: BookableLine[]): Promise<Streak[]> {
           .limit(10000)
       : Promise.resolve({ data: [], error: null }),
   ]);
+
   if (hitterLogsRes.error) throw hitterLogsRes.error;
   if (pitcherLogsRes.error) throw pitcherLogsRes.error;
 
   const hitterByPlayer = new Map<number, MlbHitterLog[]>();
-  for (const row of (hitterLogsRes.data ?? []) as (MlbHitterLog & { player_id: number })[]) {
+  for (const row of (hitterLogsRes.data ?? []) as (MlbHitterLog & {
+    player_id: number;
+  })[]) {
     const arr = hitterByPlayer.get(row.player_id) ?? [];
     arr.push(row);
     hitterByPlayer.set(row.player_id, arr);
   }
+
   const pitcherByPlayer = new Map<number, MlbPitcherLog[]>();
-  for (const row of (pitcherLogsRes.data ?? []) as (MlbPitcherLog & { player_id: number })[]) {
+  for (const row of (pitcherLogsRes.data ?? []) as (MlbPitcherLog & {
+    player_id: number;
+  })[]) {
     const arr = pitcherByPlayer.get(row.player_id) ?? [];
     arr.push(row);
     pitcherByPlayer.set(row.player_id, arr);
@@ -215,7 +359,8 @@ async function buildMlbStreaks(lines: BookableLine[]): Promise<Streak[]> {
 
   const push = (line: BookableLine, splits: ReturnType<typeof computeLineSplits>) => {
     if (splits.season_games === 0) return;
-    const team_abbr = line.player_id != null ? teamMap.get(line.player_id) ?? null : null;
+    const team_abbr = line.player_id != null ? (teamMap.get(line.player_id) ?? null) : null;
+
     out.push({
       id: `lf-mlb-${line.player_id}-${line.stat_code}-${line.main_threshold}`,
       player_id: line.player_id ?? 0,
@@ -255,6 +400,7 @@ async function buildMlbStreaks(lines: BookableLine[]): Promise<Streak[]> {
     );
     push(line, splits);
   }
+
   for (const line of pitcherLines) {
     if (line.player_id == null) continue;
     const games = pitcherByPlayer.get(line.player_id) ?? [];
@@ -269,13 +415,8 @@ async function buildMlbStreaks(lines: BookableLine[]): Promise<Streak[]> {
   return out;
 }
 
-function applyFiltersAndSort(
-  rows: Streak[],
-  filters: StreakFilters,
-  sport: SportKey,
-): Streak[] {
+function applyFiltersAndSort(rows: Streak[], filters: StreakFilters, sport: SportKey): Streak[] {
   let out = rows.filter((s) => {
-    // Sport-aware team scope (postseason, in-league)
     if (s.team_abbr) {
       if (!isLeagueTeam(sport, s.team_abbr)) return false;
       if (!isInScopeTeam(sport, s.team_abbr)) return false;
@@ -312,17 +453,15 @@ function applyFiltersAndSort(
     out = out.filter((s) => s.last_game >= cutoff);
   }
   if (filters.bestBets) {
-    out = out.filter(
-      (s) =>
-        s.streak_len >= 3 &&
-        (s.season_win_pct >= 55 || (s.last10_hit_pct ?? 0) >= 60),
-    );
+    out = out.filter((s) => s.streak_len >= 3 && (s.season_win_pct >= 55 || (s.last10_hit_pct ?? 0) >= 60));
   }
 
   out.sort((a, b) => {
     switch (filters.sortBy) {
       case "season":
-        if (b.season_win_pct !== a.season_win_pct) return b.season_win_pct - a.season_win_pct;
+        if (b.season_win_pct !== a.season_win_pct) {
+          return b.season_win_pct - a.season_win_pct;
+        }
         return b.streak_len - a.streak_len;
       case "l10": {
         const aL10 = a.last10_hit_pct ?? 0;
@@ -340,7 +479,9 @@ function applyFiltersAndSort(
       case "streak":
       default:
         if (b.streak_len !== a.streak_len) return b.streak_len - a.streak_len;
-        if (b.season_win_pct !== a.season_win_pct) return b.season_win_pct - a.season_win_pct;
+        if (b.season_win_pct !== a.season_win_pct) {
+          return b.season_win_pct - a.season_win_pct;
+        }
         return b.last_game.localeCompare(a.last_game);
     }
   });
@@ -349,13 +490,13 @@ function applyFiltersAndSort(
 }
 
 /**
- * Sportsbook-line-first streaks. Replaces the legacy generic-integer streak
- * surface across StreaksPage / Hot Streaks / Watchlist / detail pages.
+ * Sportsbook-line-first streaks.
+ *
+ * NBA now uses the internal normalized props RPC.
+ * WNBA / MLB still use the legacy snapshot path until their normalized
+ * equivalents are wired.
  */
-export function useLineFirstStreaks(
-  filters: StreakFilters,
-  sportOverride?: SportKey,
-) {
+export function useLineFirstStreaks(filters: StreakFilters, sportOverride?: SportKey) {
   const { sport: activeSport } = useSport();
   const sport = sportOverride ?? activeSport;
 
@@ -363,14 +504,13 @@ export function useLineFirstStreaks(
     queryKey: ["lineFirstStreaks", sport, filters],
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      // Team streaks aren't bookable per-player → empty result for now.
       if (filters.entityType === "team") return [];
 
       const lines = await loadBookableLines(sport);
       if (lines.length === 0) return [];
 
-      const rows =
-        sport === "MLB" ? await buildMlbStreaks(lines) : await buildNbaStreaks(lines, sport);
+      const rows = sport === "MLB" ? await buildMlbStreaks(lines) : await buildNbaStreaks(lines, sport);
+
       return applyFiltersAndSort(rows, filters, sport);
     },
   });
