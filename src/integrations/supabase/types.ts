@@ -2445,6 +2445,95 @@ export type Database = {
           },
         ]
       }
+      games_today_trusted: {
+        Row: {
+          away_score: number | null
+          away_team_abbr: string | null
+          canonical_game_key: string | null
+          game_date: string | null
+          game_time: string | null
+          home_score: number | null
+          home_team_abbr: string | null
+          id: string | null
+          is_active: boolean | null
+          is_postponed: boolean | null
+          last_verified_at: string | null
+          mismatch_flags: Json | null
+          schedule_confidence: number | null
+          source_primary: string | null
+          source_secondary: string | null
+          sport: string | null
+          status: string | null
+          updated_at: string | null
+          verification_status: string | null
+        }
+        Insert: {
+          away_score?: number | null
+          away_team_abbr?: string | null
+          canonical_game_key?: string | null
+          game_date?: string | null
+          game_time?: string | null
+          home_score?: number | null
+          home_team_abbr?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          is_postponed?: boolean | null
+          last_verified_at?: string | null
+          mismatch_flags?: Json | null
+          schedule_confidence?: number | null
+          source_primary?: string | null
+          source_secondary?: string | null
+          sport?: string | null
+          status?: string | null
+          updated_at?: string | null
+          verification_status?: string | null
+        }
+        Update: {
+          away_score?: number | null
+          away_team_abbr?: string | null
+          canonical_game_key?: string | null
+          game_date?: string | null
+          game_time?: string | null
+          home_score?: number | null
+          home_team_abbr?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          is_postponed?: boolean | null
+          last_verified_at?: string | null
+          mismatch_flags?: Json | null
+          schedule_confidence?: number | null
+          source_primary?: string | null
+          source_secondary?: string | null
+          sport?: string | null
+          status?: string | null
+          updated_at?: string | null
+          verification_status?: string | null
+        }
+        Relationships: []
+      }
+      games_today_trusted_et: {
+        Row: {
+          away_score: number | null
+          away_team_abbr: string | null
+          canonical_game_key: string | null
+          game_date: string | null
+          game_time: string | null
+          home_score: number | null
+          home_team_abbr: string | null
+          id: string | null
+          is_active: boolean | null
+          is_postponed: boolean | null
+          last_verified_at: string | null
+          schedule_confidence: number | null
+          source_primary: string | null
+          source_secondary: string | null
+          sport: string | null
+          status: string | null
+          updated_at: string | null
+          verification_status: string | null
+        }
+        Relationships: []
+      }
       line_movement_summary: {
         Row: {
           current_over_line: number | null
@@ -2526,6 +2615,19 @@ export type Database = {
         Args: { p_payloads: Json; p_source_name: string }
         Returns: Json
       }
+      betstreaks_operational_date: {
+        Args: { p_timezone?: string }
+        Returns: string
+      }
+      build_games_today_canonical_key: {
+        Args: {
+          p_away_team_abbr: string
+          p_game_date: string
+          p_home_team_abbr: string
+          p_sport: string
+        }
+        Returns: string
+      }
       complete_odds_source_run: {
         Args: { p_request_count?: number; p_run_id: string }
         Returns: undefined
@@ -2541,6 +2643,25 @@ export type Database = {
           p_run_id: string
         }
         Returns: undefined
+      }
+      finalize_games_today_verification: {
+        Args: { p_game_date?: string; p_sport?: string }
+        Returns: {
+          active_rows: number
+          inactive_rows: number
+          processed_rows: number
+        }[]
+      }
+      games_today_verification_rank: {
+        Args: {
+          p_is_postponed: boolean
+          p_last_verified_at: string
+          p_schedule_confidence: number
+          p_source_secondary: string
+          p_updated_at: string
+          p_verification_status: string
+        }
+        Returns: number
       }
       get_event_player_market_board: {
         Args: { p_event_id: string }
@@ -2560,6 +2681,29 @@ export type Database = {
           min_line: number
           player_id: string
           player_name: string
+        }[]
+      }
+      get_trusted_games_today: {
+        Args: { p_sport?: string; p_target_date?: string; p_timezone?: string }
+        Returns: {
+          away_score: number
+          away_team_abbr: string
+          canonical_game_key: string
+          game_date: string
+          game_time: string
+          home_score: number
+          home_team_abbr: string
+          id: string
+          is_active: boolean
+          is_postponed: boolean
+          last_verified_at: string
+          schedule_confidence: number
+          source_primary: string
+          source_secondary: string
+          sport: string
+          status: string
+          updated_at: string
+          verification_status: string
         }[]
       }
       import_nba_players_from_staging: { Args: never; Returns: Json }
