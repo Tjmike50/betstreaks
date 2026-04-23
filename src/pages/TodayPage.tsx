@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { useGamesToday } from "@/hooks/useGamesToday";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { useSport } from "@/contexts/SportContext";
-import { useNbaProps, summarizeByGame } from "@/hooks/useNbaProps";
+import { useNbaProps, summarizeByMatchup, matchupKey } from "@/hooks/useNbaProps";
 import { useLineMovement, indexMovement } from "@/hooks/useLineMovement";
 import { GameCard } from "@/components/GameCard";
 import { GamePropsPanel } from "@/components/GamePropsPanel";
@@ -23,7 +23,7 @@ export default function TodayPage() {
   const [searchParams] = useSearchParams();
   const isNba = sportConfig.key === "NBA";
   const { data: propRows } = useNbaProps({ enabled: isNba });
-  const propsByGame = propRows ? summarizeByGame(propRows) : new Map();
+  const propsByMatchup = propRows ? summarizeByMatchup(propRows) : new Map();
 
   // Line movement for all today's NBA events
   const eventIds = propRows ? [...new Set(propRows.map((r) => r.event_id))] : [];
@@ -45,7 +45,6 @@ export default function TodayPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      {/* Header */}
       <header className="sticky top-0 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
@@ -53,13 +52,7 @@ export default function TodayPage() {
               <Calendar className="h-5 w-5 text-primary" />
               <h1 className="text-xl font-bold">Today's Games</h1>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={refetch}
-              disabled={isFetching}
-              className="h-8 w-8"
-            >
+            <Button variant="ghost" size="icon" onClick={refetch} disabled={isFetching} className="h-8 w-8">
               <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
             </Button>
           </div>
@@ -69,16 +62,12 @@ export default function TodayPage() {
         </div>
       </header>
 
-      {/* Early Access Banner */}
       <EarlyAccessBanner />
 
-      {/* Content */}
       <main className="px-4 py-4">
         {isLoading ? (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground text-center py-2">
-              Loading today's games...
-            </p>
+            <p className="text-sm text-muted-foreground text-center py-2">Loading today's games...</p>
             {[...Array(5)].map((_, i) => (
               <Skeleton key={i} className="h-20 w-full rounded-lg" />
             ))}
@@ -99,8 +88,7 @@ export default function TodayPage() {
             <p className="text-lg font-medium">No {sportConfig.shortName} games scheduled</p>
             <p className="text-sm text-muted-foreground mt-1">for {todayFormatted}</p>
             <p className="text-xs text-muted-foreground mt-3">
-              {refreshLastRun ? `Last updated: ${refreshStatusTime}` : "Waiting for data refresh"} •{" "}
-              {season} Season
+              {refreshLastRun ? `Last updated: ${refreshStatusTime}` : "Waiting for data refresh"} • {season} Season
             </p>
             <div className="flex items-center gap-2 mt-4">
               <Button variant="outline" size="sm" onClick={refetch} disabled={isFetching}>
@@ -122,10 +110,15 @@ export default function TodayPage() {
           <>
             <div className="divide-y divide-border rounded-lg overflow-hidden border border-border">
               {games.map((game) => {
-                const summary = propsByGame.get(game.id);
+                const mKey = game.away_team_abbr && game.home_team_abbr
+                  ? matchupKey(game.away_team_abbr, game.home_team_abbr)
+                  : null;
+                const summary = mKey ? propsByMatchup.get(mKey) : undefined;
                 const isExpanded = expandedGame === game.id;
-                const gameProps = isNba && propRows
-                  ? propRows.filter((r) => r.event_id === game.id)
+                const gameProps = isNba && propRows && mKey
+                  ? propRows.filter(
+                      (r) => matchupKey(r.away_team_abbr, r.home_team_abbr) === mKey,
+                    )
                   : [];
                 const hasProps = gameProps.length > 0;
 
@@ -160,11 +153,7 @@ export default function TodayPage() {
                           {summary.marketTypes.length} markets
                         </Badge>
                         <span className="ml-auto text-muted-foreground">
-                          {isExpanded ? (
-                            <ChevronUp className="h-4 w-4" />
-                          ) : (
-                            <ChevronDown className="h-4 w-4" />
-                          )}
+                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </span>
                       </div>
                     )}
