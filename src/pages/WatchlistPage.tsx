@@ -60,8 +60,8 @@ export default function WatchlistPage() {
     removeOfflineKey
   } = useWatchlist();
 
-  // Sportsbook-line-first: match watchlist items against live line-first
-  // streaks (built from line_snapshots) instead of the legacy streaks table.
+  // Sportsbook-line-first: match watchlist items against live lines.
+  // NBA uses get_today_nba_props RPC; MLB/WNBA fall back to line_snapshots.
   const { data: watchlistData, isLoading, error } = useQuery({
     queryKey: ["watchlist-line-first", userId, sport],
     queryFn: async (): Promise<WatchlistData> => {
@@ -69,23 +69,22 @@ export default function WatchlistPage() {
 
       const { buildBookableLines, computeLineSplits, mlbHitterValue, mlbPitcherValue, nbaStatValue } = await import("@/lib/lineFirstStreaks");
 
-      const since = new Date();
-      since.setDate(since.getDate() - 1);
-      const sinceDate = since.toISOString().slice(0, 10);
+      const MARKET_TYPE_TO_STAT_CODE: Record<string, string> = {
+        player_points: "PTS",
+        player_rebounds: "REB",
+        player_assists: "AST",
+        player_threes: "3PM",
+        player_blocks: "BLK",
+        player_steals: "STL",
+      };
 
-      const [watchlistResult, linesResult] = await Promise.all([
-        supabase
-          .from("watchlist_items")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("sport", sport)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("line_snapshots")
-          .select("player_id, player_name, stat_type, threshold, game_date, sportsbook")
-          .gte("game_date", sinceDate)
-          .limit(20000),
-      ]);
+      // Fetch watchlist items
+      const watchlistResult = await supabase
+        .from("watchlist_items")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("sport", sport)
+        .order("created_at", { ascending: false });
 
       if (watchlistResult.error) throw watchlistResult.error;
       const watchlistItems = (watchlistResult.data ?? []) as WatchlistItem[];
@@ -93,11 +92,63 @@ export default function WatchlistPage() {
         return { activeItems: [], inactiveItems: [] };
       }
 
-      const bookableLines = buildBookableLines((linesResult.data ?? []) as Parameters<typeof buildBookableLines>[0]);
-      // Index lines by player_id|stat for fast lookup
+      // Build bookable lines index — sport-aware
+      type BookLine = ReturnType<typeof buildBookableLines>[number];
+      let bookableLines: BookLine[] = [];
+
+      if (sport === "NBA") {
+        // Use normalized internal RPC
+        const { data: rpcData, error: rpcErr } = await supabase.rpc("get_today_nba_props");
+        if (rpcErr) throw rpcErr;
+
+        interface RpcRow { player_name: string; market_type: string; line: number | null; book_count: number | null; }
+        const rpcRows = ((rpcData ?? []) as unknown as RpcRow[]).filter(
+          (r) => r.player_name && r.market_type && r.line != null && !!MARKET_TYPE_TO_STAT_CODE[r.market_type],
+        );
+
+        // Deduplicate by player_name+market_type, keep highest book_count
+        const byKey = new Map<string, RpcRow>();
+        for (const row of rpcRows) {
+          const key = `${row.player_name}__${row.market_type}`;
+          const prev = byKey.get(key);
+          if (!prev || Number(row.book_count ?? 0) > Number(prev.book_count ?? 0)) {
+            byKey.set(key, row);
+          }
+        }
+
+        const roundHalf = (v: number) => Math.round(v * 2) / 2;
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+        bookableLines = [...byKey.values()].map((r) => ({
+          player_id: null as number | null,
+          player_name: r.player_name,
+          stat_code: MARKET_TYPE_TO_STAT_CODE[r.market_type],
+          main_threshold: roundHalf(Number(r.line)),
+          alt_thresholds: [] as number[],
+          books_count: Number(r.book_count ?? 0),
+          game_date: today,
+        }));
+      } else {
+        // MLB / WNBA: legacy line_snapshots
+        const since = new Date();
+        since.setDate(since.getDate() - 1);
+        const sinceDate = since.toISOString().slice(0, 10);
+
+        const linesResult = await supabase
+          .from("line_snapshots")
+          .select("player_id, player_name, stat_type, threshold, game_date, sportsbook")
+          .gte("game_date", sinceDate)
+          .limit(20000);
+
+        bookableLines = buildBookableLines((linesResult.data ?? []) as Parameters<typeof buildBookableLines>[0]);
+      }
+
+      // Index lines by player_name|stat for fast lookup
       const lineByKey = new Map<string, typeof bookableLines[number]>();
       for (const l of bookableLines) {
-        if (l.player_id != null) lineByKey.set(`${l.player_id}-${l.stat_code}`, l);
+        const key = sport === "NBA"
+          ? `${l.player_name.toLowerCase()}-${l.stat_code}`
+          : `${l.player_id}-${l.stat_code}`;
+        lineByKey.set(key, l);
       }
 
       // Pull recent game logs once per sport
