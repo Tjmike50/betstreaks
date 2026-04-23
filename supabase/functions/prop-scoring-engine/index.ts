@@ -1161,12 +1161,12 @@ serve(async (req) => {
     // Auto-fetch all market lines from line_snapshots for full coverage
     // Filter out stale lines for teams not playing today
     if (score_all_market_players && !effectiveMarketLines) {
-      // First get today's playing teams to filter stale lines (sport-scoped)
-      const { data: todayGames } = await supabase
-        .from("games_today")
-        .select("home_team_abbr, away_team_abbr")
-        .eq("game_date", today)
-        .eq("sport", sport);
+      // Use trusted verified slate for today's playing teams (sport-scoped)
+      const { data: todayGames } = await supabase.rpc("get_trusted_games_today", {
+        p_sport: sport,
+        p_target_date: today,
+        p_timezone: "America/New_York",
+      });
       const playingTeams = new Set<string>();
       if (todayGames) {
         for (const g of todayGames) {
@@ -1241,7 +1241,7 @@ serve(async (req) => {
         if (m.away_team) teamMatchups[m.away_team] = { opponent: m.home_team || "", homeAway: "away" };
       }
     } else {
-      const { data: games } = await supabase.from("games_today").select("*").eq("game_date", today).eq("sport", sport);
+      const { data: games } = await supabase.rpc("get_trusted_games_today", { p_sport: sport, p_target_date: today, p_timezone: "America/New_York" });
       if (games) {
         for (const g of games) {
           if (g.home_team_abbr) teamMatchups[g.home_team_abbr] = { opponent: g.away_team_abbr || "", homeAway: "home" };

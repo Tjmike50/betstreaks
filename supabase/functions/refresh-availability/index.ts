@@ -110,12 +110,12 @@ serve(async (req) => {
 
     console.log(`[${sport}] Refreshing availability for ${today}...`);
 
-    // 1. Get today's games to know which teams are playing (sport-scoped)
-    const { data: games } = await supabase
-      .from("games_today")
-      .select("home_team_abbr, away_team_abbr")
-      .eq("game_date", today)
-      .eq("sport", sport);
+    // 1. Get today's games from trusted verified slate (sport-scoped)
+    const { data: games } = await supabase.rpc("get_trusted_games_today", {
+      p_sport: sport,
+      p_target_date: today,
+      p_timezone: "America/New_York",
+    });
 
     const teamsPlaying = new Set<string>();
     for (const g of games || []) {
