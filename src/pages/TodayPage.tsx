@@ -127,18 +127,32 @@ export default function TodayPage() {
         ) : (
           <>
             <div className="divide-y divide-border rounded-lg overflow-hidden border border-border">
-              {games.map((game) => (
-                <GameCard
-                  key={game.id}
-                  id={game.id}
-                  homeTeamAbbr={game.home_team_abbr}
-                  awayTeamAbbr={game.away_team_abbr}
-                  homeScore={game.home_score}
-                  awayScore={game.away_score}
-                  status={game.status}
-                  gameTime={game.game_time}
-                />
-              ))}
+              {games.map((game) => {
+                const summary = propsByGame.get(game.id);
+                return (
+                  <div key={game.id}>
+                    <GameCard
+                      id={game.id}
+                      homeTeamAbbr={game.home_team_abbr}
+                      awayTeamAbbr={game.away_team_abbr}
+                      homeScore={game.home_score}
+                      awayScore={game.away_score}
+                      status={game.status}
+                      gameTime={game.game_time}
+                    />
+                    {summary && summary.propCount > 0 && (
+                      <div className="px-4 pb-2 -mt-1 flex gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {summary.propCount} props
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {summary.playerCount} players
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             {isDebug && (
               <div className="mt-4 p-3 bg-muted/50 rounded-lg text-xs font-mono">
