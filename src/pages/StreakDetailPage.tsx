@@ -1,15 +1,11 @@
 // =============================================================================
 // StreakDetailPage — sportsbook-line-first.
 //
-// We no longer read from the legacy `streaks` table by id. Instead we resolve
-// the requested (player, stat) against today's `line_snapshots`, build a
-// `Streak` row on the fly using the same logic as `useLineFirstStreaks`, and
-// render it.
+// NBA: resolves (player, stat) against today's `get_today_nba_props` RPC.
+// MLB/WNBA: falls back to legacy `line_snapshots` until their normalized
+// layers are wired.
 //
-// Team streaks are intentionally NOT supported in this surface for now — see
-// the explicit early-return below. Until we ship a team-line-first model
-// (team totals / spreads / ML lines), surfacing legacy team milestone streaks
-// here would contradict the rest of the app.
+// Team streaks are intentionally NOT supported in this surface for now.
 // =============================================================================
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -28,6 +24,7 @@ import {
   mlbHitterValue,
   mlbPitcherValue,
   nbaStatValue,
+  type BookableLine,
   type LineSnapshotRow,
   type MlbHitterLog,
   type MlbPitcherLog,
@@ -36,6 +33,26 @@ import {
 
 const MLB_HITTER_CODES = new Set(["HITS", "TOTAL_BASES", "HOME_RUNS"]);
 const MLB_PITCHER_CODES = new Set(["STRIKEOUTS", "EARNED_RUNS_ALLOWED", "WALKS_ALLOWED", "HITS_ALLOWED"]);
+
+const MARKET_TYPE_TO_STAT_CODE: Record<string, string> = {
+  player_points: "PTS",
+  player_rebounds: "REB",
+  player_assists: "AST",
+  player_threes: "3PM",
+  player_blocks: "BLK",
+  player_steals: "STL",
+};
+
+interface NbaPropRow {
+  player_name: string;
+  market_type: string;
+  line: number | null;
+  book_count: number | null;
+}
+
+function roundToNearestHalf(value: number): number {
+  return Math.round(value * 2) / 2;
+}
 
 const StreakDetailPage = () => {
   const [searchParams] = useSearchParams();
@@ -60,24 +77,74 @@ const StreakDetailPage = () => {
     queryFn: async (): Promise<Streak | null> => {
       if (!playerId) return null;
 
-      // 1) Pull recent line_snapshots for this player+stat across the league.
-      //    We then reduce them to find the main bookable line that best
-      //    matches the requested threshold.
-      const since = new Date();
-      since.setDate(since.getDate() - 2);
-      const sinceDate = since.toISOString().slice(0, 10);
+      // 1) Resolve the bookable line for this player+stat.
+      let lines: BookableLine[] = [];
 
-      const { data: snapRows, error: snapErr } = await supabase
-        .from("line_snapshots")
-        .select("player_id, player_name, stat_type, threshold, game_date, sportsbook")
-        .eq("player_id", playerId)
-        .gte("game_date", sinceDate)
-        .limit(2000);
-      if (snapErr) throw snapErr;
+      if (sport === "NBA") {
+        // Use normalized internal RPC for NBA
+        const { data: rpcData, error: rpcErr } = await supabase.rpc("get_today_nba_props");
+        if (rpcErr) throw rpcErr;
 
-      const lines = buildBookableLines((snapRows ?? []) as LineSnapshotRow[]).filter(
-        (l) => l.stat_code === stat,
-      );
+        const rpcRows = ((rpcData ?? []) as unknown as NbaPropRow[]).filter(
+          (r) =>
+            r.player_name &&
+            r.market_type &&
+            r.line != null &&
+            MARKET_TYPE_TO_STAT_CODE[r.market_type] === stat,
+        );
+
+        // Match by player_id: we need to resolve the RPC's string player_id
+        // to the numeric one. The RPC rows don't carry numeric IDs, so match
+        // by looking up player_recent_games for the given playerId to get the name.
+        const { data: nameRow } = await supabase
+          .from("player_recent_games")
+          .select("player_name")
+          .eq("player_id", playerId)
+          .limit(1)
+          .maybeSingle();
+
+        const playerName = nameRow?.player_name;
+        if (!playerName) {
+          // Fallback: try matching any RPC row by name later
+        }
+
+        const matched = playerName
+          ? rpcRows.filter((r) => r.player_name.toLowerCase() === playerName.toLowerCase())
+          : [];
+
+        if (matched.length > 0) {
+          // Pick the row with the highest book_count
+          const best = matched.reduce((a, b) =>
+            (Number(b.book_count ?? 0) > Number(a.book_count ?? 0) ? b : a), matched[0]);
+          lines = [{
+            player_id: playerId,
+            player_name: best.player_name,
+            stat_code: stat,
+            main_threshold: roundToNearestHalf(Number(best.line)),
+            alt_thresholds: [],
+            books_count: Number(best.book_count ?? 0),
+            game_date: new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }),
+          }];
+        }
+      } else {
+        // MLB / WNBA: legacy line_snapshots path
+        const since = new Date();
+        since.setDate(since.getDate() - 2);
+        const sinceDate = since.toISOString().slice(0, 10);
+
+        const { data: snapRows, error: snapErr } = await supabase
+          .from("line_snapshots")
+          .select("player_id, player_name, stat_type, threshold, game_date, sportsbook")
+          .eq("player_id", playerId)
+          .gte("game_date", sinceDate)
+          .limit(2000);
+        if (snapErr) throw snapErr;
+
+        lines = buildBookableLines((snapRows ?? []) as LineSnapshotRow[]).filter(
+          (l) => l.stat_code === stat,
+        );
+      }
+
       if (lines.length === 0) return null;
 
       // Prefer the line whose threshold matches what the URL asked for,
