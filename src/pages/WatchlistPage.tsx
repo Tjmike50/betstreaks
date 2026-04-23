@@ -180,9 +180,25 @@ export default function WatchlistPage() {
           const arr = mlbPitcher.get(r.player_id) ?? []; arr.push(r); mlbPitcher.set(r.player_id, arr);
         }
       } else {
-        const { data } = await supabase.from("player_recent_games").select("player_id, game_date, pts, reb, ast, fg3m, blk, stl").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000);
-        for (const r of (data ?? []) as NbaRow[]) {
+        const { data } = await supabase.from("player_recent_games").select("player_id, player_name, game_date, pts, reb, ast, fg3m, blk, stl").in("player_id", playerIds).order("game_date", { ascending: false }).limit(5000);
+        for (const r of (data ?? []) as (NbaRow & { player_name: string | null })[]) {
           const arr = nbaLogs.get(r.player_id) ?? []; arr.push(r); nbaLogs.set(r.player_id, arr);
+        }
+
+        // For NBA, build a player_id → name map so we can look up lines by name
+        if (sport === "NBA") {
+          const idToName = new Map<number, string>();
+          for (const r of (data ?? []) as (NbaRow & { player_name: string | null })[]) {
+            if (r.player_name && !idToName.has(r.player_id)) idToName.set(r.player_id, r.player_name);
+          }
+          // Re-index lineByKey also by player_id for NBA
+          for (const [, l] of lineByKey) {
+            for (const [pid, pname] of idToName) {
+              if (pname.toLowerCase() === l.player_name.toLowerCase()) {
+                lineByKey.set(`${pid}-${l.stat_code}`, l);
+              }
+            }
+          }
         }
       }
 
