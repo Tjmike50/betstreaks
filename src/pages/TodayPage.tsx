@@ -1,11 +1,14 @@
-import { RefreshCw, Calendar, AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { RefreshCw, Calendar, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { useSearchParams } from "react-router-dom";
 import { useGamesToday } from "@/hooks/useGamesToday";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { useSport } from "@/contexts/SportContext";
 import { useNbaProps, summarizeByGame } from "@/hooks/useNbaProps";
+import { useLineMovement, indexMovement } from "@/hooks/useLineMovement";
 import { GameCard } from "@/components/GameCard";
+import { GamePropsPanel } from "@/components/GamePropsPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,8 +21,16 @@ export default function TodayPage() {
   const { formattedTime: refreshStatusTime, lastRun: refreshLastRun, season } = useRefreshStatus();
   const { config: sportConfig } = useSport();
   const [searchParams] = useSearchParams();
-  const { data: propRows } = useNbaProps({ enabled: sportConfig.key === "NBA" });
+  const isNba = sportConfig.key === "NBA";
+  const { data: propRows } = useNbaProps({ enabled: isNba });
   const propsByGame = propRows ? summarizeByGame(propRows) : new Map();
+
+  // Line movement for all today's NBA events
+  const eventIds = propRows ? [...new Set(propRows.map((r) => r.event_id))] : [];
+  const { data: movementRows } = useLineMovement({ eventIds, enabled: isNba && eventIds.length > 0 });
+  const movementIndex = movementRows ? indexMovement(movementRows) : new Map();
+
+  const [expandedGame, setExpandedGame] = useState<string | null>(null);
 
   const isDebug = searchParams.get("debug") === "1";
   const todayFormatted = format(new Date(), "EEEE, MMM d");
@@ -27,6 +38,10 @@ export default function TodayPage() {
   const formattedLastUpdated = lastUpdated
     ? formatDistanceToNow(lastUpdated, { addSuffix: true })
     : null;
+
+  const toggleExpand = (gameId: string) => {
+    setExpandedGame((prev) => (prev === gameId ? null : gameId));
+  };
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -71,19 +86,9 @@ export default function TodayPage() {
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <AlertCircle className="h-12 w-12 text-destructive mb-4" />
-            <p className="text-lg font-medium text-destructive">
-              Failed to load games
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Please try again later
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={refetch}
-              disabled={isFetching}
-              className="mt-4"
-            >
+            <p className="text-lg font-medium text-destructive">Failed to load games</p>
+            <p className="text-sm text-muted-foreground mt-1">Please try again later</p>
+            <Button variant="outline" size="sm" onClick={refetch} disabled={isFetching} className="mt-4">
               <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
               Retry
             </Button>
@@ -91,25 +96,14 @@ export default function TodayPage() {
         ) : games.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium">
-              No {sportConfig.shortName} games scheduled
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              for {todayFormatted}
-            </p>
+            <p className="text-lg font-medium">No {sportConfig.shortName} games scheduled</p>
+            <p className="text-sm text-muted-foreground mt-1">for {todayFormatted}</p>
             <p className="text-xs text-muted-foreground mt-3">
-              {refreshLastRun 
-                ? `Last updated: ${refreshStatusTime}`
-                : "Waiting for data refresh"
-              } • {season} Season
+              {refreshLastRun ? `Last updated: ${refreshStatusTime}` : "Waiting for data refresh"} •{" "}
+              {season} Season
             </p>
             <div className="flex items-center gap-2 mt-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={refetch}
-                disabled={isFetching}
-              >
+              <Button variant="outline" size="sm" onClick={refetch} disabled={isFetching}>
                 <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
@@ -129,26 +123,53 @@ export default function TodayPage() {
             <div className="divide-y divide-border rounded-lg overflow-hidden border border-border">
               {games.map((game) => {
                 const summary = propsByGame.get(game.id);
+                const isExpanded = expandedGame === game.id;
+                const gameProps = isNba && propRows
+                  ? propRows.filter((r) => r.event_id === game.id)
+                  : [];
+                const hasProps = gameProps.length > 0;
+
                 return (
                   <div key={game.id}>
-                    <GameCard
-                      id={game.id}
-                      homeTeamAbbr={game.home_team_abbr}
-                      awayTeamAbbr={game.away_team_abbr}
-                      homeScore={game.home_score}
-                      awayScore={game.away_score}
-                      status={game.status}
-                      gameTime={game.game_time}
-                    />
+                    <div
+                      className={hasProps ? "cursor-pointer" : ""}
+                      onClick={() => hasProps && toggleExpand(game.id)}
+                    >
+                      <GameCard
+                        id={game.id}
+                        homeTeamAbbr={game.home_team_abbr}
+                        awayTeamAbbr={game.away_team_abbr}
+                        homeScore={game.home_score}
+                        awayScore={game.away_score}
+                        status={game.status}
+                        gameTime={game.game_time}
+                      />
+                    </div>
                     {summary && summary.propCount > 0 && (
-                      <div className="px-4 pb-2 -mt-1 flex gap-2">
+                      <div
+                        className={`px-4 pb-2 -mt-1 flex items-center gap-2 ${hasProps ? "cursor-pointer" : ""}`}
+                        onClick={() => hasProps && toggleExpand(game.id)}
+                      >
                         <Badge variant="secondary" className="text-xs">
                           {summary.propCount} props
                         </Badge>
                         <Badge variant="outline" className="text-xs">
                           {summary.playerCount} players
                         </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {summary.marketTypes.length} markets
+                        </Badge>
+                        <span className="ml-auto text-muted-foreground">
+                          {isExpanded ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4" />
+                          )}
+                        </span>
                       </div>
+                    )}
+                    {isExpanded && hasProps && (
+                      <GamePropsPanel props={gameProps} movementIndex={movementIndex} />
                     )}
                   </div>
                 );
