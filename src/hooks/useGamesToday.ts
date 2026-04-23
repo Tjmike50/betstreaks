@@ -19,11 +19,14 @@ export interface GameToday {
   is_active: boolean;
   is_postponed: boolean;
   mismatch_flags: unknown[];
+  canonical_game_key: string | null;
+  source_primary: string;
+  source_secondary: string | null;
+  last_verified_at: string | null;
 }
 
 // Get date string in YYYY-MM-DD format for the US Eastern timezone, which is
-// the canonical "slate day" for US sports. This avoids late-night ET games
-// (e.g. a 10:40 PM ET tip) being filed under tomorrow's UTC date.
+// the canonical "slate day" for US sports.
 function getEasternDateString(date: Date): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -42,43 +45,28 @@ export function useGamesToday(sportOverride?: SportKey) {
   const sport = sportOverride ?? activeSport;
   const todayStr = getEasternDateString(new Date());
 
-  // Also include the next UTC date — late-night ET games (e.g. 10:40 PM ET
-  // tipoff) get stored with the next-day UTC date by the upstream feed.
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowUtcStr = tomorrow.toISOString().slice(0, 10);
-  const todayUtcStr = new Date().toISOString().slice(0, 10);
-  const candidateDates = Array.from(new Set([todayStr, todayUtcStr, tomorrowUtcStr]));
-
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["games-today", sport, todayStr, candidateDates.join(",")],
+    queryKey: ["games-today", sport, todayStr],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("games_today")
-        .select("*")
-        .eq("sport", sport)
-        .in("game_date", candidateDates)
-        .eq("is_active", true)
-        .order("game_time", { ascending: true, nullsFirst: false })
-        .order("id", { ascending: true });
+      // Use the trusted RPC which filters by is_active, is_postponed,
+      // canonical_game_key, and orders by game_time.
+      const { data, error } = await supabase.rpc("get_trusted_games_today", {
+        p_sport: sport,
+        p_target_date: todayStr,
+        p_timezone: "America/New_York",
+      });
 
       if (error) throw error;
 
-      const rows = (data as GameToday[]).filter(
-        (game) => game.home_team_abbr && game.away_team_abbr,
-      );
+      // Map RPC rows to GameToday shape, filling in fields the RPC doesn't return
+      const rows: GameToday[] = ((data as any[]) ?? [])
+        .filter((g: any) => g.home_team_abbr && g.away_team_abbr)
+        .map((g: any) => ({
+          ...g,
+          mismatch_flags: [],
+        }));
 
-      // Re-bucket each row to its true ET slate date.
-      const filtered = rows.filter((g) => {
-        if (g.game_date === todayStr) return true;
-        if (g.game_date === tomorrowUtcStr && todayStr !== tomorrowUtcStr) {
-          const t = (g.game_time || "").toUpperCase();
-          if (/\b(0?[7-9]|1[0-2]):\d{2}\s*PM\b/.test(t)) return true;
-        }
-        return false;
-      });
-
-      return filtered;
+      return rows;
     },
     staleTime: 1000 * 60 * 2,
   });
@@ -92,20 +80,16 @@ export function useGamesToday(sportOverride?: SportKey) {
     refetch();
   };
 
-  // Separate verified vs unverified for UI consumption
-  const verifiedGames = (data ?? []).filter(
-    (g) => g.verification_status === "verified" || g.verification_status === "missing_secondary",
-  );
-  const unverifiedGames = (data ?? []).filter(
-    (g) => g.verification_status === "mismatch" || g.verification_status === "unverified",
-  );
+  // The RPC already returns only trusted/verified rows, so all are "verified"
+  const verifiedGames = data ?? [];
+  const unverifiedGames: GameToday[] = [];
 
   const debugInfo = {
     sport,
     date: todayStr,
     rawCount: data?.length ?? 0,
     verifiedCount: verifiedGames.length,
-    unverifiedCount: unverifiedGames.length,
+    unverifiedCount: 0,
   };
 
   return {
