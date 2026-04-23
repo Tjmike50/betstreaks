@@ -14,6 +14,7 @@ import { RegenerateDailyPickButton } from "@/components/dashboard/RegenerateDail
 // Friendly display labels for stat codes (matches conventions used elsewhere
 // in the app — keeps deterministic per-leg text readable on mobile).
 const STAT_DISPLAY: Record<string, string> = {
+  // NBA / WNBA
   pts: "PTS",
   reb: "REB",
   ast: "AST",
@@ -24,6 +25,14 @@ const STAT_DISPLAY: Record<string, string> = {
   pr: "PR",
   pa: "PA",
   ra: "RA",
+  // MLB
+  hits: "Hits",
+  total_bases: "TB",
+  home_runs: "HR",
+  strikeouts: "K",
+  earned_runs_allowed: "ER",
+  walks_allowed: "BB",
+  hits_allowed: "H Allowed",
 };
 
 function formatStat(stat: string): string {

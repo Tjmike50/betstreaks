@@ -40,7 +40,7 @@ export default function ResearchGamesPage() {
             Today's Games
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Matchups, tip-off times, and live scores for tonight's slate.
+            Matchups, game times, and live scores for today's slate.
           </p>
         </header>
 
