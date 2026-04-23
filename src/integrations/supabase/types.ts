@@ -1285,6 +1285,13 @@ export type Database = {
             foreignKeyName: "odds_raw_responses_source_run_id_fkey"
             columns: ["source_run_id"]
             isOneToOne: false
+            referencedRelation: "odds_admin_status"
+            referencedColumns: ["last_failed_run_id"]
+          },
+          {
+            foreignKeyName: "odds_raw_responses_source_run_id_fkey"
+            columns: ["source_run_id"]
+            isOneToOne: false
             referencedRelation: "odds_source_runs"
             referencedColumns: ["id"]
           },
@@ -2536,19 +2543,17 @@ export type Database = {
       }
       line_movement_summary: {
         Row: {
-          current_over_line: number | null
+          current_line: number | null
           current_over_odds_american: number | null
-          current_under_line: number | null
           current_under_odds_american: number | null
           event_id: string | null
-          latest_snapshot_at: string | null
+          last_updated: string | null
           market_type: string | null
-          opening_over_line: number | null
+          move_amount: number | null
+          opening_line: number | null
           opening_over_odds_american: number | null
-          opening_under_line: number | null
           opening_under_odds_american: number | null
           player_id: string | null
-          sportsbook_id: string | null
         }
         Relationships: [
           {
@@ -2565,14 +2570,39 @@ export type Database = {
             referencedRelation: "players"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "market_snapshots_sportsbook_id_fkey"
-            columns: ["sportsbook_id"]
-            isOneToOne: false
-            referencedRelation: "sportsbooks"
-            referencedColumns: ["id"]
-          },
         ]
+      }
+      odds_admin_status: {
+        Row: {
+          last_failed_run_error_text: string | null
+          last_failed_run_finished_at: string | null
+          last_failed_run_id: string | null
+          last_failed_run_market_group: string | null
+          last_failed_run_source_name: string | null
+          last_failed_run_sport: string | null
+          last_failed_run_started_at: string | null
+          latest_event_sync_finished_at: string | null
+          latest_event_sync_started_at: string | null
+          latest_pipeline_availability_records: number | null
+          latest_pipeline_availability_status: string | null
+          latest_pipeline_errors: string[] | null
+          latest_pipeline_game_dates: string[] | null
+          latest_pipeline_line_games_processed: number | null
+          latest_pipeline_line_new_snapshots: number | null
+          latest_pipeline_line_status: string | null
+          latest_pipeline_ran_at: string | null
+          latest_pipeline_scoring_scored_count: number | null
+          latest_pipeline_scoring_source: string | null
+          latest_pipeline_scoring_status: string | null
+          latest_pipeline_success: boolean | null
+          latest_pipeline_total_duration_ms: number | null
+          latest_props_sync_finished_at: string | null
+          latest_props_sync_started_at: string | null
+          props_staleness: string | null
+          total_props_ingested_today: number | null
+          unmatched_props_count: number | null
+        }
+        Relationships: []
       }
       player_market_board: {
         Row: {
@@ -2679,6 +2709,46 @@ export type Database = {
           market_type: string
           max_line: number
           min_line: number
+          player_id: string
+          player_name: string
+        }[]
+      }
+      get_market_history: {
+        Args: { p_event_id: string; p_market_type: string; p_player_id: string }
+        Returns: {
+          captured_at: string
+          event_id: string
+          line: number
+          market_type: string
+          over_odds_american: number
+          player_id: string
+          sportsbook_id: string
+          sportsbook_name: string
+          under_odds_american: number
+        }[]
+      }
+      get_today_nba_props: {
+        Args: { p_target_date?: string; p_timezone?: string }
+        Returns: {
+          away_team_abbr: string
+          away_team_id: string
+          away_team_name: string
+          best_over_line: number
+          best_over_odds_american: number
+          best_over_sportsbook_name: string
+          best_under_line: number
+          best_under_odds_american: number
+          best_under_sportsbook_name: string
+          book_count: number
+          commence_time: string
+          event_id: string
+          event_status: string
+          home_team_abbr: string
+          home_team_id: string
+          home_team_name: string
+          latest_source_updated_at: string
+          line: number
+          market_type: string
           player_id: string
           player_name: string
         }[]
