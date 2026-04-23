@@ -726,11 +726,11 @@ serve(async (req) => {
       .lt("game_date", gameDate)
       .order("game_date", { ascending: false })
       .limit(5 * playerIds.length),
-    supabase
-      .from("games_today")
-      .select("id,sport,game_date,home_team_abbr,away_team_abbr")
-      .eq("sport", "MLB")
-      .eq("game_date", gameDate),
+    supabase.rpc("get_trusted_games_today", {
+      p_sport: "MLB",
+      p_target_date: gameDate,
+      p_timezone: "America/New_York",
+    }),
     supabase
       .from("mlb_game_context")
       .select("game_id,probable_home_pitcher_id,probable_away_pitcher_id,game_context_json"),
