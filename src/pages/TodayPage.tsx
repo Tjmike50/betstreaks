@@ -18,6 +18,8 @@ export default function TodayPage() {
   const { formattedTime: refreshStatusTime, lastRun: refreshLastRun, season } = useRefreshStatus();
   const { config: sportConfig } = useSport();
   const [searchParams] = useSearchParams();
+  const { data: propRows } = useNbaProps({ enabled: sportConfig.key === "nba" });
+  const propsByGame = propRows ? summarizeByGame(propRows) : new Map();
 
   const isDebug = searchParams.get("debug") === "1";
   const todayFormatted = format(new Date(), "EEEE, MMM d");
