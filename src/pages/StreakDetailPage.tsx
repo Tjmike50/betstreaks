@@ -9,8 +9,9 @@
 // =============================================================================
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
 import { Footer } from "@/components/Footer";
 import { supabase } from "@/integrations/supabase/client";
 import { useWatchlist } from "@/hooks/useWatchlist";
@@ -48,10 +49,111 @@ interface NbaPropRow {
   market_type: string;
   line: number | null;
   book_count: number | null;
+  event_id: string;
+  player_id: string;
+  best_over_line: number | null;
+  best_over_odds_american: number | null;
+  best_over_sportsbook_name: string | null;
+  best_under_line: number | null;
+  best_under_odds_american: number | null;
+  best_under_sportsbook_name: string | null;
+}
+
+interface LineMovementRow {
+  opening_line: number | null;
+  current_line: number | null;
+  move_amount: number | null;
 }
 
 function roundToNearestHalf(value: number): number {
   return Math.round(value * 2) / 2;
+}
+
+function formatOdds(odds: number | null): string {
+  if (odds == null) return "—";
+  return odds > 0 ? `+${odds}` : `${odds}`;
+}
+
+/** Best-line + movement card shown on NBA streak detail pages */
+function BestLineCard({ prop, movement }: { prop: NbaPropRow; movement: LineMovementRow | null }) {
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <p className="text-sm font-semibold text-foreground">Best Available Lines</p>
+
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          {/* Over */}
+          <div className="rounded-md bg-secondary/60 p-2 space-y-0.5">
+            <p className="text-muted-foreground">Best Over</p>
+            <p className="text-sm font-medium text-foreground tabular-nums">
+              O {prop.best_over_line ?? prop.line}{" "}
+              <span className="text-green-400">{formatOdds(prop.best_over_odds_american)}</span>
+            </p>
+            {prop.best_over_sportsbook_name && (
+              <p className="text-muted-foreground/70">{prop.best_over_sportsbook_name}</p>
+            )}
+          </div>
+
+          {/* Under */}
+          <div className="rounded-md bg-secondary/60 p-2 space-y-0.5">
+            <p className="text-muted-foreground">Best Under</p>
+            <p className="text-sm font-medium text-foreground tabular-nums">
+              U {prop.best_under_line ?? prop.line}{" "}
+              <span className="text-red-400">{formatOdds(prop.best_under_odds_american)}</span>
+            </p>
+            {prop.best_under_sportsbook_name && (
+              <p className="text-muted-foreground/70">{prop.best_under_sportsbook_name}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Consensus */}
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>
+            Consensus: <span className="text-foreground font-medium tabular-nums">{prop.line ?? "—"}</span>
+          </span>
+          {prop.book_count != null && (
+            <span>
+              {prop.book_count} {Number(prop.book_count) === 1 ? "book" : "books"}
+            </span>
+          )}
+        </div>
+
+        {/* Movement */}
+        {movement && movement.opening_line != null && movement.current_line != null && (
+          <div className="flex items-center gap-2 text-xs border-t border-border pt-2">
+            {movement.move_amount != null && Math.abs(movement.move_amount) >= 0.01 ? (
+              movement.move_amount > 0 ? (
+                <TrendingUp className="h-3.5 w-3.5 text-green-400" />
+              ) : (
+                <TrendingDown className="h-3.5 w-3.5 text-red-400" />
+              )
+            ) : (
+              <Minus className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <span className="text-muted-foreground">
+              Line moved{" "}
+              <span className="text-foreground font-medium tabular-nums">{movement.opening_line}</span>
+              {" → "}
+              <span className="text-foreground font-medium tabular-nums">{movement.current_line}</span>
+            </span>
+            {movement.move_amount != null && Math.abs(movement.move_amount) >= 0.01 && (
+              <span
+                className={
+                  movement.move_amount > 0
+                    ? "text-green-400 font-medium tabular-nums"
+                    : "text-red-400 font-medium tabular-nums"
+                }
+              >
+                ({movement.move_amount > 0 ? "+" : ""}
+                {movement.move_amount.toFixed(1)})
+              </span>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 const StreakDetailPage = () => {
@@ -66,22 +168,20 @@ const StreakDetailPage = () => {
   const playerId = playerIdParam ? parseInt(playerIdParam, 10) : null;
   const requestedThreshold = thresholdParam ? parseFloat(thresholdParam) : null;
 
-  // Team streak surfaces are intentionally disabled — we only show
-  // line-first player streaks here.
   const isTeamRequest = entityType === "team";
 
   // Build the streak from live book lines + game logs.
-  const { data: streak, isLoading: streakLoading } = useQuery({
+  // Also capture the matched NbaPropRow for best-line display.
+  const { data: streakData, isLoading: streakLoading } = useQuery({
     queryKey: ["streak-detail-line-first", sport, playerId, stat, requestedThreshold],
     enabled: !isTeamRequest && !!playerId && !!stat,
-    queryFn: async (): Promise<Streak | null> => {
+    queryFn: async (): Promise<{ streak: Streak; matchedProp: NbaPropRow | null } | null> => {
       if (!playerId) return null;
 
-      // 1) Resolve the bookable line for this player+stat.
       let lines: BookableLine[] = [];
+      let matchedProp: NbaPropRow | null = null;
 
       if (sport === "NBA") {
-        // Use normalized internal RPC for NBA
         const { data: rpcData, error: rpcErr } = await supabase.rpc("get_today_nba_props");
         if (rpcErr) throw rpcErr;
 
@@ -93,9 +193,6 @@ const StreakDetailPage = () => {
             MARKET_TYPE_TO_STAT_CODE[r.market_type] === stat,
         );
 
-        // Match by player_id: we need to resolve the RPC's string player_id
-        // to the numeric one. The RPC rows don't carry numeric IDs, so match
-        // by looking up player_recent_games for the given playerId to get the name.
         const { data: nameRow } = await supabase
           .from("player_recent_games")
           .select("player_name")
@@ -104,18 +201,14 @@ const StreakDetailPage = () => {
           .maybeSingle();
 
         const playerName = nameRow?.player_name;
-        if (!playerName) {
-          // Fallback: try matching any RPC row by name later
-        }
-
         const matched = playerName
           ? rpcRows.filter((r) => r.player_name.toLowerCase() === playerName.toLowerCase())
           : [];
 
         if (matched.length > 0) {
-          // Pick the row with the highest book_count
           const best = matched.reduce((a, b) =>
             (Number(b.book_count ?? 0) > Number(a.book_count ?? 0) ? b : a), matched[0]);
+          matchedProp = best;
           lines = [{
             player_id: playerId,
             player_name: best.player_name,
@@ -127,7 +220,6 @@ const StreakDetailPage = () => {
           }];
         }
       } else {
-        // MLB / WNBA: legacy line_snapshots path
         const since = new Date();
         since.setDate(since.getDate() - 2);
         const sinceDate = since.toISOString().slice(0, 10);
@@ -147,14 +239,11 @@ const StreakDetailPage = () => {
 
       if (lines.length === 0) return null;
 
-      // Prefer the line whose threshold matches what the URL asked for,
-      // else fall back to the most-booked main line.
       const chosen =
         (requestedThreshold != null
           ? lines.find((l) => Math.abs(l.main_threshold - requestedThreshold) < 1e-6)
           : null) ?? lines[0];
 
-      // 2) Load this player's recent game logs from the right table.
       const today = new Date().toISOString().slice(0, 10);
       let values: (number | null)[] = [];
       let dates: string[] = [];
@@ -181,7 +270,6 @@ const StreakDetailPage = () => {
         values = games.map((g) => mlbPitcherValue(g, stat));
         dates = games.map((g) => g.game_date);
       } else {
-        // NBA / WNBA share player_recent_games
         const { data } = await supabase
           .from("player_recent_games")
           .select("game_date, pts, reb, ast, fg3m, blk, stl, team_abbr")
@@ -198,7 +286,7 @@ const StreakDetailPage = () => {
 
       const splits = computeLineSplits(values, dates, chosen.main_threshold);
 
-      const result: Streak = {
+      const streak: Streak = {
         id: `lf-${playerId}-${stat}-${chosen.main_threshold}`,
         player_id: playerId,
         player_name: chosen.player_name,
@@ -225,8 +313,31 @@ const StreakDetailPage = () => {
         book_main_threshold: chosen.main_threshold,
         book_informational: false,
       };
-      return result;
+      return { streak, matchedProp };
     },
+  });
+
+  const streak = streakData?.streak ?? null;
+  const matchedProp = streakData?.matchedProp ?? null;
+
+  // Fetch line movement for the matched prop (NBA only)
+  const { data: movementRow } = useQuery({
+    queryKey: ["streak-line-movement", matchedProp?.event_id, matchedProp?.player_id, matchedProp?.market_type],
+    enabled: sport === "NBA" && !!matchedProp?.event_id,
+    queryFn: async (): Promise<LineMovementRow | null> => {
+      if (!matchedProp) return null;
+      const { data, error } = await supabase
+        .from("line_movement_summary" as any)
+        .select("opening_line, current_line, move_amount")
+        .eq("event_id", matchedProp.event_id)
+        .eq("player_id", matchedProp.player_id)
+        .eq("market_type", matchedProp.market_type)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as unknown as LineMovementRow) ?? null;
+    },
+    staleTime: 90_000,
   });
 
   // Refresh status timestamp (id=1) for "last updated" display.
@@ -243,15 +354,12 @@ const StreakDetailPage = () => {
     },
   });
 
-  // Recent games for the panel below — same source as before.
+  // Recent games for the panel below
   const { data: recentGames, isLoading: gamesLoading } = useQuery({
     queryKey: ["recent-games-line-first", sport, playerId],
     enabled: !isTeamRequest && !!playerId,
     queryFn: async () => {
       if (!playerId) return [];
-      // For MLB we don't have a unified "recent games" table that matches
-      // the NBA shape RecentGamesList expects, so we keep this NBA/WNBA-only
-      // for now. MLB users still get the full splits in StreakStats above.
       if (sport === "MLB") return [];
       const { data, error } = await supabase
         .from("player_recent_games")
@@ -269,7 +377,6 @@ const StreakDetailPage = () => {
     if (streak) toggleWatchlist(streak);
   };
 
-  // Explicit team-streak product decision: not supported in this surface.
   if (isTeamRequest) {
     return (
       <div className="min-h-screen bg-background flex flex-col pb-20">
@@ -295,7 +402,7 @@ const StreakDetailPage = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
       <StreakDetailHeader
-        streak={streak ?? null}
+        streak={streak}
         isLoading={streakLoading}
         isStarred={starred}
         onToggleStar={handleToggleStar}
@@ -320,6 +427,12 @@ const StreakDetailPage = () => {
         ) : (
           <>
             <StreakStats streak={streak} lastUpdated={refreshStatus?.last_run ?? null} />
+
+            {/* Best-line + movement card (NBA only) */}
+            {matchedProp && (
+              <BestLineCard prop={matchedProp} movement={movementRow ?? null} />
+            )}
+
             <RecentGamesList
               games={recentGames || []}
               stat={stat}
