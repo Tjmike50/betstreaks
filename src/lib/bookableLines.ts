@@ -1,15 +1,41 @@
 // =============================================================================
 // bookableLines — translates between streak/scoring stat codes and the
-// stat_type labels actually used by sportsbook line snapshots.
+// normalized odds layer's market_type keys, and builds an index of bookable
+// lines for fast lookup.
 //
 // Goal: BetStreaks should prioritize streaks/cheatsheets that line up with
 // thresholds users can really bet at a sportsbook.
 // =============================================================================
 
 /**
- * Map streak/scoring stat codes (PTS, REB, ast, fg3m, HITS, STRIKEOUTS, ...)
- * → the line_snapshots `stat_type` labels we actually receive from books.
- * One streak code can map to multiple book labels (case variants etc).
+ * Map normalized market_type keys (from markets / consensus_lines) → streak
+ * stat codes they satisfy. One market_type can map to multiple streak codes
+ * (e.g. player_points → PTS, pts).
+ */
+export const MARKET_TYPE_TO_STAT_CODES: Record<string, string[]> = {
+  player_points: ["PTS", "pts", "PTS_U"],
+  player_rebounds: ["REB", "reb"],
+  player_assists: ["AST", "ast"],
+  player_threes: ["3PM", "FG3M", "fg3m"],
+  player_blocks: ["BLK", "blk"],
+  player_steals: ["STL", "stl"],
+  player_points_assists: ["PA"],
+  player_points_rebounds: ["PR"],
+  player_points_rebounds_assists: ["PRA"],
+  player_rebounds_assists: ["RA"],
+  // MLB market types (if/when they enter the normalized layer)
+  batter_hits: ["HITS"],
+  batter_total_bases: ["TOTAL_BASES"],
+  batter_home_runs: ["HOME_RUNS"],
+  pitcher_strikeouts: ["STRIKEOUTS"],
+  pitcher_earned_runs: ["EARNED_RUNS_ALLOWED"],
+  pitcher_walks: ["WALKS_ALLOWED"],
+  pitcher_hits_allowed: ["HITS_ALLOWED"],
+};
+
+/**
+ * Legacy mapping kept for backward compat — used only by code that already
+ * references it. New code should use MARKET_TYPE_TO_STAT_CODES.
  */
 export const STAT_CODE_TO_BOOK_LABELS: Record<string, string[]> = {
   // NBA / WNBA
@@ -25,15 +51,13 @@ export const STAT_CODE_TO_BOOK_LABELS: Record<string, string[]> = {
   PR: ["Points + Rebounds"],
   PRA: ["Points + Rebounds + Assists"],
   RA: ["Rebounds + Assists"],
-  // legacy lower-case used in player_prop_scores for NBA
   pts: ["Points"],
   reb: ["Rebounds"],
   ast: ["Assists"],
   fg3m: ["3-Pointers"],
   blk: ["Blocks"],
   stl: ["Steals"],
-
-  // MLB anchors / expansion
+  // MLB
   HITS: ["batter_hits"],
   TOTAL_BASES: ["batter_total_bases"],
   HOME_RUNS: ["batter_home_runs"],
@@ -59,8 +83,7 @@ export interface BookableLineEntry {
   /** Distinct .5 thresholds offered for this player+stat (sorted asc). */
   thresholds: number[];
   /**
-   * "Main" line — heuristic: lowest threshold with the highest book count,
-   * which in our snapshot data corresponds to the standard non-alt line.
+   * "Main" line — the consensus average line across sportsbooks.
    * Falls back to the lowest available threshold.
    */
   mainThreshold: number;
@@ -73,9 +96,78 @@ export interface BookableLineRow {
 }
 
 /**
- * Index a flat list of line_snapshots rows into a Map keyed by
- * `(player|streak-stat-code)`. We invert STAT_CODE_TO_BOOK_LABELS so that a
- * row with `stat_type='Points'` maps back to streak code `PTS`, `pts`, etc.
+ * Consensus-based row shape from the consensus_lines view + player join.
+ */
+export interface ConsensusLineRow {
+  player_name: string;
+  market_type: string;
+  average_line: number;
+  min_line: number;
+  max_line: number;
+}
+
+/**
+ * Build the bookable index from consensus_lines data. Each consensus row
+ * provides an average/min/max range; we expand to .5-step thresholds so
+ * matchStreakToBookLine still works correctly.
+ */
+export function buildBookableIndexFromConsensus(
+  rows: ConsensusLineRow[]
+): Map<string, BookableLineEntry> {
+  const out = new Map<string, BookableLineEntry>();
+
+  for (const row of rows) {
+    const codes = MARKET_TYPE_TO_STAT_CODES[row.market_type];
+    if (!codes) continue;
+
+    const minT = row.min_line;
+    const maxT = row.max_line;
+    const avgT = row.average_line;
+    if (!Number.isFinite(minT) || !Number.isFinite(maxT)) continue;
+
+    // Generate all plausible .5 thresholds in [min, max]
+    const thresholds: number[] = [];
+    // Round min down to nearest .5, max up to nearest .5
+    let t = Math.floor(minT * 2) / 2;
+    const ceiling = Math.ceil(maxT * 2) / 2;
+    while (t <= ceiling + 1e-9) {
+      thresholds.push(t);
+      t += 1;
+    }
+    if (thresholds.length === 0) thresholds.push(avgT);
+
+    // Find mainThreshold: the generated threshold closest to average
+    const mainThreshold = thresholds.reduce((best, cur) =>
+      Math.abs(cur - avgT) < Math.abs(best - avgT) ? cur : best,
+      thresholds[0],
+    );
+
+    const seen = new Set<string>();
+    for (const code of codes) {
+      const key = bookableKey(row.player_name, code);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const existing = out.get(key);
+      if (existing) {
+        // Merge thresholds from multiple events (same player in different games)
+        const merged = new Set([...existing.thresholds, ...thresholds]);
+        const sortedMerged = [...merged].sort((a, b) => a - b);
+        out.set(key, {
+          thresholds: sortedMerged,
+          mainThreshold: existing.mainThreshold, // keep first
+        });
+      } else {
+        out.set(key, { thresholds: [...thresholds], mainThreshold });
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Legacy builder — kept for any callers still passing raw line_snapshot rows.
  */
 export function buildBookableIndex(
   rows: BookableLineRow[]
@@ -90,14 +182,12 @@ export function buildBookableIndex(
     }
   }
 
-  // collect thresholds per (player, code)
   const tally = new Map<string, Map<number, number>>();
   for (const row of rows) {
     const codes = labelToCodes.get(row.stat_type);
     if (!codes) continue;
     const t = Number(row.threshold);
     if (!Number.isFinite(t)) continue;
-    // De-dupe across casings: store once per uppercased code
     const seen = new Set<string>();
     for (const code of codes) {
       const key = bookableKey(row.player_name, code);
@@ -116,7 +206,6 @@ export function buildBookableIndex(
   for (const [key, m] of tally) {
     const sorted = [...m.entries()].sort((a, b) => a[0] - b[0]);
     const thresholds = sorted.map(([t]) => t);
-    // main = threshold with most rows (highest sportsbook coverage); tie → lowest
     const mainThreshold = sorted.reduce(
       (best, cur) => (cur[1] > best[1] ? cur : best),
       sorted[0],
