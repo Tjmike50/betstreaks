@@ -297,6 +297,42 @@ export type Database = {
         }
         Relationships: []
       }
+      backend_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string | null
+          id: string
+          message: string
+          metadata: Json | null
+          resolved: boolean | null
+          resolved_at: string | null
+          severity: string
+          sport: string
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string | null
+          id?: string
+          message: string
+          metadata?: Json | null
+          resolved?: boolean | null
+          resolved_at?: string | null
+          severity: string
+          sport: string
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string | null
+          id?: string
+          message?: string
+          metadata?: Json | null
+          resolved?: boolean | null
+          resolved_at?: string | null
+          severity?: string
+          sport?: string
+        }
+        Relationships: []
+      }
       cheatsheet_cache: {
         Row: {
           created_at: string
@@ -1030,6 +1066,39 @@ export type Database = {
         }
         Relationships: []
       }
+      mlb_player_aliases: {
+        Row: {
+          alias_name: string
+          canonical_name: string
+          confidence: number | null
+          created_at: string | null
+          id: string
+          normalized_alias: string
+          player_id: string
+          source: string | null
+        }
+        Insert: {
+          alias_name: string
+          canonical_name: string
+          confidence?: number | null
+          created_at?: string | null
+          id?: string
+          normalized_alias: string
+          player_id: string
+          source?: string | null
+        }
+        Update: {
+          alias_name?: string
+          canonical_name?: string
+          confidence?: number | null
+          created_at?: string | null
+          id?: string
+          normalized_alias?: string
+          player_id?: string
+          source?: string | null
+        }
+        Relationships: []
+      }
       mlb_player_profiles: {
         Row: {
           bats: string | null
@@ -1129,6 +1198,102 @@ export type Database = {
         }
         Relationships: []
       }
+      mlb_refresh_health: {
+        Row: {
+          duration_ms: number | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          job_name: string
+          metadata: Json | null
+          rows_inserted: number | null
+          rows_updated: number | null
+          run_date: string
+          started_at: string | null
+          status: string
+        }
+        Insert: {
+          duration_ms?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          job_name: string
+          metadata?: Json | null
+          rows_inserted?: number | null
+          rows_updated?: number | null
+          run_date?: string
+          started_at?: string | null
+          status: string
+        }
+        Update: {
+          duration_ms?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          job_name?: string
+          metadata?: Json | null
+          rows_inserted?: number | null
+          rows_updated?: number | null
+          run_date?: string
+          started_at?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
+      mlb_team_id_map: {
+        Row: {
+          created_at: string | null
+          source: string
+          team_abbr: string
+          team_id: number
+          team_name: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          source?: string
+          team_abbr: string
+          team_id: number
+          team_name?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          source?: string
+          team_abbr?: string
+          team_id?: number
+          team_name?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      mlb_team_id_map_backup_20260424: {
+        Row: {
+          created_at: string | null
+          source: string | null
+          team_abbr: string | null
+          team_id: number | null
+          team_name: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          source?: string | null
+          team_abbr?: string | null
+          team_id?: number | null
+          team_name?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          source?: string | null
+          team_abbr?: string | null
+          team_id?: number | null
+          team_name?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       mlb_team_offense_daily: {
         Row: {
           as_of_date: string
@@ -1174,6 +1339,51 @@ export type Database = {
           updated_at?: string
           walk_rate?: number | null
           window_size?: number
+        }
+        Relationships: []
+      }
+      mlb_unresolved_players: {
+        Row: {
+          event_id: string | null
+          first_seen_at: string | null
+          id: string
+          last_seen_at: string | null
+          market_key: string | null
+          normalized_name: string
+          raw_name: string
+          resolution_status: string | null
+          resolved_player_id: string | null
+          seen_count: number | null
+          sportsbook: string | null
+          team_abbr: string | null
+        }
+        Insert: {
+          event_id?: string | null
+          first_seen_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          market_key?: string | null
+          normalized_name: string
+          raw_name: string
+          resolution_status?: string | null
+          resolved_player_id?: string | null
+          seen_count?: number | null
+          sportsbook?: string | null
+          team_abbr?: string | null
+        }
+        Update: {
+          event_id?: string | null
+          first_seen_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          market_key?: string | null
+          normalized_name?: string
+          raw_name?: string
+          resolution_status?: string | null
+          resolved_player_id?: string | null
+          seen_count?: number | null
+          sportsbook?: string | null
+          team_abbr?: string | null
         }
         Relationships: []
       }
@@ -2572,6 +2782,22 @@ export type Database = {
           },
         ]
       }
+      mlb_player_resolution_view: {
+        Row: {
+          bats: string | null
+          created_at: string | null
+          is_probable_pitcher: boolean | null
+          mlb_team_id: number | null
+          normalized_name: string | null
+          player_id: number | null
+          player_name: string | null
+          primary_role: string | null
+          team_abbr: string | null
+          throws: string | null
+          updated_at: string | null
+        }
+        Relationships: []
+      }
       odds_admin_status: {
         Row: {
           last_failed_run_error_text: string | null
@@ -2790,16 +3016,41 @@ export type Database = {
         }
         Returns: string
       }
+      normalize_mlb_player_name: {
+        Args: { input_name: string }
+        Returns: string
+      }
       normalize_person_name: { Args: { input_text: string }; Returns: string }
       queue_unmatched_nba_market_payload: {
         Args: { p_payload: Json; p_source_name: string }
         Returns: string
       }
+      resolve_mlb_player_for_odds: {
+        Args: {
+          p_event_id?: string
+          p_market_key?: string
+          p_primary_role?: string
+          p_raw_name: string
+          p_sportsbook?: string
+          p_team_abbr?: string
+        }
+        Returns: {
+          canonical_name: string
+          confidence: number
+          player_id: number
+          resolution_method: string
+          resolved_team_abbr: string
+          unresolved_id: string
+        }[]
+      }
       resolve_nba_player_id: { Args: { p_full_name: string }; Returns: string }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
       try_ingest_nba_market_payload: {
         Args: { p_payload: Json; p_source_name: string }
         Returns: Json
       }
+      unaccent: { Args: { "": string }; Returns: string }
       upsert_nba_event: {
         Args: {
           p_away_team_abbreviation: string
