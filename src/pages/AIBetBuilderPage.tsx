@@ -435,6 +435,10 @@ export default function AIBetBuilderPage() {
   const handleSubmit = (overridePrompt?: string) => {
     const p = (overridePrompt ?? prompt).trim();
     if (!p) return;
+    if (!user) {
+      navigate("/auth?redirect=/ai-builder");
+      return;
+    }
     setHasInteracted(true);
     const slipCount = isPremium ? filters.slipCount : 1;
     buildSlips(p, slipCount, { ...filters, sport });
