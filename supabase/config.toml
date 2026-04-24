@@ -57,3 +57,6 @@ verify_jwt = false
 [functions.score-mlb-anchors]
 verify_jwt = false
 
+[functions.refresh-mlb-team-map]
+verify_jwt = false
+
