@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.mlb-stale-data-cleanup]
 verify_jwt = false
+
+[functions.grade-mlb-props]
+verify_jwt = false

@@ -87,6 +87,12 @@ interface StepResult {
   error?: string;
 }
 
+interface RefreshRequestBody {
+  game_date?: string;
+  logs_only?: boolean;
+  debug_raw?: boolean;
+}
+
 type Supa = ReturnType<typeof createClient>;
 
 // In-memory cache populated by step 1 so subsequent steps can map TeamID → abbr
@@ -342,6 +348,15 @@ serve(async (req) => {
   }
 
   const start = Date.now();
+  let body: RefreshRequestBody = {};
+  try {
+    body = await req.json();
+  } catch (_) {
+    // allow empty body
+  }
+  const requestedDate = body.game_date || todayET();
+  const logsOnly = body.logs_only === true;
+  const debugRaw = body.debug_raw === true;
 
   if ((MLB_SEASON_STATE as string) === "offseason") {
     console.log(`[refresh-mlb-data] Skipped — MLB seasonState=${MLB_SEASON_STATE}`);
@@ -362,49 +377,59 @@ serve(async (req) => {
   const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  console.log(`[refresh-mlb-data] Run start — date=${todayET()} state=${MLB_SEASON_STATE}`);
+  console.log(
+    `[refresh-mlb-data] Run start — requestedDate=${requestedDate} logsOnly=${logsOnly} debugRaw=${debugRaw} state=${MLB_SEASON_STATE}`,
+  );
 
   const steps: StepResult[] = [];
 
-  steps.push(await ingestTeams(supabase));
-  steps.push(await ingestPlayers(supabase));
-  const gamesResult = await ingestGames(supabase);
-  steps.push(gamesResult.games);
-  steps.push(gamesResult.context);
-  steps.push(await ingestProbablePitchers(supabase, gamesResult.pitcherIds));
+  if (!logsOnly) {
+    steps.push(await ingestTeams(supabase));
+    steps.push(await ingestPlayers(supabase));
+    const gamesResult = await ingestGames(supabase);
+    steps.push(gamesResult.games);
+    steps.push(gamesResult.context);
+    steps.push(await ingestProbablePitchers(supabase, gamesResult.pitcherIds));
+  }
 
-  // ─── Step 5: Game-log ingestion (hitter + pitcher) ───────
-  const todayStr = todayET();
-  const logResult = await ingestGameLogsWindow(supabase, todayStr, GAMELOG_LOOKBACK_DAYS);
+  // ─── Game-log ingestion (hitter + pitcher) ───────
+  const logResult = logsOnly
+    ? await ingestGameLogsWindow(supabase, requestedDate, 1, { debugRaw })
+    : await ingestGameLogsWindow(supabase, requestedDate, GAMELOG_LOOKBACK_DAYS, { debugRaw });
   steps.push(logResult.hitter);
   steps.push(logResult.pitcher);
 
-  // ─── Step 6: Rolling stats / matchup / team offense rebuilds ───
-  // These read from the logs we just upserted.
-  const [rolling, matchup, teamOff] = await Promise.all([
-    rebuildRollingStats(supabase, todayStr, ROLLING_WINDOW_DAYS),
-    rebuildPitcherMatchupSummaries(supabase, todayStr, ROLLING_WINDOW_DAYS),
-    rebuildTeamOffenseDaily(supabase, todayStr, ROLLING_WINDOW_DAYS),
-  ]);
-  steps.push(rolling);
-  steps.push(matchup);
-  steps.push(teamOff);
+  if (!logsOnly) {
+    // These read from the logs we just upserted.
+    const [rolling, matchup, teamOff] = await Promise.all([
+      rebuildRollingStats(supabase, requestedDate, ROLLING_WINDOW_DAYS),
+      rebuildPitcherMatchupSummaries(supabase, requestedDate, ROLLING_WINDOW_DAYS),
+      rebuildTeamOffenseDaily(supabase, requestedDate, ROLLING_WINDOW_DAYS),
+    ]);
+    steps.push(rolling);
+    steps.push(matchup);
+    steps.push(teamOff);
+  }
 
   const totalRows = steps.reduce((acc, s) => acc + (s.rows || 0), 0);
   const hasError = steps.some((s) => s.error);
 
-  // refresh_status id=5 reserved for MLB stats refresh.
-  try {
-    await supabase
-      .from("refresh_status")
-      .upsert({ id: 5, sport: "MLB", last_run: new Date().toISOString() }, { onConflict: "id" });
-  } catch (_) { /* non-critical */ }
+  if (!logsOnly) {
+    // refresh_status id=5 reserved for MLB stats refresh.
+    try {
+      await supabase
+        .from("refresh_status")
+        .upsert({ id: 5, sport: "MLB", last_run: new Date().toISOString() }, { onConflict: "id" });
+    } catch (_) { /* non-critical */ }
+  }
 
   return new Response(
     JSON.stringify({
       ok: !hasError,
       sport: "MLB",
       seasonState: MLB_SEASON_STATE,
+      requested_date: requestedDate,
+      logs_only: logsOnly,
       total_rows: totalRows,
       steps,
       duration_ms: Date.now() - start,

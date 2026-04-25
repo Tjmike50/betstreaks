@@ -31,6 +31,12 @@ function todayET(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
+function shiftEtDate(targetDate: string, dayDelta: number): string {
+  const date = new Date(`${targetDate}T00:00:00-04:00`);
+  date.setUTCDate(date.getUTCDate() + dayDelta);
+  return date.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
 function etDayRange(targetDate: string): { startIso: string; endIso: string } {
   const startIso = `${targetDate}T00:00:00-04:00`;
   const end = new Date(`${targetDate}T00:00:00-04:00`);
@@ -242,6 +248,38 @@ serve(async (req) => {
             "consensus_threshold",
           ],
           note: "warning-only; sparse sportsbook/price data should not hard-fail health check",
+        },
+      ),
+    );
+
+    const previousGameDate = shiftEtDate(gameDate, -1);
+    const { count: previousScoreCount, error: previousScoreErr } = await supabase
+      .from("player_prop_scores")
+      .select("id", { count: "exact", head: true })
+      .eq("sport", "MLB")
+      .eq("game_date", previousGameDate);
+
+    const { count: previousOutcomeCount, error: previousOutcomeErr } = await supabase
+      .from("mlb_prop_outcomes")
+      .select("id", { count: "exact", head: true })
+      .eq("sport", "MLB")
+      .eq("game_date", previousGameDate);
+
+    checks.push(
+      makeCheck(
+        "mlb_previous_day_outcomes_present",
+        !previousScoreErr &&
+          !previousOutcomeErr &&
+          ((previousScoreCount ?? 0) === 0 || (previousOutcomeCount ?? 0) > 0),
+        "warning",
+        previousScoreErr || previousOutcomeErr
+          ? `Failed to verify previous-day MLB outcomes: ${previousScoreErr?.message ?? previousOutcomeErr?.message}`
+          : `Previous-day MLB scores=${previousScoreCount ?? 0}, outcomes=${previousOutcomeCount ?? 0}`,
+        {
+          previous_game_date: previousGameDate,
+          score_rows: previousScoreCount ?? 0,
+          outcome_rows: previousOutcomeCount ?? 0,
+          note: "warning-only; same-day pending games should not fail MLB health checks",
         },
       ),
     );
