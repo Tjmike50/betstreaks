@@ -805,6 +805,129 @@ interface LineSnapshot {
   game_date: string;
   over_odds: string | null;
   under_odds: string | null;
+  sportsbook?: string;
+  snapshot_at?: string;
+}
+
+interface LineQualityMetrics {
+  book_count: number;
+  best_over_price: number | null;
+  best_under_price: number | null;
+  average_over_price: number | null;
+  line_spread: number;
+  consensus_threshold: number | null;
+  threshold_is_consensus: boolean;
+  odds_freshness_minutes: number | null;
+  line_quality_score: number;
+  line_quality_tier: "elite" | "strong" | "lean" | "weak";
+  has_price_data: boolean;
+}
+
+function parseAmericanOdds(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function lineQualityTier(score: number): "elite" | "strong" | "lean" | "weak" {
+  if (score >= 75) return "elite";
+  if (score >= 60) return "strong";
+  if (score >= 45) return "lean";
+  return "weak";
+}
+
+function lineQualityAdjustment(tier: ReturnType<typeof lineQualityTier>): number {
+  switch (tier) {
+    case "elite":
+      return 3;
+    case "strong":
+      return 1.5;
+    case "lean":
+      return 0;
+    case "weak":
+    default:
+      return -4;
+  }
+}
+
+function computeLineQualityMetrics(
+  rows: Array<LineSnapshot & { sportsbook: string; snapshot_at: string }>,
+  threshold: number,
+): LineQualityMetrics {
+  const thresholds = [...new Set(rows.map((row) => Number(row.threshold)).filter((v) => Number.isFinite(v)))];
+  const thresholdRows = rows.filter((row) => Number(row.threshold) === Number(threshold));
+  const uniqueBooks = new Set(thresholdRows.map((row) => row.sportsbook).filter(Boolean));
+  const overPrices = thresholdRows
+    .map((row) => parseAmericanOdds(row.over_odds))
+    .filter((v): v is number => v != null);
+  const underPrices = thresholdRows
+    .map((row) => parseAmericanOdds(row.under_odds))
+    .filter((v): v is number => v != null);
+
+  const thresholdCounts = new Map<number, Set<string>>();
+  for (const row of rows) {
+    const t = Number(row.threshold);
+    if (!Number.isFinite(t)) continue;
+    const set = thresholdCounts.get(t) ?? new Set<string>();
+    if (row.sportsbook) set.add(row.sportsbook);
+    thresholdCounts.set(t, set);
+  }
+  const consensusEntry = [...thresholdCounts.entries()].sort((a, b) => {
+    const countDelta = b[1].size - a[1].size;
+    if (countDelta !== 0) return countDelta;
+    return a[0] - b[0];
+  })[0];
+  const consensusThreshold = consensusEntry ? consensusEntry[0] : null;
+
+  const freshest = rows
+    .map((row) => new Date(row.snapshot_at).getTime())
+    .filter((v) => Number.isFinite(v))
+    .sort((a, b) => b - a)[0];
+  const freshnessMinutes = freshest != null ? Math.max(0, (Date.now() - freshest) / 60_000) : null;
+
+  let score = 50;
+  const bookCount = uniqueBooks.size;
+  if (bookCount >= 5) score += 18;
+  else if (bookCount >= 3) score += 12;
+  else if (bookCount === 2) score += 4;
+  else if (bookCount === 1) score -= 4;
+
+  if (consensusThreshold != null && Number(threshold) === consensusThreshold) score += 10;
+  else score -= 5;
+
+  const spread = thresholds.length > 0 ? Math.max(...thresholds) - Math.min(...thresholds) : 0;
+  if (spread >= 1.5) score -= 16;
+  else if (spread >= 1) score -= 10;
+  else if (spread >= 0.5) score -= 5;
+  else score += 4;
+
+  const hasPriceData = overPrices.length > 0 || underPrices.length > 0;
+  if (!hasPriceData) score -= 6;
+  else if (overPrices.length > 0 && underPrices.length > 0) score += 3;
+
+  if (freshnessMinutes != null) {
+    if (freshnessMinutes <= 10) score += 8;
+    else if (freshnessMinutes <= 30) score += 4;
+    else if (freshnessMinutes > 120) score -= 15;
+    else if (freshnessMinutes > 30) score -= 8;
+  } else {
+    score -= 5;
+  }
+
+  const finalScore = clamp(score);
+  return {
+    book_count: bookCount,
+    best_over_price: overPrices.length > 0 ? Math.max(...overPrices) : null,
+    best_under_price: underPrices.length > 0 ? Math.max(...underPrices) : null,
+    average_over_price: overPrices.length > 0 ? overPrices.reduce((a, b) => a + b, 0) / overPrices.length : null,
+    line_spread: round1(spread),
+    consensus_threshold: consensusThreshold,
+    threshold_is_consensus: consensusThreshold != null && Number(threshold) === consensusThreshold,
+    odds_freshness_minutes: freshnessMinutes != null ? round1(freshnessMinutes) : null,
+    line_quality_score: round1(finalScore),
+    line_quality_tier: lineQualityTier(finalScore),
+    has_price_data: hasPriceData,
+  };
 }
 
 // ── Main handler ──
@@ -833,7 +956,7 @@ serve(async (req) => {
   //    We scope to "consensus" sportsbook to avoid duplicate per-book rows.
   const { data: snaps, error: snapErr } = await supabase
     .from("line_snapshots")
-    .select("player_id,player_name,stat_type,threshold,game_date,over_odds,under_odds,sportsbook")
+    .select("player_id,player_name,stat_type,threshold,game_date,over_odds,under_odds,sportsbook,snapshot_at")
     .eq("game_date", gameDate)
     .in("stat_type", anchorOddsMarkets);
 
@@ -916,6 +1039,7 @@ serve(async (req) => {
   let resolvedReal = 0;
   let resolvedSynth = 0;
   const dedup = new Map<string, LineSnapshot>();
+  const snapshotGroupsByPlayerMarket = new Map<string, Array<LineSnapshot & { sportsbook: string; snapshot_at: string }>>();
   for (const s of (snaps ?? []) as Array<LineSnapshot & { sportsbook: string }>) {
     if (s.player_id == null && s.player_name) {
       const realPid = nameToPid.get(normName(s.player_name));
@@ -928,6 +1052,14 @@ serve(async (req) => {
       }
     }
     if (s.player_id == null) continue;
+    const groupKey = `${s.player_id}|${s.stat_type}`;
+    const group = snapshotGroupsByPlayerMarket.get(groupKey) ?? [];
+    group.push({
+      ...s,
+      sportsbook: s.sportsbook,
+      snapshot_at: (s as LineSnapshot & { snapshot_at?: string }).snapshot_at ?? new Date(0).toISOString(),
+    });
+    snapshotGroupsByPlayerMarket.set(groupKey, group);
     const key = `${s.player_id}|${s.stat_type}|${s.threshold}`;
     const existing = dedup.get(key);
     if (!existing || s.sportsbook === "consensus") dedup.set(key, s);
@@ -1121,6 +1253,10 @@ serve(async (req) => {
   let strikeoutsMissingContextCount = 0;
   let pitcherSideEnhancedCount = 0;
   let pitcherSideMissingContextCount = 0;
+  let lineQualityEnhancedCount = 0;
+  let lineQualityMissingCount = 0;
+  let lineQualityWeakCount = 0;
+  let lineQualityEliteCount = 0;
 
   for (const line of lines) {
     const statKey = oddsToStatKey[line.stat_type];
@@ -1301,7 +1437,20 @@ serve(async (req) => {
       w.value * vl.score;
     const positiveDen = w.recent_form + w.matchup + w.opportunity + w.consistency + w.value;
     const positiveScore = positive / positiveDen; // 0..100
-    const overall = clamp(positiveScore - w.risk_penalty * (rk.score - 50) / 2);
+    let overall = clamp(positiveScore - w.risk_penalty * (rk.score - 50) / 2);
+
+    const rawMarketKey = MLB_MARKET_MAP[statKey].oddsApiMarket;
+    const lineQualityRows = snapshotGroupsByPlayerMarket.get(`${line.player_id}|${rawMarketKey}`) ?? [];
+    let lineQuality: LineQualityMetrics | null = null;
+    if (lineQualityRows.length > 0) {
+      lineQuality = computeLineQualityMetrics(lineQualityRows, line.threshold);
+      overall = clamp(overall + lineQualityAdjustment(lineQuality.line_quality_tier));
+      lineQualityEnhancedCount++;
+      if (lineQuality.line_quality_tier === "weak") lineQualityWeakCount++;
+      if (lineQuality.line_quality_tier === "elite") lineQualityEliteCount++;
+    } else {
+      lineQualityMissingCount++;
+    }
     const tier = tierFor(overall);
 
     const summary = {
@@ -1377,6 +1526,35 @@ serve(async (req) => {
 
       if (strikeoutContext.bf_l3_avg == null && strikeoutContext.bf_l5_avg == null) {
         summary.bf_context_note = "batters_faced is present in mlb_pitcher_game_logs but empty/null for recent starts";
+      }
+    }
+
+    if (lineQuality) {
+      summary.book_count = lineQuality.book_count;
+      summary.best_over_price = lineQuality.best_over_price;
+      summary.best_under_price = lineQuality.best_under_price;
+      summary.average_over_price = lineQuality.average_over_price != null ? round1(lineQuality.average_over_price) : null;
+      summary.line_spread = lineQuality.line_spread;
+      summary.consensus_threshold = lineQuality.consensus_threshold;
+      summary.threshold_is_consensus = lineQuality.threshold_is_consensus;
+      summary.odds_freshness_minutes = lineQuality.odds_freshness_minutes;
+      summary.line_quality_score = lineQuality.line_quality_score;
+      summary.line_quality_tier = lineQuality.line_quality_tier;
+
+      if (lineQuality.line_quality_tier === "elite") extraReasonTags.push("line_quality_elite");
+      else if (lineQuality.line_quality_tier === "strong") extraReasonTags.push("line_quality_strong");
+      else if (lineQuality.line_quality_tier === "weak") extraReasonTags.push("line_quality_weak");
+
+      if (lineQuality.threshold_is_consensus) extraReasonTags.push("consensus_line");
+      else extraReasonTags.push("non_consensus_line");
+
+      if (lineQuality.book_count >= 2) extraReasonTags.push("multi_book_market");
+      else extraReasonTags.push("single_book_market");
+
+      if (lineQuality.odds_freshness_minutes != null && lineQuality.odds_freshness_minutes > 30) {
+        extraReasonTags.push("stale_line");
+      } else {
+        extraReasonTags.push("fresh_line");
       }
     }
 
@@ -1543,6 +1721,10 @@ serve(async (req) => {
       strikeouts_missing_context_count: strikeoutsMissingContextCount,
       pitcher_side_enhanced_count: pitcherSideEnhancedCount,
       pitcher_side_missing_context_count: pitcherSideMissingContextCount,
+      line_quality_enhanced_count: lineQualityEnhancedCount,
+      line_quality_missing_count: lineQualityMissingCount,
+      line_quality_weak_count: lineQualityWeakCount,
+      line_quality_elite_count: lineQualityEliteCount,
       write_errors: writeErrors,
       anchors: ANCHOR_KEYS,
       duration_ms: Date.now() - startedAt,

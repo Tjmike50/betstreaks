@@ -215,6 +215,37 @@ serve(async (req) => {
       ),
     );
 
+    const lineQualityRows = scoreRows ?? [];
+    const lineQualityMissing = lineQualityRows.filter((row) => {
+      const summary = (row.summary_json ?? {}) as Record<string, unknown>;
+      return !(
+        "line_quality_score" in summary ||
+        "line_quality_tier" in summary ||
+        "book_count" in summary ||
+        "consensus_threshold" in summary
+      );
+    }).length;
+    checks.push(
+      makeCheck(
+        "mlb_line_quality_metadata",
+        lineQualityRows.length === 0 || lineQualityMissing === 0,
+        "warning",
+        `MLB scored rows=${lineQualityRows.length}, missing_line_quality_rows=${lineQualityMissing}`,
+        {
+          game_date: gameDate,
+          total_rows: lineQualityRows.length,
+          missing_context_rows: lineQualityMissing,
+          required_any_of: [
+            "line_quality_score",
+            "line_quality_tier",
+            "book_count",
+            "consensus_threshold",
+          ],
+          note: "warning-only; sparse sportsbook/price data should not hard-fail health check",
+        },
+      ),
+    );
+
     const { count: unresolvedCount, error: unresolvedErr } = await supabase
       .from("mlb_unresolved_players")
       .select("id", { count: "exact", head: true })
