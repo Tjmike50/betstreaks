@@ -32,6 +32,16 @@ const WNBA_TEAM_ABBRS: Record<string, string> = {
   "Washington Mystics": "WAS",
 };
 
+const MLB_PRIMARY_ROLE_BY_MARKET: Record<string, "pitcher" | "batter"> = {
+  pitcher_strikeouts: "pitcher",
+  pitcher_earned_runs: "pitcher",
+  pitcher_walks: "pitcher",
+  pitcher_hits_allowed: "pitcher",
+  batter_hits: "batter",
+  batter_total_bases: "batter",
+  batter_home_runs: "batter",
+};
+
 type SportKey = "NBA" | "WNBA" | "MLB";
 
 interface SportConfig {
@@ -470,6 +480,8 @@ serve(async (req) => {
     const newRows: any[] = [];
     let skippedDupes = 0;
     let gamesProcessed = 0;
+    let mlbResolvedPlayers = 0;
+    let mlbUnresolvedPlayers = 0;
     const propMarkets = cfg.propMarkets;
 
     for (const game of gamesData.slice(0, 5)) {
@@ -526,7 +538,50 @@ serve(async (req) => {
               continue;
             }
 
+            let playerId: number | null = null;
+            if (sport === "MLB") {
+              const primaryRole = MLB_PRIMARY_ROLE_BY_MARKET[statType] ?? null;
+              const teamAbbr = null;
+
+              try {
+                const { data: resolutionRows, error: resolutionError } = await supabase.rpc(
+                  "resolve_mlb_player_for_odds",
+                  {
+                    p_raw_name: prop.player,
+                    p_team_abbr: teamAbbr,
+                    p_market_key: statType,
+                    p_sportsbook: entry.bookmakerKey,
+                    p_event_id: game.id,
+                    p_primary_role: primaryRole ?? undefined,
+                  },
+                );
+
+                if (resolutionError) {
+                  console.error(
+                    `[MLB] resolve_mlb_player_for_odds failed for ${prop.player} (${statType}, ${entry.bookmakerKey}, ${game.id}):`,
+                    resolutionError,
+                  );
+                  mlbUnresolvedPlayers++;
+                } else {
+                  const resolved = Array.isArray(resolutionRows) ? resolutionRows[0] : null;
+                  if (resolved && typeof resolved.player_id === "number" && Number.isFinite(resolved.player_id)) {
+                    playerId = resolved.player_id;
+                    mlbResolvedPlayers++;
+                  } else {
+                    mlbUnresolvedPlayers++;
+                  }
+                }
+              } catch (resolutionErr) {
+                console.error(
+                  `[MLB] resolver exception for ${prop.player} (${statType}, ${entry.bookmakerKey}, ${game.id}):`,
+                  resolutionErr,
+                );
+                mlbUnresolvedPlayers++;
+              }
+            }
+
             newRows.push({
+              player_id: playerId,
               player_name: prop.player,
               stat_type: statType,
               threshold: prop.point,
@@ -645,6 +700,8 @@ serve(async (req) => {
       new_by_date: dateCounts,
       skipped_dupes: skippedDupes,
       total_across_dates: totalToday || 0,
+      mlb_resolved_players: mlbResolvedPlayers,
+      mlb_unresolved_players: mlbUnresolvedPlayers,
       odds_provider: oddsProvider,
       odds_fallback: oddsFallback,
       odds_stale: oddsStale,

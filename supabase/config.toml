@@ -60,3 +60,8 @@ verify_jwt = false
 [functions.refresh-mlb-team-map]
 verify_jwt = false
 
+[functions.mlb-health-check]
+verify_jwt = false
+
+[functions.mlb-stale-data-cleanup]
+verify_jwt = false

@@ -3,6 +3,7 @@ export interface Streak {
   player_id: number;
   player_name: string;
   team_abbr: string | null;
+  opponent_abbr?: string | null;
   stat: string;
   threshold: number;
   streak_len: number;
@@ -21,6 +22,10 @@ export interface Streak {
   last5_hits: number;
   last5_games: number;
   last5_hit_pct: number | null;
+  confidence_score?: number | null;
+  score_overall?: number | null;
+  confidence_tier?: string | null;
+  reason_tags?: unknown;
   /** Client-side annotations: real sportsbook line backing this streak. */
   book_threshold?: number | null;
   /** Main bookable line for this player+stat (may differ from streak.threshold). */
