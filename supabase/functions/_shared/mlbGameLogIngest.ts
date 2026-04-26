@@ -31,6 +31,7 @@ export interface IngestLogResult {
 export interface IngestGameLogOptions {
   debugRaw?: boolean;
   source?: "mlb_stats_api" | "sportsdataio";
+  backfillMlbamMappings?: boolean;
 }
 
 interface IntStatResult {
@@ -53,6 +54,11 @@ interface PlayerLookupRow {
   player_name: string | null;
   team_abbr: string | null;
   primary_role: string | null;
+}
+
+interface ExistingExternalIdRow {
+  player_id: number;
+  external_player_id: string;
 }
 
 const MLB_TEAM_NAME_TO_ABBR: Record<string, string> = {
@@ -267,9 +273,31 @@ function extractPlayersMap(boxscore: any, side: "home" | "away"): Array<{ player
 }
 
 async function buildPlayerLookup(supabase: Supa): Promise<{
+  existingMlbamByExternalId: Map<string, number>;
   exactByNameTeamRole: Map<string, PlayerLookupRow[]>;
   teamAbbrToSportsdataId: Map<string, number>;
 }> {
+  let mappingRows: any[] = [];
+  try {
+    const { data, error } = await supabase
+      .from("mlb_player_external_ids")
+      .select("player_id, external_player_id")
+      .eq("provider", "mlbam");
+    if (error) throw error;
+    mappingRows = data ?? [];
+  } catch (_) {
+    mappingRows = [];
+  }
+
+  const existingMlbamByExternalId = new Map<string, number>();
+  for (const row of mappingRows as ExistingExternalIdRow[]) {
+    const playerId = intOrNull(row.player_id);
+    const externalPlayerId = String(row.external_player_id ?? "").trim();
+    if (playerId != null && externalPlayerId) {
+      existingMlbamByExternalId.set(externalPlayerId, playerId);
+    }
+  }
+
   const { data: teamRows, error: teamErr } = await supabase
     .from("mlb_team_id_map")
     .select("team_id, team_abbr");
@@ -311,7 +339,7 @@ async function buildPlayerLookup(supabase: Supa): Promise<{
     exactByNameTeamRole.set(key, list);
   }
 
-  return { exactByNameTeamRole, teamAbbrToSportsdataId };
+  return { existingMlbamByExternalId, exactByNameTeamRole, teamAbbrToSportsdataId };
 }
 
 function buildBlockedSourceResult(dateStr: string, source: string, debugRaw: boolean): { hitter: IngestLogResult; pitcher: IngestLogResult } {
@@ -377,19 +405,24 @@ export async function ingestGameLogsForDate(
   const scheduleGames = extractScheduleGames(schedulePayload);
   const finalGames = scheduleGames.filter((g) => isFinalScheduleStatus(g.status));
 
-  const { exactByNameTeamRole, teamAbbrToSportsdataId } = await buildPlayerLookup(supabase);
+  const { existingMlbamByExternalId, exactByNameTeamRole, teamAbbrToSportsdataId } = await buildPlayerLookup(supabase);
 
   const hitterRows: any[] = [];
   const pitcherRows: any[] = [];
   const sampleHitterRows: any[] = [];
   const samplePitcherRows: any[] = [];
   const unresolvedPlayers: Array<Record<string, unknown>> = [];
+  const mappingsToCreate = new Map<string, Record<string, unknown>>();
+  const sampleMappingsCreated: Array<Record<string, unknown>> = [];
   const boxscoreErrorGames: number[] = [];
 
   let unresolvedPlayerCount = 0;
   let fractionalStatRows = 0;
   let skippedFractionalRows = 0;
   let boxscoreFetchErrors = 0;
+  let mappingHits = 0;
+  let mappingCreated = 0;
+  let exactNameTeamMatches = 0;
   let hitterTotalHits = 0;
   let hitterTotalTotalBases = 0;
   let hitterRowsWithHits = 0;
@@ -421,6 +454,7 @@ export async function ingestGameLogsForDate(
       const battingParticipated = hasBattingParticipation(batting);
       const pitchingParticipated = hasPitchingParticipation(pitching);
       const fullName = String(player?.person?.fullName ?? "").trim() || null;
+      const mlbamPlayerId = String(player?.person?.id ?? "").trim() || null;
       const teamAbbr = entry.teamName ? MLB_TEAM_NAME_TO_ABBR[entry.teamName] ?? null : null;
       const teamId = teamAbbr ? teamAbbrToSportsdataId.get(teamAbbr) ?? null : null;
       const opponentName = entry.opponentMlbamId != null
@@ -434,10 +468,49 @@ export async function ingestGameLogsForDate(
       const role = pitchingParticipated ? "pitcher" : battingParticipated ? "hitter" : null;
       if (!role || !fullName || !teamAbbr) continue;
 
-      const lookupRole = role === "hitter" ? "batter" : role;
-      const lookupKey = `${normalizeName(fullName)}|${teamAbbr}|${lookupRole}`;
-      const matches = exactByNameTeamRole.get(lookupKey) ?? [];
-      if (matches.length !== 1) {
+      let resolvedPlayerId: number | null = null;
+      if (mlbamPlayerId && existingMlbamByExternalId.has(mlbamPlayerId)) {
+        resolvedPlayerId = existingMlbamByExternalId.get(mlbamPlayerId) ?? null;
+        if (resolvedPlayerId != null) mappingHits++;
+      }
+
+      if (resolvedPlayerId == null) {
+        const lookupRole = role === "hitter" ? "batter" : role;
+        const lookupKey = `${normalizeName(fullName)}|${teamAbbr}|${lookupRole}`;
+        const matches = exactByNameTeamRole.get(lookupKey) ?? [];
+        if (matches.length === 1) {
+          resolvedPlayerId = matches[0].player_id;
+          exactNameTeamMatches++;
+          if (options.backfillMlbamMappings && mlbamPlayerId) {
+            mappingsToCreate.set(mlbamPlayerId, {
+              player_id: resolvedPlayerId,
+              player_name: fullName,
+              team_abbr: teamAbbr,
+              provider: "mlbam",
+              external_player_id: mlbamPlayerId,
+              confidence: 1.0,
+              source: "mlb_stats_api",
+              metadata: {
+                role,
+                team_abbr: teamAbbr,
+                game_date: dateStr,
+              },
+            });
+            existingMlbamByExternalId.set(mlbamPlayerId, resolvedPlayerId);
+            if (sampleMappingsCreated.length < SAMPLE_LIMIT) {
+              sampleMappingsCreated.push({
+                player_name: fullName,
+                team_abbr: teamAbbr,
+                role,
+                external_player_id: mlbamPlayerId,
+                player_id: resolvedPlayerId,
+              });
+            }
+          }
+        }
+      }
+
+      if (resolvedPlayerId == null) {
         unresolvedPlayerCount++;
         if (unresolvedPlayers.length < UNRESOLVED_SAMPLE_LIMIT) {
           unresolvedPlayers.push({
@@ -445,12 +518,11 @@ export async function ingestGameLogsForDate(
             team_abbr: teamAbbr,
             role,
             game_pk: game.gamePk,
-            match_count: matches.length,
+            external_player_id: mlbamPlayerId,
           });
         }
         continue;
       }
-      const resolvedPlayerId = matches[0].player_id;
 
       if (role === "hitter" && battingParticipated && batting) {
         const hits = readIntegerStat(batting, ["hits"]);
@@ -589,6 +661,19 @@ export async function ingestGameLogsForDate(
     }
   }
 
+  if (options.backfillMlbamMappings && mappingsToCreate.size > 0) {
+    mappingCreated = mappingsToCreate.size;
+    const uniqueMappings = Array.from(mappingsToCreate.values());
+    const CHUNK = 250;
+    for (let i = 0; i < uniqueMappings.length; i += CHUNK) {
+      const slice = uniqueMappings.slice(i, i + CHUNK);
+      const { error } = await supabase.from("mlb_player_external_ids").upsert(slice, {
+        onConflict: "provider,external_player_id",
+      });
+      if (error) throw new Error(`Failed to upsert mlb_player_external_ids: ${error.message}`);
+    }
+  }
+
   const okForGrading = fractionalStatRows === 0;
   const baseMetadata: Record<string, unknown> = {
     source_endpoint: "MLB Stats API",
@@ -602,6 +687,9 @@ export async function ingestGameLogsForDate(
     pitcher_rows: pitcherRows.length,
     hitter_rows_written: 0,
     pitcher_rows_written: 0,
+    mapping_hits: mappingHits,
+    mapping_created: options.backfillMlbamMappings ? mappingCreated : 0,
+    exact_name_team_matches: exactNameTeamMatches,
     unresolved_player_count: unresolvedPlayerCount,
     fractional_stat_rows: fractionalStatRows,
     skipped_fractional_rows: skippedFractionalRows,
@@ -627,6 +715,7 @@ export async function ingestGameLogsForDate(
   if (boxscoreErrorGames.length > 0) {
     (metadata as Record<string, unknown>).boxscore_error_game_pks = boxscoreErrorGames;
   }
+  (metadata as Record<string, unknown>).sample_mappings_created = sampleMappingsCreated;
 
   if (!okForGrading) {
     return {
@@ -752,6 +841,15 @@ export async function ingestGameLogsWindow(
       pitcher_rows_written:
         numericMetadataValue(agg.hitter.metadata, "pitcher_rows_written") +
         numericMetadataValue(metadata, "pitcher_rows_written"),
+      mapping_hits:
+        numericMetadataValue(agg.hitter.metadata, "mapping_hits") +
+        numericMetadataValue(metadata, "mapping_hits"),
+      mapping_created:
+        numericMetadataValue(agg.hitter.metadata, "mapping_created") +
+        numericMetadataValue(metadata, "mapping_created"),
+      exact_name_team_matches:
+        numericMetadataValue(agg.hitter.metadata, "exact_name_team_matches") +
+        numericMetadataValue(metadata, "exact_name_team_matches"),
       unresolved_player_count:
         numericMetadataValue(agg.hitter.metadata, "unresolved_player_count") +
         numericMetadataValue(metadata, "unresolved_player_count"),
@@ -798,6 +896,15 @@ export async function ingestGameLogsWindow(
     agg.pitcher.metadata = agg.hitter.metadata;
 
     if (options.debugRaw) {
+      const createdMappings = Array.isArray(metadata.sample_mappings_created)
+        ? metadata.sample_mappings_created as Array<Record<string, unknown>>
+        : [];
+      const existingCreatedMappings = Array.isArray(agg.hitter.metadata?.sample_mappings_created)
+        ? agg.hitter.metadata?.sample_mappings_created as Array<Record<string, unknown>>
+        : [];
+      for (const item of createdMappings) {
+        if (existingCreatedMappings.length < SAMPLE_LIMIT) existingCreatedMappings.push(item);
+      }
       const unresolved = Array.isArray(metadata.sample_unresolved_players)
         ? metadata.sample_unresolved_players as Array<Record<string, unknown>>
         : [];
@@ -821,6 +928,10 @@ export async function ingestGameLogsWindow(
   if (options.debugRaw) {
     agg.hitter.metadata = {
       ...(agg.hitter.metadata ?? {}),
+      sample_mappings_created:
+        Array.isArray(agg.hitter.metadata?.sample_mappings_created)
+          ? agg.hitter.metadata?.sample_mappings_created
+          : [],
       sample_unresolved_players: unresolvedSamples,
       sample_hitter_rows: hitterSamples,
       sample_pitcher_rows: pitcherSamples,

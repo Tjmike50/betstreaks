@@ -92,6 +92,7 @@ interface RefreshRequestBody {
   logs_only?: boolean;
   debug_raw?: boolean;
   source?: "mlb_stats_api" | "sportsdataio";
+  backfill_mlbam_mappings?: boolean;
 }
 
 type Supa = ReturnType<typeof createClient>;
@@ -359,6 +360,7 @@ serve(async (req) => {
   const logsOnly = body.logs_only === true;
   const debugRaw = body.debug_raw === true;
   const source = body.source || "mlb_stats_api";
+  const backfillMlbamMappings = body.backfill_mlbam_mappings === true;
 
   if ((MLB_SEASON_STATE as string) === "offseason") {
     console.log(`[refresh-mlb-data] Skipped — MLB seasonState=${MLB_SEASON_STATE}`);
@@ -380,7 +382,7 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   console.log(
-    `[refresh-mlb-data] Run start — requestedDate=${requestedDate} logsOnly=${logsOnly} debugRaw=${debugRaw} source=${source} state=${MLB_SEASON_STATE}`,
+    `[refresh-mlb-data] Run start — requestedDate=${requestedDate} logsOnly=${logsOnly} debugRaw=${debugRaw} source=${source} backfillMlbamMappings=${backfillMlbamMappings} state=${MLB_SEASON_STATE}`,
   );
 
   const steps: StepResult[] = [];
@@ -396,8 +398,12 @@ serve(async (req) => {
 
   // ─── Game-log ingestion (hitter + pitcher) ───────
   const logResult = logsOnly
-    ? await ingestGameLogsWindow(supabase, requestedDate, 1, { debugRaw, source })
-    : await ingestGameLogsWindow(supabase, requestedDate, GAMELOG_LOOKBACK_DAYS, { debugRaw, source });
+    ? await ingestGameLogsWindow(supabase, requestedDate, 1, { debugRaw, source, backfillMlbamMappings })
+    : await ingestGameLogsWindow(supabase, requestedDate, GAMELOG_LOOKBACK_DAYS, {
+      debugRaw,
+      source,
+      backfillMlbamMappings,
+    });
   steps.push(logResult.hitter);
   steps.push(logResult.pitcher);
 
