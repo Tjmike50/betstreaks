@@ -42,6 +42,15 @@ export interface MarketDepthData {
   } | null;
 }
 
+export interface AIBuildAvailableGame {
+  id: string;
+  away_team_abbr?: string | null;
+  home_team_abbr?: string | null;
+  game_time?: string | null;
+  status?: string | null;
+  canonical_game_key?: string | null;
+}
+
 export type ErrorType = "credits" | "limit" | "auth" | "no-data" | "network" | "generic";
 
 export function useAIBetBuilder() {
@@ -51,15 +60,16 @@ export function useAIBetBuilder() {
   const [errorType, setErrorType] = useState<ErrorType | null>(null);
   const [marketDepth, setMarketDepth] = useState<MarketDepthData | null>(null);
   const [isFallback, setIsFallback] = useState(false);
+  const [availableGames, setAvailableGames] = useState<AIBuildAvailableGame[]>([]);
   const { sport } = useSport();
 
   const buildSlips = async (prompt: string, slipCount = 1, filters?: BuilderFilters) => {
     setIsLoading(true);
     setError(null);
     setErrorType(null);
-    setSlips([]);
     setMarketDepth(null);
     setIsFallback(false);
+    setAvailableGames([]);
 
     // Always send the active sport so the edge function tags rows + filters odds correctly.
     const effectiveSport = filters?.sport ?? sport;
@@ -77,12 +87,14 @@ export function useAIBetBuilder() {
         let bodyError: string | null = null;
         let bodyErrorCode: string | null = null;
         let bodyMessage: string | null = null;
+        let bodyAvailableGames: AIBuildAvailableGame[] = [];
         try {
           if (context) {
             const body = await context.json();
             bodyError = body?.error || null;
             bodyErrorCode = body?.error_code || null;
             bodyMessage = body?.message || null;
+            bodyAvailableGames = Array.isArray(body?.available_games) ? body.available_games : [];
           }
         } catch {
           // body already consumed or not JSON
@@ -113,10 +125,12 @@ export function useAIBetBuilder() {
         if (bodyError === "no_candidates" || bodyError?.includes?.("no candidates")) {
           setError(bodyMessage || "Today's prop data isn't ready yet. Try again after games are loaded.");
           setErrorType("no-data");
+          setAvailableGames(bodyAvailableGames);
           toast({ title: "No data available", description: "Prop data hasn't been loaded yet for today's games.", variant: "destructive" });
           return;
         }
         // Generic fallback
+        setAvailableGames(bodyAvailableGames);
         setError(bodyMessage || fnError.message || "Something went wrong. Please try again.");
         setErrorType("generic");
         toast({ title: "Something went wrong", description: bodyMessage || "Please try again later.", variant: "destructive" });
@@ -126,6 +140,7 @@ export function useAIBetBuilder() {
       if (data && data.ok === false) {
         const errorCode = data.error_code || "GENERIC_ERROR";
         const message = data.message || "Something went wrong. Please try again.";
+        const responseAvailableGames = Array.isArray(data.available_games) ? data.available_games : [];
         if (errorCode === "FREE_LIMIT_REACHED") {
           setError(message);
           setErrorType("limit");
@@ -135,12 +150,14 @@ export function useAIBetBuilder() {
         if (errorCode === "SCHEDULE_EMPTY" || errorCode === "NO_CANDIDATES" || errorCode === "GAME_NOT_FOUND") {
           setError(message);
           setErrorType("no-data");
+          setAvailableGames(responseAvailableGames);
           toast({ title: "No data available", description: message, variant: "destructive" });
           return;
         }
         if (errorCode === "AI_PROVIDER_FAILED") {
           setError(message);
           setErrorType("generic");
+          setAvailableGames(responseAvailableGames);
           toast({ title: "AI temporarily unavailable", description: message, variant: "destructive" });
           return;
         }
@@ -163,8 +180,31 @@ export function useAIBetBuilder() {
         throw new Error(data.error);
       }
 
-      setSlips(data.slips || []);
+      const nextSlips = Array.isArray(data?.slips) ? data.slips : [];
+      if (import.meta.env.DEV) {
+        console.log("[AI Builder] response", {
+          ok: data?.ok,
+          slips: nextSlips.length,
+          error_code: data?.error_code,
+          message: data?.message,
+        });
+      }
+
+      if (nextSlips.length === 0) {
+        setError(data?.message || "No eligible props found for this slate yet. Try all games or refresh odds.");
+        setErrorType("no-data");
+        setAvailableGames(Array.isArray(data?.available_games) ? data.available_games : []);
+        toast({
+          title: "No slips generated",
+          description: data?.message || "No eligible props found for this slate yet. Try all games or refresh odds.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setSlips(nextSlips);
       setIsFallback(!!data.fallback);
+      setAvailableGames([]);
 
       // Capture market depth debug data
       if (data?.scoring_metadata || data?.debug) {
@@ -192,5 +232,5 @@ export function useAIBetBuilder() {
     }
   };
 
-  return { slips, isLoading, error, errorType, buildSlips, marketDepth, isFallback };
+  return { slips, isLoading, error, errorType, buildSlips, marketDepth, isFallback, availableGames };
 }

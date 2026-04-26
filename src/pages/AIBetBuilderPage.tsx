@@ -421,7 +421,7 @@ export default function AIBetBuilderPage() {
     ...DEFAULT_BUILDER_FILTERS,
     sport,
   });
-  const { slips, isLoading, error, errorType, buildSlips, marketDepth, isFallback } = useAIBetBuilder();
+  const { slips, isLoading, error, errorType, buildSlips, marketDepth, isFallback, availableGames } = useAIBetBuilder();
   const { isPremium } = usePremiumStatus();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -605,8 +605,21 @@ export default function AIBetBuilderPage() {
             <CardContent className="pt-4 flex items-start gap-3">
               <Database className="h-5 w-5 text-info shrink-0 mt-0.5" />
               <div className="space-y-2">
-                <p className="text-sm font-medium text-info">Prop data not ready</p>
+                <p className="text-sm font-medium text-info">No slips generated</p>
                 <p className="text-xs text-muted-foreground">{error}</p>
+                {availableGames.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-medium text-foreground">Available games</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {availableGames.map((game) => (
+                        <Badge key={game.id} variant="outline" className="text-[10px]">
+                          {game.away_team_abbr} @ {game.home_team_abbr}
+                          {game.game_time ? ` • ${game.game_time}` : ""}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   Try Again
@@ -711,10 +724,21 @@ export default function AIBetBuilderPage() {
 
         {/* Post-interaction empty state */}
         {!isLoading && !error && slips.length === 0 && hasInteracted && (
-          <div className="text-center py-8 text-muted-foreground">
-            <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">Enter a prompt and tap Generate to build slips</p>
-          </div>
+          <Card className="border-border/30 bg-card/60">
+            <CardContent className="pt-5 pb-5 text-center space-y-3">
+              <Sparkles className="h-8 w-8 mx-auto opacity-30 text-muted-foreground" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">No slips generated</p>
+                <p className="text-xs text-muted-foreground">
+                  No eligible props found for this slate yet. Try all games or refresh odds.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={handleButtonSubmit}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                Try Again
+              </Button>
+            </CardContent>
+          </Card>
         )}
 
         {/* Disclaimer */}
