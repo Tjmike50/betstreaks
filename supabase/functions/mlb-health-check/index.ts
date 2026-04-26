@@ -284,6 +284,32 @@ serve(async (req) => {
       ),
     );
 
+    const { count: previousSummaryCount, error: previousSummaryErr } = await supabase
+      .from("mlb_performance_summaries")
+      .select("id", { count: "exact", head: true })
+      .eq("sport", "MLB")
+      .eq("summary_date", previousGameDate)
+      .eq("summary_window", "daily");
+
+    checks.push(
+      makeCheck(
+        "mlb_previous_day_performance_summaries_present",
+        !previousOutcomeErr &&
+          !previousSummaryErr &&
+          ((previousOutcomeCount ?? 0) === 0 || (previousSummaryCount ?? 0) > 0),
+        "warning",
+        previousOutcomeErr || previousSummaryErr
+          ? `Failed to verify previous-day MLB performance summaries: ${previousOutcomeErr?.message ?? previousSummaryErr?.message}`
+          : `Previous-day MLB outcomes=${previousOutcomeCount ?? 0}, daily summaries=${previousSummaryCount ?? 0}`,
+        {
+          previous_game_date: previousGameDate,
+          outcome_rows: previousOutcomeCount ?? 0,
+          daily_summary_rows: previousSummaryCount ?? 0,
+          note: "warning-only; missing summaries should not hard-fail MLB health checks",
+        },
+      ),
+    );
+
     const { count: unresolvedCount, error: unresolvedErr } = await supabase
       .from("mlb_unresolved_players")
       .select("id", { count: "exact", head: true })

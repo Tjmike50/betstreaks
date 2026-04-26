@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.grade-mlb-props]
 verify_jwt = false
+
+[functions.summarize-mlb-performance]
+verify_jwt = false
