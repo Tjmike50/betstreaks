@@ -33,6 +33,7 @@ interface ScoreRow {
 interface HitterLog {
   player_id: number;
   game_date: string;
+  game_id: string;
   hits: number | null;
   total_bases: number | null;
   home_runs: number | null;
@@ -41,6 +42,7 @@ interface HitterLog {
 interface PitcherLog {
   player_id: number;
   game_date: string;
+  game_id: string;
   strikeouts: number | null;
   earned_runs_allowed: number | null;
   walks_allowed: number | null;
@@ -89,6 +91,10 @@ function gradeOutcome(actual: number, threshold: number, side: PickSide): Outcom
   if (actual > threshold) return "hit";
   if (actual === threshold) return "push";
   return "miss";
+}
+
+function isOfficialActualValue(actual: number | null): actual is number {
+  return actual != null && Number.isFinite(actual) && Number.isInteger(actual);
 }
 
 async function logHealth(
@@ -162,12 +168,16 @@ serve(async (req) => {
       const metadata = {
         dry_run: dryRun,
         game_date: gameDate,
+        official_log_source: "mlb_statsapi",
+        official_logs_only: true,
         graded_count: 0,
         hit_count: 0,
         miss_count: 0,
         push_count: 0,
         pending_count: 0,
         missing_result_count: 0,
+        pending_due_to_missing_official_log_count: 0,
+        invalid_actual_count: 0,
         error_count: 0,
       };
       await logHealth(supabase, {
@@ -190,6 +200,8 @@ serve(async (req) => {
         push_count: 0,
         pending_count: 0,
         missing_result_count: 0,
+        pending_due_to_missing_official_log_count: 0,
+        invalid_actual_count: 0,
         error_count: 0,
         sample_results: [],
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -215,12 +227,16 @@ serve(async (req) => {
       const metadata = {
         dry_run: dryRun,
         game_date: gameDate,
+        official_log_source: "mlb_statsapi",
+        official_logs_only: true,
         graded_count: 0,
         hit_count: 0,
         miss_count: 0,
         push_count: 0,
         pending_count: 0,
         missing_result_count: 0,
+        pending_due_to_missing_official_log_count: 0,
+        invalid_actual_count: 0,
         error_count: 0,
         note: "no pending or ungraded MLB prop rows matched the request",
       };
@@ -244,6 +260,8 @@ serve(async (req) => {
         push_count: 0,
         pending_count: 0,
         missing_result_count: 0,
+        pending_due_to_missing_official_log_count: 0,
+        invalid_actual_count: 0,
         error_count: 0,
         sample_results: [],
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -252,15 +270,17 @@ serve(async (req) => {
     const playerIds = [...new Set(targetRows.map((row) => row.player_id))];
     const { data: hitterLogsRaw, error: hitterErr } = await supabase
       .from("mlb_hitter_game_logs")
-      .select("player_id,game_date,hits,total_bases,home_runs")
+      .select("player_id,game_date,game_id,hits,total_bases,home_runs")
       .eq("game_date", gameDate)
+      .like("game_id", "mlb_statsapi_%")
       .in("player_id", playerIds);
     if (hitterErr) throw new Error(`Failed to fetch mlb_hitter_game_logs: ${hitterErr.message}`);
 
     const { data: pitcherLogsRaw, error: pitcherErr } = await supabase
       .from("mlb_pitcher_game_logs")
-      .select("player_id,game_date,strikeouts,earned_runs_allowed,walks_allowed,hits_allowed")
+      .select("player_id,game_date,game_id,strikeouts,earned_runs_allowed,walks_allowed,hits_allowed")
       .eq("game_date", gameDate)
+      .like("game_id", "mlb_statsapi_%")
       .in("player_id", playerIds);
     if (pitcherErr) throw new Error(`Failed to fetch mlb_pitcher_game_logs: ${pitcherErr.message}`);
 
@@ -287,6 +307,8 @@ serve(async (req) => {
     let pushCount = 0;
     let pendingCount = 0;
     let missingResultCount = 0;
+    let pendingDueToMissingOfficialLogCount = 0;
+    let invalidActualCount = 0;
     let errorCount = 0;
 
     for (const row of targetRows) {
@@ -306,18 +328,27 @@ serve(async (req) => {
             ? "mlb_hitter_game_logs"
             : "mlb_pitcher_game_logs",
           duplicate_game_logs: duplicateLogs,
+          official_log_source: "mlb_statsapi",
+          official_logs_only: true,
         };
 
         if (duplicateLogs) {
           pendingCount++;
           missingResultCount++;
-          metadata.note = "multiple game logs found for player/date; leaving pending to avoid grading wrong game";
+          pendingDueToMissingOfficialLogCount++;
+          metadata.note = "multiple official mlb_statsapi game logs found for player/date; leaving pending to avoid grading wrong game";
         } else {
           actualValue = actualForScore(row, hitterLog, pitcherLog);
           if (actualValue == null) {
             pendingCount++;
             missingResultCount++;
-            metadata.note = "no completed game log available";
+            pendingDueToMissingOfficialLogCount++;
+            metadata.note = "no official mlb_statsapi game log available";
+          } else if (!isOfficialActualValue(actualValue)) {
+            actualValue = null;
+            pendingCount++;
+            invalidActualCount++;
+            metadata.note = "official mlb_statsapi actual was fractional/invalid; leaving pending";
           } else {
             outcome = gradeOutcome(actualValue, Number(row.threshold), pickSide);
             gradedCount++;
@@ -380,12 +411,16 @@ serve(async (req) => {
     const metadata = {
       dry_run: dryRun,
       game_date: gameDate,
+      official_log_source: "mlb_statsapi",
+      official_logs_only: true,
       graded_count: gradedCount,
       hit_count: hitCount,
       miss_count: missCount,
       push_count: pushCount,
       pending_count: pendingCount,
       missing_result_count: missingResultCount,
+      pending_due_to_missing_official_log_count: pendingDueToMissingOfficialLogCount,
+      invalid_actual_count: invalidActualCount,
       error_count: errorCount,
     };
 
@@ -412,6 +447,8 @@ serve(async (req) => {
         push_count: pushCount,
         pending_count: pendingCount,
         missing_result_count: missingResultCount,
+        pending_due_to_missing_official_log_count: pendingDueToMissingOfficialLogCount,
+        invalid_actual_count: invalidActualCount,
         error_count: errorCount,
         sample_results: sampleResults,
       }),
@@ -456,6 +493,8 @@ serve(async (req) => {
         push_count: 0,
         pending_count: 0,
         missing_result_count: 0,
+        pending_due_to_missing_official_log_count: 0,
+        invalid_actual_count: 0,
         error_count: 1,
         sample_results: [],
         error: message,

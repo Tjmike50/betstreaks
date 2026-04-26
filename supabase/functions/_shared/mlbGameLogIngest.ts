@@ -1,21 +1,19 @@
 // ============================================================
 // BetStreaks — MLB game-log ingestion (hitter + pitcher)
 //
-// Pulls official completed SportsDataIO box scores and upserts into:
-//   • mlb_hitter_game_logs
-//   • mlb_pitcher_game_logs
+// Supports two source modes:
+//   • mlb_stats_api  -> official MLB Stats API schedule + boxscore path
+//   • sportsdataio   -> guarded/blocked for grading safety
 //
-// Used by `refresh-mlb-data`. Idempotent — every row upserts on
-// (game_id, player_id) via the v1 schema's natural key.
-//
-// Important: this path is grading-safe. It only writes player logs for
-// games confirmed final, and it skips rows whose outcome stats are
-// fractional so projected/live values never enter the grading tables.
+// The official MLB Stats API path only writes logs for final games and only
+// writes integer outcome stats. Fractional rows are rejected so projected or
+// non-official stats never contaminate mlb_hitter_game_logs /
+// mlb_pitcher_game_logs.
 // ============================================================
 
-const SPORTSDATA_SCORES_BASE = "https://api.sportsdata.io/v3/mlb/scores/json";
-const SPORTSDATA_STATS_BASE = "https://api.sportsdata.io/v3/mlb/stats/json";
-const BOX_SCORE_ENDPOINT = "BoxScores";
+const MLB_STATS_API_SCHEDULE_ENDPOINT = "https://statsapi.mlb.com/api/v1/schedule";
+const MLB_STATS_API_GAME_ENDPOINT = "https://statsapi.mlb.com/api/v1/game";
+const SPORTSDATA_BLOCKED_ENDPOINT = "https://api.sportsdata.io/v3/mlb/stats/json/BoxScores";
 
 type Supa = {
   from: (table: string) => any;
@@ -32,6 +30,7 @@ export interface IngestLogResult {
 
 export interface IngestGameLogOptions {
   debugRaw?: boolean;
+  source?: "mlb_stats_api" | "sportsdataio";
 }
 
 interface IntStatResult {
@@ -40,94 +39,91 @@ interface IntStatResult {
   keyFound: boolean;
 }
 
-const HITTER_HITS_KEYS = ["Hits", "hits", "BattingHits", "battingHits", "batting_hits"];
-const HITTER_TOTAL_BASES_KEYS = [
-  "TotalBases",
-  "totalBases",
-  "total_bases",
-  "BattingTotalBases",
-  "battingTotalBases",
-  "batting_total_bases",
-];
-const HITTER_SINGLES_KEYS = ["Singles", "singles", "BattingSingles", "battingSingles", "batting_singles"];
-const HITTER_DOUBLES_KEYS = ["Doubles", "doubles", "BattingDoubles", "battingDoubles", "batting_doubles"];
-const HITTER_TRIPLES_KEYS = ["Triples", "triples", "BattingTriples", "battingTriples", "batting_triples"];
-const HITTER_HOME_RUNS_KEYS = ["HomeRuns", "homeRuns", "home_runs", "BattingHomeRuns", "battingHomeRuns", "batting_home_runs"];
-const HITTER_RUNS_KEYS = ["Runs", "runs", "BattingRuns", "battingRuns", "batting_runs"];
-const HITTER_RBI_KEYS = ["RunsBattedIn", "runsBattedIn", "runs_batted_in", "RBI", "rbi"];
-const HITTER_WALKS_KEYS = ["Walks", "walks", "BattingWalks", "battingWalks", "batting_walks"];
-const HITTER_STRIKEOUTS_KEYS = ["Strikeouts", "strikeouts", "BattingStrikeouts", "battingStrikeouts", "batting_strikeouts"];
-const HITTER_STOLEN_BASES_KEYS = ["StolenBases", "stolenBases", "stolen_bases"];
-const HITTER_AT_BATS_KEYS = ["AtBats", "atBats", "at_bats"];
-const HITTER_PLATE_APPEARANCES_KEYS = ["PlateAppearances", "plateAppearances", "plate_appearances"];
-const HITTER_BATTING_ORDER_KEYS = ["BattingOrder", "battingOrder", "batting_order"];
+interface ScheduleGame {
+  gamePk: number;
+  status: unknown;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+}
 
-const PITCHER_STRIKEOUTS_KEYS = ["PitchingStrikeouts", "pitchingStrikeouts", "pitching_strikeouts", "Strikeouts", "strikeouts"];
-const PITCHER_EARNED_RUNS_KEYS = ["PitchingEarnedRuns", "pitchingEarnedRuns", "pitching_earned_runs", "EarnedRuns", "earnedRuns", "earned_runs"];
-const PITCHER_WALKS_KEYS = ["PitchingWalks", "pitchingWalks", "pitching_walks", "Walks", "walks"];
-const PITCHER_HITS_ALLOWED_KEYS = ["PitchingHits", "pitchingHits", "pitching_hits", "HitsAllowed", "hitsAllowed", "hits_allowed"];
-const PITCHER_HOME_RUNS_ALLOWED_KEYS = ["PitchingHomeRuns", "pitchingHomeRuns", "pitching_home_runs", "HomeRunsAllowed", "homeRunsAllowed", "home_runs_allowed"];
-const PITCHER_BATTERS_FACED_KEYS = [
-  "PitchingPlateAppearances",
-  "pitchingPlateAppearances",
-  "pitching_plate_appearances",
-  "BattersFaced",
-  "battersFaced",
-  "batters_faced",
-  "PitchingBattersFaced",
-  "pitchingBattersFaced",
-  "pitching_batters_faced",
-];
-const PITCHER_INNINGS_PITCHED_KEYS = ["InningsPitchedDecimal", "inningsPitchedDecimal", "innings_pitched_decimal", "InningsPitchedFull", "inningsPitchedFull", "innings_pitched_full"];
-const PITCHER_PITCH_COUNT_KEYS = ["PitchesThrown", "pitchesThrown", "pitches_thrown", "PitchCount", "pitchCount", "pitch_count"];
+interface PlayerLookupRow {
+  player_id: number;
+  player_name: string | null;
+  team_abbr: string | null;
+  primary_role: string | null;
+}
+
+const MLB_TEAM_NAME_TO_ABBR: Record<string, string> = {
+  "Arizona Diamondbacks": "ARI",
+  "Athletics": "ATH",
+  "Atlanta Braves": "ATL",
+  "Baltimore Orioles": "BAL",
+  "Boston Red Sox": "BOS",
+  "Chicago Cubs": "CHC",
+  "Chicago White Sox": "CWS",
+  "Cincinnati Reds": "CIN",
+  "Cleveland Guardians": "CLE",
+  "Colorado Rockies": "COL",
+  "Detroit Tigers": "DET",
+  "Houston Astros": "HOU",
+  "Kansas City Royals": "KC",
+  "Los Angeles Angels": "LAA",
+  "Los Angeles Dodgers": "LAD",
+  "Miami Marlins": "MIA",
+  "Milwaukee Brewers": "MIL",
+  "Minnesota Twins": "MIN",
+  "New York Mets": "NYM",
+  "New York Yankees": "NYY",
+  "Philadelphia Phillies": "PHI",
+  "Pittsburgh Pirates": "PIT",
+  "San Diego Padres": "SD",
+  "San Francisco Giants": "SF",
+  "Seattle Mariners": "SEA",
+  "St. Louis Cardinals": "STL",
+  "Tampa Bay Rays": "TB",
+  "Texas Rangers": "TEX",
+  "Toronto Blue Jays": "TOR",
+  "Washington Nationals": "WSH",
+};
+
+const SAMPLE_LIMIT = 3;
+const UNRESOLVED_SAMPLE_LIMIT = 10;
 
 const DEBUG_HITTER_VALUE_KEYS = [
-  "PlayerID",
-  "Name",
-  "Team",
-  "Position",
-  "PositionCategory",
-  "Hits",
+  "fullName",
+  "battingOrder",
+  "atBats",
   "hits",
-  "BattingHits",
-  "TotalBases",
+  "doubles",
+  "triples",
+  "homeRuns",
+  "runs",
+  "rbi",
+  "baseOnBalls",
+  "strikeOuts",
+  "stolenBases",
+  "plateAppearances",
   "totalBases",
-  "BattingTotalBases",
-  "Singles",
-  "Doubles",
-  "Triples",
-  "HomeRuns",
-  "AtBats",
-  "PlateAppearances",
-  "BattingOrder",
 ];
 
 const DEBUG_PITCHER_VALUE_KEYS = [
-  "PlayerID",
-  "Name",
-  "Team",
-  "Position",
-  "PositionCategory",
-  "PitchingStrikeouts",
-  "pitchingStrikeouts",
-  "PitchingEarnedRuns",
-  "PitchingWalks",
-  "PitchingHits",
-  "PitchingPlateAppearances",
-  "BattersFaced",
-  "InningsPitchedDecimal",
-  "PitchesThrown",
+  "fullName",
+  "inningsPitched",
+  "strikeOuts",
+  "earnedRuns",
+  "baseOnBalls",
+  "hits",
+  "battersFaced",
+  "pitchesThrown",
 ];
 
-async function fetchSportsData(path: string): Promise<any> {
-  const apiKey = Deno.env.get("SPORTSDATAIO_API_KEY");
-  if (!apiKey) throw new Error("SPORTSDATAIO_API_KEY not configured");
-  const url = `${path}?key=${apiKey}`;
-  console.log(`[mlb-gamelogs] GET ${path}`);
+async function fetchJson(url: string): Promise<any> {
   const res = await fetch(url, { signal: AbortSignal.timeout(45_000) });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`SportsDataIO ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`${res.status} ${url}: ${body.slice(0, 300)}`);
   }
   return res.json();
 }
@@ -151,12 +147,6 @@ function firstDefinedValue(row: any, keys: string[]): unknown {
   return undefined;
 }
 
-function hasAnyKey(row: any, keys: string[]): boolean {
-  return keys.some((key) =>
-    Object.prototype.hasOwnProperty.call(row ?? {}, key) && row?.[key] != null
-  );
-}
-
 function readIntegerStat(row: any, keys: string[]): IntStatResult {
   const value = firstDefinedValue(row, keys);
   if (value == null) return { value: null, fractional: false, keyFound: false };
@@ -167,334 +157,457 @@ function readIntegerStat(row: any, keys: string[]): IntStatResult {
 }
 
 function readNumericStat(row: any, keys: string[]): number | null {
-  const value = firstDefinedValue(row, keys);
-  return num(value);
+  return num(firstDefinedValue(row, keys));
 }
 
 function pickDebugValues(row: any, keys: string[]): Record<string, unknown> {
-  const values: Record<string, unknown> = {};
+  const out: Record<string, unknown> = {};
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(row ?? {}, key) && row?.[key] != null) {
-      values[key] = row[key];
+      out[key] = row[key];
     }
   }
-  return values;
+  return out;
 }
 
-function formatSportsDataDate(dateStr: string): string {
-  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  const d = new Date(`${dateStr}T12:00:00Z`);
-  return `${d.getUTCFullYear()}-${months[d.getUTCMonth()]}-${String(d.getUTCDate()).padStart(2, "0")}`;
+function normalizeName(name: string | null | undefined): string {
+  return (name ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function isFinalStatus(statusRaw: unknown): boolean {
-  const status = String(statusRaw ?? "").trim().toLowerCase();
-  return status.includes("final") || status === "f" || status === "f/ot" || status === "closed" || status === "complete";
+function parseBattingOrder(value: unknown): number | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric >= 100) return Math.trunc(numeric / 100);
+  return Math.trunc(numeric);
 }
 
-function isPitcherRow(row: any): boolean {
-  const pc = String(row?.PositionCategory ?? "").toUpperCase();
-  const position = String(row?.Position ?? "").toUpperCase();
-  if (pc === "P" || pc === "PITCHER" || position === "P" || position === "SP" || position === "RP") return true;
-  const ip = readNumericStat(row, PITCHER_INNINGS_PITCHED_KEYS);
-  return ip != null && ip > 0;
+function hasPitchingParticipation(pitching: any): boolean {
+  if (!pitching || typeof pitching !== "object") return false;
+  const inningsPitched = readNumericStat(pitching, ["inningsPitched"]);
+  const battersFaced = readIntegerStat(pitching, ["battersFaced"]);
+  const pitchesThrown = readIntegerStat(pitching, ["numberOfPitches", "pitchesThrown"]);
+  const strikeOuts = readIntegerStat(pitching, ["strikeOuts"]);
+  const hitsAllowed = readIntegerStat(pitching, ["hits"]);
+  const walksAllowed = readIntegerStat(pitching, ["baseOnBalls"]);
+  return (inningsPitched ?? 0) > 0 ||
+    (battersFaced.value ?? 0) > 0 ||
+    (pitchesThrown.value ?? 0) > 0 ||
+    (strikeOuts.value ?? 0) > 0 ||
+    (hitsAllowed.value ?? 0) > 0 ||
+    (walksAllowed.value ?? 0) > 0;
 }
 
-function extractPlayerRows(box: any): any[] {
-  const playerGames = Array.isArray(box?.PlayerGames) ? box.PlayerGames : [];
-  if (playerGames.length > 0) return playerGames;
-  return [
-    ...(Array.isArray(box?.HomeTeamPlayerStats) ? box.HomeTeamPlayerStats : []),
-    ...(Array.isArray(box?.AwayTeamPlayerStats) ? box.AwayTeamPlayerStats : []),
-  ];
+function hasBattingParticipation(batting: any): boolean {
+  if (!batting || typeof batting !== "object") return false;
+  const plateAppearances = readIntegerStat(batting, ["plateAppearances"]);
+  const atBats = readIntegerStat(batting, ["atBats"]);
+  const hits = readIntegerStat(batting, ["hits"]);
+  const walks = readIntegerStat(batting, ["baseOnBalls"]);
+  const runs = readIntegerStat(batting, ["runs"]);
+  const rbi = readIntegerStat(batting, ["rbi"]);
+  return (plateAppearances.value ?? 0) > 0 ||
+    (atBats.value ?? 0) > 0 ||
+    (hits.value ?? 0) > 0 ||
+    (walks.value ?? 0) > 0 ||
+    (runs.value ?? 0) > 0 ||
+    (rbi.value ?? 0) > 0;
 }
 
-function numericMetadataValue(metadata: Record<string, unknown> | undefined, key: string): number {
-  const value = metadata?.[key];
-  return typeof value === "number" ? value : 0;
+function isFinalScheduleStatus(status: any): boolean {
+  const abstractState = String(status?.abstractGameState ?? "").toLowerCase();
+  const abstractCode = String(status?.abstractGameCode ?? "").toUpperCase();
+  const detailedState = String(status?.detailedState ?? "").toLowerCase();
+  return abstractState === "final" ||
+    abstractCode === "F" ||
+    detailedState.includes("final") ||
+    detailedState.includes("completed") ||
+    detailedState.includes("game over");
 }
 
-/**
- * Ingest hitter + pitcher game logs for the given ISO date (YYYY-MM-DD).
- * Returns one StepResult per table.
- */
+function extractScheduleGames(payload: any): ScheduleGame[] {
+  const dates = Array.isArray(payload?.dates) ? payload.dates : [];
+  const games: ScheduleGame[] = [];
+  for (const dateEntry of dates) {
+    for (const game of Array.isArray(dateEntry?.games) ? dateEntry.games : []) {
+      const gamePk = intOrNull(game?.gamePk);
+      if (gamePk == null) continue;
+      games.push({
+        gamePk,
+        status: game?.status ?? null,
+        homeTeamId: intOrNull(game?.teams?.home?.team?.id),
+        awayTeamId: intOrNull(game?.teams?.away?.team?.id),
+        homeTeamName: String(game?.teams?.home?.team?.name ?? "").trim() || null,
+        awayTeamName: String(game?.teams?.away?.team?.name ?? "").trim() || null,
+      });
+    }
+  }
+  return games;
+}
+
+function extractPlayersMap(boxscore: any, side: "home" | "away"): Array<{ player: any; isHome: boolean; teamName: string | null; teamMlbamId: number | null; opponentMlbamId: number | null }> {
+  const team = boxscore?.teams?.[side];
+  const opponent = boxscore?.teams?.[side === "home" ? "away" : "home"];
+  const players = Object.values(team?.players ?? {}) as any[];
+  return players.map((player) => ({
+    player,
+    isHome: side === "home",
+    teamName: String(team?.team?.name ?? "").trim() || null,
+    teamMlbamId: intOrNull(team?.team?.id),
+    opponentMlbamId: intOrNull(opponent?.team?.id),
+  }));
+}
+
+async function buildPlayerLookup(supabase: Supa): Promise<{
+  exactByNameTeamRole: Map<string, PlayerLookupRow[]>;
+  teamAbbrToSportsdataId: Map<string, number>;
+}> {
+  const { data: teamRows, error: teamErr } = await supabase
+    .from("mlb_team_id_map")
+    .select("team_id, team_abbr");
+  if (teamErr) throw new Error(`Failed to read mlb_team_id_map: ${teamErr.message}`);
+
+  const teamIdToAbbr = new Map<number, string>();
+  const teamAbbrToSportsdataId = new Map<string, number>();
+  for (const row of teamRows ?? []) {
+    const teamId = intOrNull((row as any).team_id);
+    const abbr = String((row as any).team_abbr ?? "").toUpperCase();
+    if (teamId != null && abbr) {
+      teamIdToAbbr.set(teamId, abbr);
+      teamAbbrToSportsdataId.set(abbr, teamId);
+    }
+  }
+
+  const { data: profileRows, error: profileErr } = await supabase
+    .from("mlb_player_profiles")
+    .select("player_id, player_name, mlb_team_id, primary_role");
+  if (profileErr) throw new Error(`Failed to read mlb_player_profiles: ${profileErr.message}`);
+
+  const exactByNameTeamRole = new Map<string, PlayerLookupRow[]>();
+  for (const row of profileRows ?? []) {
+    const playerId = intOrNull((row as any).player_id);
+    const playerName = String((row as any).player_name ?? "").trim() || null;
+    const teamId = intOrNull((row as any).mlb_team_id);
+    const primaryRole = String((row as any).primary_role ?? "").trim() || null;
+    const teamAbbr = teamId != null ? teamIdToAbbr.get(teamId) ?? null : null;
+    if (playerId == null || !playerName || !teamAbbr) continue;
+    const role = primaryRole === "pitcher" ? "pitcher" : "batter";
+    const key = `${normalizeName(playerName)}|${teamAbbr}|${role}`;
+    const list = exactByNameTeamRole.get(key) ?? [];
+    list.push({
+      player_id: playerId,
+      player_name: playerName,
+      team_abbr: teamAbbr,
+      primary_role: role,
+    });
+    exactByNameTeamRole.set(key, list);
+  }
+
+  return { exactByNameTeamRole, teamAbbrToSportsdataId };
+}
+
+function buildBlockedSourceResult(dateStr: string, source: string, debugRaw: boolean): { hitter: IngestLogResult; pitcher: IngestLogResult } {
+  const metadata: Record<string, unknown> = {
+    ok_for_grading: false,
+    source_endpoint: source === "sportsdataio" ? SPORTSDATA_BLOCKED_ENDPOINT : source,
+    official_boxscore_mode: false,
+    reason: "source returned fractional/non-official stats",
+    fractional_stat_rows: 0,
+    skipped_fractional_rows: 0,
+    rows_written: 0,
+    recommendation: "Use a verified final boxscore endpoint/source before grading.",
+    game_date: dateStr,
+  };
+  if (debugRaw) {
+    metadata.sample_hitter_raw_keys = [];
+    metadata.sample_pitcher_raw_keys = [];
+    metadata.sample_hitter_raw_values = [];
+    metadata.sample_pitcher_raw_values = [];
+  }
+  return {
+    hitter: {
+      step: "mlb_hitter_game_logs",
+      rows: 0,
+      skipped: true,
+      reason: "source returned fractional/non-official stats",
+      metadata,
+    },
+    pitcher: {
+      step: "mlb_pitcher_game_logs",
+      rows: 0,
+      skipped: true,
+      reason: "source returned fractional/non-official stats",
+      metadata,
+    },
+  };
+}
+
+function withDebugSamples(metadata: Record<string, unknown>, hitterSamples: any[], pitcherSamples: any[], unresolvedPlayers: Array<Record<string, unknown>>, debugRaw: boolean) {
+  if (!debugRaw) return metadata;
+  return {
+    ...metadata,
+    sample_hitter_rows: hitterSamples,
+    sample_pitcher_rows: pitcherSamples,
+    sample_unresolved_players: unresolvedPlayers,
+  };
+}
+
 export async function ingestGameLogsForDate(
   supabase: Supa,
   dateStr: string,
   options: IngestGameLogOptions = {},
 ): Promise<{ hitter: IngestLogResult; pitcher: IngestLogResult }> {
-  const result = {
-    hitter: { step: "mlb_hitter_game_logs", rows: 0 } as IngestLogResult,
-    pitcher: { step: "mlb_pitcher_game_logs", rows: 0 } as IngestLogResult,
-  };
-
-  let games: any[] = [];
-  try {
-    games = (await fetchSportsData(`${SPORTSDATA_SCORES_BASE}/GamesByDate/${dateStr}`)) as any[];
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    result.hitter.error = msg;
-    result.pitcher.error = msg;
-    return result;
+  const source = options.source ?? "mlb_stats_api";
+  if (source !== "mlb_stats_api") {
+    return buildBlockedSourceResult(dateStr, source, options.debugRaw === true);
   }
 
-  if (!Array.isArray(games) || games.length === 0) {
-    const metadata = {
-      source_endpoint: `${SPORTSDATA_SCORES_BASE}/GamesByDate/${dateStr}`,
-      official_boxscore_mode: true,
-      games_checked: 0,
-      games_final: 0,
-      games_skipped_not_final: 0,
-      hitter_rows: 0,
-      pitcher_rows: 0,
-      fractional_stat_rows: 0,
-      skipped_fractional_rows: 0,
-    };
-    result.hitter.skipped = true;
-    result.hitter.reason = "no games found for date";
-    result.hitter.metadata = metadata;
-    result.pitcher.skipped = true;
-    result.pitcher.reason = "no games found for date";
-    result.pitcher.metadata = metadata;
-    return result;
-  }
+  const scheduleUrl =
+    `${MLB_STATS_API_SCHEDULE_ENDPOINT}?sportId=1&date=${dateStr}&hydrate=game(content(summary)),status`;
 
-  const finalGameIds = new Set<number>();
-  let gamesFinal = 0;
-  for (const game of games) {
-    const gameId = intOrNull(game?.GameID);
-    if (gameId == null) continue;
-    if (isFinalStatus(game?.Status)) {
-      finalGameIds.add(gameId);
-      gamesFinal++;
-    }
-  }
+  const schedulePayload = await fetchJson(scheduleUrl);
+  const scheduleGames = extractScheduleGames(schedulePayload);
+  const finalGames = scheduleGames.filter((g) => isFinalScheduleStatus(g.status));
 
-  const baseMetadata = {
-    source_endpoint: `${SPORTSDATA_STATS_BASE}/${BOX_SCORE_ENDPOINT}/${formatSportsDataDate(dateStr)}`,
-    official_boxscore_mode: true,
-    games_checked: games.length,
-    games_final: gamesFinal,
-    games_skipped_not_final: Math.max(0, games.length - gamesFinal),
-  };
-
-  if (finalGameIds.size === 0) {
-    result.hitter.skipped = true;
-    result.hitter.reason = "no final games available";
-    result.hitter.metadata = {
-      ...baseMetadata,
-      hitter_rows: 0,
-      pitcher_rows: 0,
-      fractional_stat_rows: 0,
-      skipped_fractional_rows: 0,
-    };
-    result.pitcher.skipped = true;
-    result.pitcher.reason = "no final games available";
-    result.pitcher.metadata = {
-      ...baseMetadata,
-      hitter_rows: 0,
-      pitcher_rows: 0,
-      fractional_stat_rows: 0,
-      skipped_fractional_rows: 0,
-    };
-    return result;
-  }
-
-  let boxes: any[] = [];
-  try {
-    boxes = (await fetchSportsData(
-      `${SPORTSDATA_STATS_BASE}/${BOX_SCORE_ENDPOINT}/${formatSportsDataDate(dateStr)}`,
-    )) as any[];
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    result.hitter.error = msg;
-    result.hitter.metadata = baseMetadata;
-    result.pitcher.error = msg;
-    result.pitcher.metadata = baseMetadata;
-    return result;
-  }
-
-  if (!Array.isArray(boxes) || boxes.length === 0) {
-    result.hitter.skipped = true;
-    result.hitter.reason = "no official box scores returned";
-    result.hitter.metadata = {
-      ...baseMetadata,
-      hitter_rows: 0,
-      pitcher_rows: 0,
-      fractional_stat_rows: 0,
-      skipped_fractional_rows: 0,
-    };
-    result.pitcher.skipped = true;
-    result.pitcher.reason = "no official box scores returned";
-    result.pitcher.metadata = {
-      ...baseMetadata,
-      hitter_rows: 0,
-      pitcher_rows: 0,
-      fractional_stat_rows: 0,
-      skipped_fractional_rows: 0,
-    };
-    return result;
-  }
+  const { exactByNameTeamRole, teamAbbrToSportsdataId } = await buildPlayerLookup(supabase);
 
   const hitterRows: any[] = [];
   const pitcherRows: any[] = [];
-  const sampleHitterRawRows: any[] = [];
-  const samplePitcherRawRows: any[] = [];
+  const sampleHitterRows: any[] = [];
+  const samplePitcherRows: any[] = [];
+  const unresolvedPlayers: Array<Record<string, unknown>> = [];
+  const boxscoreErrorGames: number[] = [];
 
+  let unresolvedPlayerCount = 0;
   let fractionalStatRows = 0;
   let skippedFractionalRows = 0;
-  let suspiciousHitterRows = 0;
+  let boxscoreFetchErrors = 0;
+  let hitterTotalHits = 0;
+  let hitterTotalTotalBases = 0;
+  let hitterRowsWithHits = 0;
+  let hitterRowsWithTotalBases = 0;
   let hitterRowsWithHeadlineHitsKeyFound = 0;
   let hitterRowsWithHeadlineTotalBasesKeyFound = 0;
   let hitterRowsWithBreakdownAvailable = 0;
-  let hitterRowsWithHits = 0;
-  let hitterRowsWithTotalBases = 0;
-  let hitterTotalHits = 0;
-  let hitterTotalTotalBases = 0;
+  let suspiciousHitterRows = 0;
 
-  for (const box of boxes) {
-    const game = box?.Game ?? {};
-    const gameIdRaw = intOrNull(game?.GameID);
-    if (gameIdRaw == null || !finalGameIds.has(gameIdRaw)) continue;
+  for (const game of finalGames) {
+    let boxscore: any;
+    try {
+      boxscore = await fetchJson(`${MLB_STATS_API_GAME_ENDPOINT}/${game.gamePk}/boxscore`);
+    } catch (_) {
+      boxscoreFetchErrors++;
+      if (boxscoreErrorGames.length < UNRESOLVED_SAMPLE_LIMIT) boxscoreErrorGames.push(game.gamePk);
+      continue;
+    }
+    const players = [
+      ...extractPlayersMap(boxscore, "home"),
+      ...extractPlayersMap(boxscore, "away"),
+    ];
 
-    const gameId = `mlb_${gameIdRaw}`;
-    const homeTeamId = intOrNull(game?.HomeTeamID);
-    const awayTeamId = intOrNull(game?.AwayTeamID);
-    const playerRows = extractPlayerRows(box);
+    for (const entry of players) {
+      const player = entry.player;
+      const stats = player?.stats ?? {};
+      const batting = stats?.batting ?? null;
+      const pitching = stats?.pitching ?? null;
+      const battingParticipated = hasBattingParticipation(batting);
+      const pitchingParticipated = hasPitchingParticipation(pitching);
+      const fullName = String(player?.person?.fullName ?? "").trim() || null;
+      const teamAbbr = entry.teamName ? MLB_TEAM_NAME_TO_ABBR[entry.teamName] ?? null : null;
+      const teamId = teamAbbr ? teamAbbrToSportsdataId.get(teamAbbr) ?? null : null;
+      const opponentName = entry.opponentMlbamId != null
+        ? (scheduleGames.find((g) => g.homeTeamId === entry.opponentMlbamId)?.homeTeamName ??
+          scheduleGames.find((g) => g.awayTeamId === entry.opponentMlbamId)?.awayTeamName ??
+          null)
+        : null;
+      const opponentAbbr = opponentName ? MLB_TEAM_NAME_TO_ABBR[opponentName] ?? null : null;
+      const opponentTeamId = opponentAbbr ? teamAbbrToSportsdataId.get(opponentAbbr) ?? null : null;
 
-    for (const row of playerRows) {
-      const playerId = intOrNull(row?.PlayerID);
-      if (playerId == null) continue;
+      const role = pitchingParticipated ? "pitcher" : battingParticipated ? "hitter" : null;
+      if (!role || !fullName || !teamAbbr) continue;
 
-      const teamId = intOrNull(row?.TeamID);
-      const isHome = row?.HomeOrAway != null
-        ? String(row.HomeOrAway).toUpperCase() === "HOME"
-        : (teamId != null && homeTeamId != null ? teamId === homeTeamId : null);
-      const opponentTeamId =
-        teamId != null && homeTeamId != null && awayTeamId != null
-          ? (teamId === homeTeamId ? awayTeamId : homeTeamId)
-          : null;
+      const lookupRole = role === "hitter" ? "batter" : role;
+      const lookupKey = `${normalizeName(fullName)}|${teamAbbr}|${lookupRole}`;
+      const matches = exactByNameTeamRole.get(lookupKey) ?? [];
+      if (matches.length !== 1) {
+        unresolvedPlayerCount++;
+        if (unresolvedPlayers.length < UNRESOLVED_SAMPLE_LIMIT) {
+          unresolvedPlayers.push({
+            player_name: fullName,
+            team_abbr: teamAbbr,
+            role,
+            game_pk: game.gamePk,
+            match_count: matches.length,
+          });
+        }
+        continue;
+      }
+      const resolvedPlayerId = matches[0].player_id;
 
-      if (isPitcherRow(row)) {
-        if (options.debugRaw && samplePitcherRawRows.length < 3) samplePitcherRawRows.push(row);
+      if (role === "hitter" && battingParticipated && batting) {
+        const hits = readIntegerStat(batting, ["hits"]);
+        const doubles = readIntegerStat(batting, ["doubles"]);
+        const triples = readIntegerStat(batting, ["triples"]);
+        const homeRuns = readIntegerStat(batting, ["homeRuns"]);
+        const totalBases = readIntegerStat(batting, ["totalBases"]);
+        const atBats = readIntegerStat(batting, ["atBats"]);
+        const plateAppearances = readIntegerStat(batting, ["plateAppearances"]);
+        const runs = readIntegerStat(batting, ["runs"]);
+        const rbi = readIntegerStat(batting, ["rbi"]);
+        const walks = readIntegerStat(batting, ["baseOnBalls"]);
+        const strikeouts = readIntegerStat(batting, ["strikeOuts"]);
+        const stolenBases = readIntegerStat(batting, ["stolenBases"]);
 
-        const strikeouts = readIntegerStat(row, PITCHER_STRIKEOUTS_KEYS);
-        const earnedRuns = readIntegerStat(row, PITCHER_EARNED_RUNS_KEYS);
-        const walksAllowed = readIntegerStat(row, PITCHER_WALKS_KEYS);
-        const hitsAllowed = readIntegerStat(row, PITCHER_HITS_ALLOWED_KEYS);
-        const homeRunsAllowed = readIntegerStat(row, PITCHER_HOME_RUNS_ALLOWED_KEYS);
-        const battersFaced = readIntegerStat(row, PITCHER_BATTERS_FACED_KEYS);
-
-        const fractional =
-          strikeouts.fractional ||
-          earnedRuns.fractional ||
-          walksAllowed.fractional ||
-          hitsAllowed.fractional ||
-          homeRunsAllowed.fractional ||
-          battersFaced.fractional;
-
+        const fractional = [
+          hits, doubles, triples, homeRuns, totalBases,
+        ].some((s) => s.fractional);
         if (fractional) {
           fractionalStatRows++;
           skippedFractionalRows++;
           continue;
         }
 
-        pitcherRows.push({
-          player_id: playerId,
-          game_id: gameId,
+        const resolvedHits = hits.value;
+        const resolvedSingles =
+          resolvedHits != null && doubles.value != null && triples.value != null && homeRuns.value != null
+            ? resolvedHits - doubles.value - triples.value - homeRuns.value
+            : null;
+        const resolvedTotalBases =
+          totalBases.value != null
+            ? totalBases.value
+            : resolvedSingles != null && doubles.value != null && triples.value != null && homeRuns.value != null
+            ? resolvedSingles + 2 * doubles.value + 3 * triples.value + 4 * homeRuns.value
+            : null;
+
+        if ((resolvedTotalBases ?? 0) > 0 && (resolvedHits ?? 0) === 0) suspiciousHitterRows++;
+        if ((resolvedHits ?? 0) > 0) hitterRowsWithHits++;
+        if ((resolvedTotalBases ?? 0) > 0) hitterRowsWithTotalBases++;
+        if (hits.keyFound) hitterRowsWithHeadlineHitsKeyFound++;
+        if (totalBases.keyFound) hitterRowsWithHeadlineTotalBasesKeyFound++;
+        if (doubles.keyFound || triples.keyFound || homeRuns.keyFound) hitterRowsWithBreakdownAvailable++;
+        hitterTotalHits += resolvedHits ?? 0;
+        hitterTotalTotalBases += resolvedTotalBases ?? 0;
+
+        const battingParticipationIsZero =
+          (plateAppearances.value ?? 0) === 0 &&
+          (atBats.value ?? 0) === 0 &&
+          (resolvedHits ?? 0) === 0 &&
+          (walks.value ?? 0) === 0;
+        if (battingParticipationIsZero) continue;
+
+        const row = {
+          player_id: resolvedPlayerId,
+          game_id: `mlb_statsapi_${game.gamePk}`,
           game_date: dateStr,
           team_id: teamId,
           opponent_team_id: opponentTeamId,
-          is_home: isHome,
-          innings_pitched: readNumericStat(row, PITCHER_INNINGS_PITCHED_KEYS),
-          pitch_count: intOrNull(firstDefinedValue(row, PITCHER_PITCH_COUNT_KEYS)),
+          batting_order: parseBattingOrder(player?.battingOrder),
+          plate_appearances:
+            plateAppearances.value ??
+            ((atBats.value ?? 0) + (walks.value ?? 0)),
+          at_bats: atBats.value,
+          hits: resolvedHits,
+          singles: resolvedSingles,
+          doubles: doubles.value,
+          triples: triples.value,
+          home_runs: homeRuns.value,
+          runs: runs.value,
+          rbi: rbi.value,
+          walks: walks.value,
+          strikeouts: strikeouts.value,
+          stolen_bases: stolenBases.value,
+          total_bases: resolvedTotalBases,
+          is_home: entry.isHome,
+          opposing_pitcher_id: null,
+          updated_at: new Date().toISOString(),
+        };
+        hitterRows.push(row);
+        if (sampleHitterRows.length < SAMPLE_LIMIT) {
+          sampleHitterRows.push({
+            player_name: fullName,
+            team_abbr: teamAbbr,
+            hits: row.hits,
+            total_bases: row.total_bases,
+            home_runs: row.home_runs,
+            at_bats: row.at_bats,
+          });
+        }
+      }
+
+      if (role === "pitcher" && pitchingParticipated && pitching) {
+        const strikeouts = readIntegerStat(pitching, ["strikeOuts"]);
+        const earnedRuns = readIntegerStat(pitching, ["earnedRuns"]);
+        const walksAllowed = readIntegerStat(pitching, ["baseOnBalls"]);
+        const hitsAllowed = readIntegerStat(pitching, ["hits"]);
+        const battersFaced = readIntegerStat(pitching, ["battersFaced"]);
+
+        const fractional = [strikeouts, earnedRuns, walksAllowed, hitsAllowed, battersFaced]
+          .some((s) => s.fractional);
+        if (fractional) {
+          fractionalStatRows++;
+          skippedFractionalRows++;
+          continue;
+        }
+
+        const row = {
+          player_id: resolvedPlayerId,
+          game_id: `mlb_statsapi_${game.gamePk}`,
+          game_date: dateStr,
+          team_id: teamId,
+          opponent_team_id: opponentTeamId,
+          innings_pitched: readNumericStat(pitching, ["inningsPitched"]),
+          pitch_count: readIntegerStat(pitching, ["numberOfPitches", "pitchesThrown"]).value,
           strikeouts: strikeouts.value,
           earned_runs_allowed: earnedRuns.value,
           walks_allowed: walksAllowed.value,
           hits_allowed: hitsAllowed.value,
-          home_runs_allowed: homeRunsAllowed.value,
+          home_runs_allowed: readIntegerStat(pitching, ["homeRuns"]).value,
           batters_faced: battersFaced.value,
-        });
-      } else {
-        if (options.debugRaw && sampleHitterRawRows.length < 3) sampleHitterRawRows.push(row);
-
-        const hits = readIntegerStat(row, HITTER_HITS_KEYS);
-        const singles = readIntegerStat(row, HITTER_SINGLES_KEYS);
-        const doubles = readIntegerStat(row, HITTER_DOUBLES_KEYS);
-        const triples = readIntegerStat(row, HITTER_TRIPLES_KEYS);
-        const homeRuns = readIntegerStat(row, HITTER_HOME_RUNS_KEYS);
-        const totalBases = readIntegerStat(row, HITTER_TOTAL_BASES_KEYS);
-
-        const fractional =
-          hits.fractional ||
-          singles.fractional ||
-          doubles.fractional ||
-          triples.fractional ||
-          homeRuns.fractional ||
-          totalBases.fractional;
-
-        if (fractional) {
-          fractionalStatRows++;
-          skippedFractionalRows++;
-          continue;
+          is_home: entry.isHome,
+          updated_at: new Date().toISOString(),
+        };
+        pitcherRows.push(row);
+        if (samplePitcherRows.length < SAMPLE_LIMIT) {
+          samplePitcherRows.push({
+            player_name: fullName,
+            team_abbr: teamAbbr,
+            strikeouts: row.strikeouts,
+            earned_runs_allowed: row.earned_runs_allowed,
+            hits_allowed: row.hits_allowed,
+            walks_allowed: row.walks_allowed,
+          });
         }
-
-        const breakdownAvailable =
-          singles.keyFound || doubles.keyFound || triples.keyFound || homeRuns.keyFound;
-        const resolvedHits = hits.value ??
-          (breakdownAvailable
-            ? (singles.value ?? 0) + (doubles.value ?? 0) + (triples.value ?? 0) + (homeRuns.value ?? 0)
-            : null);
-        const resolvedTotalBases = totalBases.value ??
-          (breakdownAvailable
-            ? (singles.value ?? 0) + 2 * (doubles.value ?? 0) + 3 * (triples.value ?? 0) + 4 * (homeRuns.value ?? 0)
-            : null);
-
-        if (hits.keyFound) hitterRowsWithHeadlineHitsKeyFound++;
-        if (totalBases.keyFound) hitterRowsWithHeadlineTotalBasesKeyFound++;
-        if (breakdownAvailable) hitterRowsWithBreakdownAvailable++;
-        if ((resolvedHits ?? 0) > 0) hitterRowsWithHits++;
-        if ((resolvedTotalBases ?? 0) > 0) hitterRowsWithTotalBases++;
-        if ((resolvedTotalBases ?? 0) > 0 && (resolvedHits ?? 0) === 0) suspiciousHitterRows++;
-        hitterTotalHits += resolvedHits ?? 0;
-        hitterTotalTotalBases += resolvedTotalBases ?? 0;
-
-        hitterRows.push({
-          player_id: playerId,
-          game_id: gameId,
-          game_date: dateStr,
-          team_id: teamId,
-          opponent_team_id: opponentTeamId,
-          opposing_pitcher_id: intOrNull(row?.OpposingPitcherID),
-          is_home: isHome,
-          batting_order: intOrNull(firstDefinedValue(row, HITTER_BATTING_ORDER_KEYS)),
-          plate_appearances: intOrNull(firstDefinedValue(row, HITTER_PLATE_APPEARANCES_KEYS)),
-          at_bats: intOrNull(firstDefinedValue(row, HITTER_AT_BATS_KEYS)),
-          hits: resolvedHits,
-          singles: singles.value,
-          doubles: doubles.value,
-          triples: triples.value,
-          home_runs: homeRuns.value,
-          total_bases: resolvedTotalBases,
-          runs: intOrNull(firstDefinedValue(row, HITTER_RUNS_KEYS)),
-          rbi: intOrNull(firstDefinedValue(row, HITTER_RBI_KEYS)),
-          walks: intOrNull(firstDefinedValue(row, HITTER_WALKS_KEYS)),
-          strikeouts: intOrNull(firstDefinedValue(row, HITTER_STRIKEOUTS_KEYS)),
-          stolen_bases: intOrNull(firstDefinedValue(row, HITTER_STOLEN_BASES_KEYS)),
-        });
       }
     }
   }
 
-  const metadata = {
-    ...baseMetadata,
-    ok_for_grading: fractionalStatRows === 0,
-    reason: fractionalStatRows > 0 ? "source returned fractional/non-official stats" : null,
+  const okForGrading = fractionalStatRows === 0;
+  const baseMetadata: Record<string, unknown> = {
+    source_endpoint: "MLB Stats API",
+    official_boxscore_mode: true,
+    ok_for_grading: okForGrading,
+    reason: okForGrading ? null : "source returned fractional/non-official stats",
+    games_checked: scheduleGames.length,
+    games_final: finalGames.length,
+    games_skipped_not_final: Math.max(0, scheduleGames.length - finalGames.length),
     hitter_rows: hitterRows.length,
     pitcher_rows: pitcherRows.length,
+    hitter_rows_written: 0,
+    pitcher_rows_written: 0,
+    unresolved_player_count: unresolvedPlayerCount,
     fractional_stat_rows: fractionalStatRows,
     skipped_fractional_rows: skippedFractionalRows,
     rows_written: 0,
+    boxscore_fetch_errors: boxscoreFetchErrors,
+    recommendation: "Use a verified final boxscore endpoint/source before grading.",
     hitter_total_hits: hitterTotalHits,
     hitter_total_total_bases: hitterTotalTotalBases,
     hitter_rows_with_hits: hitterRowsWithHits,
@@ -503,83 +616,93 @@ export async function ingestGameLogsForDate(
     hitter_rows_with_headline_total_bases_key_found: hitterRowsWithHeadlineTotalBasesKeyFound,
     hitter_rows_with_breakdown_available: hitterRowsWithBreakdownAvailable,
     suspicious_hitter_rows: suspiciousHitterRows,
-    recommendation: "Use a verified final boxscore endpoint/source before grading.",
+  };
+  const metadata = withDebugSamples(
+    baseMetadata,
+    sampleHitterRows,
+    samplePitcherRows,
+    unresolvedPlayers,
+    options.debugRaw === true,
+  );
+  if (boxscoreErrorGames.length > 0) {
+    (metadata as Record<string, unknown>).boxscore_error_game_pks = boxscoreErrorGames;
+  }
+
+  if (!okForGrading) {
+    return {
+      hitter: {
+        step: "mlb_hitter_game_logs",
+        rows: 0,
+        skipped: true,
+        reason: "source returned fractional/non-official stats",
+        metadata,
+      },
+      pitcher: {
+        step: "mlb_pitcher_game_logs",
+        rows: 0,
+        skipped: true,
+        reason: "source returned fractional/non-official stats",
+        metadata,
+      },
+    };
+  }
+
+  let hitterRowsWritten = 0;
+  if (hitterRows.length > 0) {
+    const CHUNK = 400;
+    for (let i = 0; i < hitterRows.length; i += CHUNK) {
+      const slice = hitterRows.slice(i, i + CHUNK);
+      const { error } = await supabase.from("mlb_hitter_game_logs").upsert(slice, {
+        onConflict: "game_id,player_id",
+      });
+      if (error) throw new Error(`Failed to upsert mlb_hitter_game_logs: ${error.message}`);
+      hitterRowsWritten += slice.length;
+    }
+  }
+
+  let pitcherRowsWritten = 0;
+  if (pitcherRows.length > 0) {
+    const CHUNK = 400;
+    for (let i = 0; i < pitcherRows.length; i += CHUNK) {
+      const slice = pitcherRows.slice(i, i + CHUNK);
+      const { error } = await supabase.from("mlb_pitcher_game_logs").upsert(slice, {
+        onConflict: "game_id,player_id",
+      });
+      if (error) throw new Error(`Failed to upsert mlb_pitcher_game_logs: ${error.message}`);
+      pitcherRowsWritten += slice.length;
+    }
+  }
+
+  const finalMetadata = {
+    ...metadata,
+    hitter_rows_written: hitterRowsWritten,
+    pitcher_rows_written: pitcherRowsWritten,
+    rows_written: hitterRowsWritten + pitcherRowsWritten,
   };
 
-  if (options.debugRaw) {
-    result.hitter.metadata = {
-      ...metadata,
-      sample_hitter_raw_keys: sampleHitterRawRows.map((row) => Object.keys(row).sort()),
-      sample_hitter_raw_values: sampleHitterRawRows.map((row) => pickDebugValues(row, DEBUG_HITTER_VALUE_KEYS)),
-    };
-    result.pitcher.metadata = {
-      ...metadata,
-      sample_pitcher_raw_keys: samplePitcherRawRows.map((row) => Object.keys(row).sort()),
-      sample_pitcher_raw_values: samplePitcherRawRows.map((row) => pickDebugValues(row, DEBUG_PITCHER_VALUE_KEYS)),
-    };
-  } else {
-    result.hitter.metadata = metadata;
-    result.pitcher.metadata = metadata;
-  }
-
-  if (fractionalStatRows > 0) {
-    result.hitter.skipped = true;
-    result.hitter.reason = "source returned fractional/non-official stats";
-    result.pitcher.skipped = true;
-    result.pitcher.reason = "source returned fractional/non-official stats";
-  } else if (hitterRows.length > 0) {
-    try {
-      const CHUNK = 400;
-      for (let i = 0; i < hitterRows.length; i += CHUNK) {
-        const slice = hitterRows.slice(i, i + CHUNK);
-        const { error } = await supabase
-          .from("mlb_hitter_game_logs")
-          .upsert(slice, { onConflict: "game_id,player_id" });
-        if (error) throw error;
-      }
-      result.hitter.rows = hitterRows.length;
-      if (result.hitter.metadata) result.hitter.metadata.rows_written = hitterRows.length + pitcherRows.length;
-      if (result.pitcher.metadata) result.pitcher.metadata.rows_written = hitterRows.length + pitcherRows.length;
-    } catch (e: any) {
-      result.hitter.error = String(e?.message ?? e);
-    }
-  } else {
-    result.hitter.skipped = true;
-    result.hitter.reason = "no official hitter rows to upsert";
-  }
-
-  if (fractionalStatRows > 0) {
-    // no-op: protected above; do not write any rows for this date
-  } else if (pitcherRows.length > 0) {
-    try {
-      const CHUNK = 400;
-      for (let i = 0; i < pitcherRows.length; i += CHUNK) {
-        const slice = pitcherRows.slice(i, i + CHUNK);
-        const { error } = await supabase
-          .from("mlb_pitcher_game_logs")
-          .upsert(slice, { onConflict: "game_id,player_id" });
-        if (error) throw error;
-      }
-      result.pitcher.rows = pitcherRows.length;
-    } catch (e: any) {
-      result.pitcher.error = String(e?.message ?? e);
-    }
-  } else {
-    result.pitcher.skipped = true;
-    result.pitcher.reason = "no official pitcher rows to upsert";
-  }
-
-  console.log(
-    `[mlb-gamelogs] date=${dateStr} source=${BOX_SCORE_ENDPOINT} games_checked=${games.length} games_final=${gamesFinal} hitter=${hitterRows.length} pitcher=${pitcherRows.length} fractional_stat_rows=${fractionalStatRows} skipped_fractional_rows=${skippedFractionalRows} ok_for_grading=${fractionalStatRows === 0}`,
-  );
-
-  return result;
+  return {
+    hitter: {
+      step: "mlb_hitter_game_logs",
+      rows: hitterRowsWritten,
+      skipped: hitterRowsWritten === 0,
+      reason: hitterRowsWritten === 0 ? "no official hitter rows written" : undefined,
+      metadata: finalMetadata,
+    },
+    pitcher: {
+      step: "mlb_pitcher_game_logs",
+      rows: pitcherRowsWritten,
+      skipped: pitcherRowsWritten === 0,
+      reason: pitcherRowsWritten === 0 ? "no official pitcher rows written" : undefined,
+      metadata: finalMetadata,
+    },
+  };
 }
 
-/**
- * Ingest a sliding window of N most-recent dates ending on `endDateStr` (ET).
- * Used to backfill rolling windows in one refresh pass.
- */
+function numericMetadataValue(metadata: Record<string, unknown> | undefined, key: string): number {
+  const value = metadata?.[key];
+  return typeof value === "number" ? value : 0;
+}
+
 export async function ingestGameLogsWindow(
   supabase: Supa,
   endDateStr: string,
@@ -599,118 +722,116 @@ export async function ingestGameLogsWindow(
     pitcher: { step: "mlb_pitcher_game_logs", rows: 0, metadata: {} } as IngestLogResult,
     dates,
   };
+
+  const unresolvedSamples: Array<Record<string, unknown>> = [];
+  const hitterSamples: any[] = [];
+  const pitcherSamples: any[] = [];
   const errors: string[] = [];
 
   for (const d of dates) {
-    const r = await ingestGameLogsForDate(supabase, d, options);
-    agg.hitter.rows += r.hitter.rows;
-    agg.pitcher.rows += r.pitcher.rows;
-
-    const hitterMetadata = r.hitter.metadata ?? {};
-    const pitcherMetadata = r.pitcher.metadata ?? {};
-    const sourceEndpoint = hitterMetadata.source_endpoint ?? pitcherMetadata.source_endpoint;
-
+    const res = await ingestGameLogsForDate(supabase, d, options);
+    agg.hitter.rows += res.hitter.rows;
+    agg.pitcher.rows += res.pitcher.rows;
+    const metadata = (res.hitter.metadata ?? {}) as Record<string, unknown>;
     agg.hitter.metadata = {
       ...(agg.hitter.metadata ?? {}),
-      source_endpoint: sourceEndpoint,
-      official_boxscore_mode: true,
-      ok_for_grading:
-        Boolean(agg.hitter.metadata?.ok_for_grading ?? true) && Boolean(hitterMetadata.ok_for_grading ?? true),
-      reason: hitterMetadata.reason ?? agg.hitter.metadata?.reason,
-      games_checked: numericMetadataValue(agg.hitter.metadata, "games_checked") + numericMetadataValue(hitterMetadata, "games_checked"),
-      games_final: numericMetadataValue(agg.hitter.metadata, "games_final") + numericMetadataValue(hitterMetadata, "games_final"),
+      source_endpoint: metadata.source_endpoint,
+      official_boxscore_mode: Boolean(metadata.official_boxscore_mode ?? true),
+      ok_for_grading: Boolean(agg.hitter.metadata?.ok_for_grading ?? true) && Boolean(metadata.ok_for_grading ?? true),
+      reason: metadata.reason ?? agg.hitter.metadata?.reason,
+      games_checked: numericMetadataValue(agg.hitter.metadata, "games_checked") + numericMetadataValue(metadata, "games_checked"),
+      games_final: numericMetadataValue(agg.hitter.metadata, "games_final") + numericMetadataValue(metadata, "games_final"),
       games_skipped_not_final:
         numericMetadataValue(agg.hitter.metadata, "games_skipped_not_final") +
-        numericMetadataValue(hitterMetadata, "games_skipped_not_final"),
-      hitter_rows: numericMetadataValue(agg.hitter.metadata, "hitter_rows") + numericMetadataValue(hitterMetadata, "hitter_rows"),
-      pitcher_rows: numericMetadataValue(agg.hitter.metadata, "pitcher_rows") + numericMetadataValue(hitterMetadata, "pitcher_rows"),
+        numericMetadataValue(metadata, "games_skipped_not_final"),
+      hitter_rows: numericMetadataValue(agg.hitter.metadata, "hitter_rows") + numericMetadataValue(metadata, "hitter_rows"),
+      pitcher_rows: numericMetadataValue(agg.hitter.metadata, "pitcher_rows") + numericMetadataValue(metadata, "pitcher_rows"),
+      hitter_rows_written:
+        numericMetadataValue(agg.hitter.metadata, "hitter_rows_written") +
+        numericMetadataValue(metadata, "hitter_rows_written"),
+      pitcher_rows_written:
+        numericMetadataValue(agg.hitter.metadata, "pitcher_rows_written") +
+        numericMetadataValue(metadata, "pitcher_rows_written"),
+      unresolved_player_count:
+        numericMetadataValue(agg.hitter.metadata, "unresolved_player_count") +
+        numericMetadataValue(metadata, "unresolved_player_count"),
+      boxscore_fetch_errors:
+        numericMetadataValue(agg.hitter.metadata, "boxscore_fetch_errors") +
+        numericMetadataValue(metadata, "boxscore_fetch_errors"),
       fractional_stat_rows:
         numericMetadataValue(agg.hitter.metadata, "fractional_stat_rows") +
-        numericMetadataValue(hitterMetadata, "fractional_stat_rows"),
+        numericMetadataValue(metadata, "fractional_stat_rows"),
       skipped_fractional_rows:
         numericMetadataValue(agg.hitter.metadata, "skipped_fractional_rows") +
-        numericMetadataValue(hitterMetadata, "skipped_fractional_rows"),
+        numericMetadataValue(metadata, "skipped_fractional_rows"),
       rows_written:
         numericMetadataValue(agg.hitter.metadata, "rows_written") +
-        numericMetadataValue(hitterMetadata, "rows_written"),
+        numericMetadataValue(metadata, "rows_written"),
+      recommendation:
+        (metadata.recommendation as string | undefined) ??
+        (agg.hitter.metadata?.recommendation as string | undefined),
       hitter_total_hits:
         numericMetadataValue(agg.hitter.metadata, "hitter_total_hits") +
-        numericMetadataValue(hitterMetadata, "hitter_total_hits"),
+        numericMetadataValue(metadata, "hitter_total_hits"),
       hitter_total_total_bases:
         numericMetadataValue(agg.hitter.metadata, "hitter_total_total_bases") +
-        numericMetadataValue(hitterMetadata, "hitter_total_total_bases"),
+        numericMetadataValue(metadata, "hitter_total_total_bases"),
       hitter_rows_with_hits:
         numericMetadataValue(agg.hitter.metadata, "hitter_rows_with_hits") +
-        numericMetadataValue(hitterMetadata, "hitter_rows_with_hits"),
+        numericMetadataValue(metadata, "hitter_rows_with_hits"),
       hitter_rows_with_total_bases:
         numericMetadataValue(agg.hitter.metadata, "hitter_rows_with_total_bases") +
-        numericMetadataValue(hitterMetadata, "hitter_rows_with_total_bases"),
+        numericMetadataValue(metadata, "hitter_rows_with_total_bases"),
       hitter_rows_with_headline_hits_key_found:
         numericMetadataValue(agg.hitter.metadata, "hitter_rows_with_headline_hits_key_found") +
-        numericMetadataValue(hitterMetadata, "hitter_rows_with_headline_hits_key_found"),
+        numericMetadataValue(metadata, "hitter_rows_with_headline_hits_key_found"),
       hitter_rows_with_headline_total_bases_key_found:
         numericMetadataValue(agg.hitter.metadata, "hitter_rows_with_headline_total_bases_key_found") +
-        numericMetadataValue(hitterMetadata, "hitter_rows_with_headline_total_bases_key_found"),
+        numericMetadataValue(metadata, "hitter_rows_with_headline_total_bases_key_found"),
       hitter_rows_with_breakdown_available:
         numericMetadataValue(agg.hitter.metadata, "hitter_rows_with_breakdown_available") +
-        numericMetadataValue(hitterMetadata, "hitter_rows_with_breakdown_available"),
+        numericMetadataValue(metadata, "hitter_rows_with_breakdown_available"),
       suspicious_hitter_rows:
         numericMetadataValue(agg.hitter.metadata, "suspicious_hitter_rows") +
-        numericMetadataValue(hitterMetadata, "suspicious_hitter_rows"),
-      recommendation:
-        (hitterMetadata.recommendation as string | undefined) ??
-        (agg.hitter.metadata?.recommendation as string | undefined) ??
-        "Use a verified final boxscore endpoint/source before grading.",
+        numericMetadataValue(metadata, "suspicious_hitter_rows"),
     };
-
-    agg.pitcher.metadata = {
-      ...(agg.pitcher.metadata ?? {}),
-      source_endpoint: sourceEndpoint,
-      official_boxscore_mode: true,
-      ok_for_grading:
-        Boolean(agg.pitcher.metadata?.ok_for_grading ?? true) && Boolean(pitcherMetadata.ok_for_grading ?? true),
-      reason: pitcherMetadata.reason ?? agg.pitcher.metadata?.reason,
-      games_checked: numericMetadataValue(agg.pitcher.metadata, "games_checked") + numericMetadataValue(pitcherMetadata, "games_checked"),
-      games_final: numericMetadataValue(agg.pitcher.metadata, "games_final") + numericMetadataValue(pitcherMetadata, "games_final"),
-      games_skipped_not_final:
-        numericMetadataValue(agg.pitcher.metadata, "games_skipped_not_final") +
-        numericMetadataValue(pitcherMetadata, "games_skipped_not_final"),
-      hitter_rows: numericMetadataValue(agg.pitcher.metadata, "hitter_rows") + numericMetadataValue(pitcherMetadata, "hitter_rows"),
-      pitcher_rows: numericMetadataValue(agg.pitcher.metadata, "pitcher_rows") + numericMetadataValue(pitcherMetadata, "pitcher_rows"),
-      fractional_stat_rows:
-        numericMetadataValue(agg.pitcher.metadata, "fractional_stat_rows") +
-        numericMetadataValue(pitcherMetadata, "fractional_stat_rows"),
-      skipped_fractional_rows:
-        numericMetadataValue(agg.pitcher.metadata, "skipped_fractional_rows") +
-        numericMetadataValue(pitcherMetadata, "skipped_fractional_rows"),
-      rows_written:
-        numericMetadataValue(agg.pitcher.metadata, "rows_written") +
-        numericMetadataValue(pitcherMetadata, "rows_written"),
-      recommendation:
-        (pitcherMetadata.recommendation as string | undefined) ??
-        (agg.pitcher.metadata?.recommendation as string | undefined) ??
-        "Use a verified final boxscore endpoint/source before grading.",
-    };
+    agg.pitcher.metadata = agg.hitter.metadata;
 
     if (options.debugRaw) {
-      if (!(agg.hitter.metadata?.sample_hitter_raw_keys) && hitterMetadata.sample_hitter_raw_keys) {
-        agg.hitter.metadata.sample_hitter_raw_keys = hitterMetadata.sample_hitter_raw_keys;
-        agg.hitter.metadata.sample_hitter_raw_values = hitterMetadata.sample_hitter_raw_values;
+      const unresolved = Array.isArray(metadata.sample_unresolved_players)
+        ? metadata.sample_unresolved_players as Array<Record<string, unknown>>
+        : [];
+      for (const item of unresolved) {
+        if (unresolvedSamples.length < UNRESOLVED_SAMPLE_LIMIT) unresolvedSamples.push(item);
       }
-      if (!(agg.pitcher.metadata?.sample_pitcher_raw_keys) && pitcherMetadata.sample_pitcher_raw_keys) {
-        agg.pitcher.metadata.sample_pitcher_raw_keys = pitcherMetadata.sample_pitcher_raw_keys;
-        agg.pitcher.metadata.sample_pitcher_raw_values = pitcherMetadata.sample_pitcher_raw_values;
+      const hs = Array.isArray(metadata.sample_hitter_rows) ? metadata.sample_hitter_rows as any[] : [];
+      for (const item of hs) {
+        if (hitterSamples.length < SAMPLE_LIMIT) hitterSamples.push(item);
+      }
+      const ps = Array.isArray(metadata.sample_pitcher_rows) ? metadata.sample_pitcher_rows as any[] : [];
+      for (const item of ps) {
+        if (pitcherSamples.length < SAMPLE_LIMIT) pitcherSamples.push(item);
       }
     }
 
-    if (r.hitter.error) errors.push(`hitter ${d}: ${r.hitter.error}`);
-    if (r.pitcher.error) errors.push(`pitcher ${d}: ${r.pitcher.error}`);
+    if (res.hitter.error) errors.push(`hitter ${d}: ${res.hitter.error}`);
+    if (res.pitcher.error) errors.push(`pitcher ${d}: ${res.pitcher.error}`);
+  }
+
+  if (options.debugRaw) {
+    agg.hitter.metadata = {
+      ...(agg.hitter.metadata ?? {}),
+      sample_unresolved_players: unresolvedSamples,
+      sample_hitter_rows: hitterSamples,
+      sample_pitcher_rows: pitcherSamples,
+    };
+    agg.pitcher.metadata = agg.hitter.metadata;
   }
 
   if (errors.length > 0) {
     const msg = errors.slice(0, 3).join(" | ");
-    if (agg.hitter.rows === 0) agg.hitter.error = msg;
-    if (agg.pitcher.rows === 0) agg.pitcher.error = msg;
+    agg.hitter.error = msg;
+    agg.pitcher.error = msg;
   }
 
   return agg;
