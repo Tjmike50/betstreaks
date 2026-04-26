@@ -58,6 +58,36 @@ function resolveToAbbr(name: string): string {
   return upper;
 }
 
+function easternDateString(date = new Date()): string {
+  return date.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+function jsonResponse(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function failureResponse(
+  errorCode: string,
+  message: string,
+  debug: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+  status = 200,
+): Response {
+  return jsonResponse(
+    {
+      ok: false,
+      error_code: errorCode,
+      message,
+      debug,
+      ...extra,
+    },
+    status,
+  );
+}
+
 // ===== ODDS UTILITY FUNCTIONS =====
 
 /** Convert American odds to implied probability (0-1) */
@@ -1089,28 +1119,28 @@ serve(async (req) => {
     // --- Auth & usage limits ---
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      return new Response(
-        JSON.stringify({ error: "Authentication required. Please log in." }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return failureResponse("AUTH_REQUIRED", "Authentication required. Please log in.", debug, {}, 401);
     }
     let isPremium = false;
     {
       const { data: flags } = await supabase.from("user_flags").select("is_premium").eq("user_id", user.id).single();
       isPremium = flags?.is_premium ?? false;
       if (!isPremium) {
-        const today = new Date().toISOString().split("T")[0];
+        const today = easternDateString();
         const { data: usage } = await serviceClient.from("ai_usage").select("request_count").eq("user_id", user.id).eq("usage_date", today).single();
         if (usage && usage.request_count >= 1) {
-          return new Response(
-            JSON.stringify({ error: "free_limit_reached", message: "Free users get 1 AI slip per day. Upgrade to Premium for unlimited." }),
-            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          return failureResponse(
+            "FREE_LIMIT_REACHED",
+            "Free users get 1 AI slip per day. Upgrade to Premium for unlimited.",
+            debug,
+            {},
+            429,
           );
         }
       }
     }
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = easternDateString();
     debug.db_query_date = todayStr;
 
     // -------------------------------------------------------------------------
@@ -1199,11 +1229,33 @@ serve(async (req) => {
     // Use trusted verified slate for the operational ET date
     const { data: gamesTodayRows } = await serviceClient.rpc("get_trusted_games_today", {
       p_sport: sport.toUpperCase(),
+      p_target_date: todayStr,
       p_timezone: "America/New_York",
     });
+    const availableGames = ((gamesTodayRows as any[]) || []).map((g: any) => ({
+      id: g.id,
+      away_team_abbr: g.away_team_abbr,
+      home_team_abbr: g.home_team_abbr,
+      game_time: g.game_time,
+      status: g.status,
+      canonical_game_key: g.canonical_game_key,
+    }));
     for (const g of (gamesTodayRows as any[]) || []) {
       if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
       if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
+    }
+
+    console.log(
+      `[AI-Builder] Request context sport=${sport} date=${todayStr} selected_games=${filters?.includeGames?.length ?? 0} active_games=${(gamesTodayRows as any[])?.length ?? 0} odds_games=${gamesData.length}`,
+    );
+
+    if (((gamesTodayRows as any[])?.length ?? 0) === 0) {
+      return failureResponse(
+        "SCHEDULE_EMPTY",
+        "No active games found for this slate yet. Refresh the schedule or try again shortly.",
+        debug,
+        { available_games: [] },
+      );
     }
 
     // If user selected specific games, restrict teams to only those games
@@ -1215,6 +1267,14 @@ serve(async (req) => {
           if (g.home_team_abbr) gameFilterTeams.add(g.home_team_abbr.toUpperCase());
           if (g.away_team_abbr) gameFilterTeams.add(g.away_team_abbr.toUpperCase());
         }
+      }
+      if (gameFilterTeams.size === 0) {
+        return failureResponse(
+          "GAME_NOT_FOUND",
+          "The selected game is not in today’s active verified slate.",
+          debug,
+          { available_games: availableGames },
+        );
       }
       console.log(`[AI-Builder] Game filter active — restricting to teams: ${[...gameFilterTeams].join(", ")}`);
     }
@@ -1798,12 +1858,11 @@ serve(async (req) => {
 
     // Check we have SOMETHING
     if (diversifiedCandidates.length === 0 && gameLevelCandidates.length === 0) {
-      return new Response(
-        JSON.stringify({
-          error: "No verified market candidates available for today's games. Live sportsbook odds may not be available yet. Try again later or switch to game-level bets.",
-          debug,
-        }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      return failureResponse(
+        "NO_CANDIDATES",
+        "No eligible props found for this slate yet. Try all games or refresh odds.",
+        debug,
+        { available_games: availableGames },
       );
     }
 
@@ -2174,7 +2233,12 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         }
 
         if (fallbackSlips.length === 0) {
-          return new Response(JSON.stringify({ error: "AI service temporarily unavailable and no candidates available for fallback.", debug }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return failureResponse(
+            "AI_PROVIDER_FAILED",
+            "AI service temporarily unavailable and no eligible fallback candidates were available.",
+            debug,
+            { available_games: availableGames },
+          );
         }
 
         // Save fallback slips to DB (same as LLM path)
@@ -2209,7 +2273,8 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
 
         console.log(`[AI-Builder] Fallback: built ${savedFallbackSlips.length} slips from scored candidates`);
 
-        return new Response(JSON.stringify({
+        return jsonResponse({
+          ok: true,
           slips: savedFallbackSlips, fallback: true, debug,
           scoring_metadata: {
             verified_prop_candidates: debug.verified_prop_candidates,
@@ -2226,7 +2291,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
             scoring_source: scoringSource,
             enrichment_coverage: { full: enrichmentFull, partial: enrichmentPartial, none: enrichmentNone, miss_reasons: enrichmentMissReasons },
           },
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        });
       }
       const errText = await aiRes.text();
       console.error("[AI-Builder] AI gateway error:", aiRes.status, errText);
@@ -2485,9 +2550,11 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         ? `Live market verification was not available for enough player props to build a slip. ${marketRejections.length} prop(s) were rejected because no matching verified sportsbook market was found. Try again later when markets are open, or switch to game-level bets.`
         : "AI could not build valid slips from today's verified candidates. Try a different prompt or adjust your filters.";
 
-      return new Response(
-        JSON.stringify({ error: errorMsg, debug }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      return failureResponse(
+        "NO_CANDIDATES",
+        isMarketIssue ? "No eligible props found for this slate yet. Try all games or refresh odds." : errorMsg,
+        debug,
+        { available_games: availableGames, rejected_legs: debug.rejected_legs },
       );
     }
 
@@ -2520,11 +2587,12 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
 
     // Track usage
     if (user && !isPremium) {
-      const today = new Date().toISOString().split("T")[0];
+      const today = easternDateString();
       serviceClient.from("ai_usage").upsert({ user_id: user.id, usage_date: today, request_count: 1 }, { onConflict: "user_id,usage_date" }).then(() => {});
     }
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
+      ok: true,
       slips: savedSlips,
       debug,
       scoring_metadata: {
@@ -2552,14 +2620,24 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
           alias_rescued_players: [...aliasRescuedPlayers],
         },
       },
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("[AI-Builder] Error:", e);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error", debug }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    const message = e instanceof Error ? e.message : "Unknown error";
+    const errorCode =
+      message.includes("prompt is required")
+        ? "INVALID_REQUEST"
+        : message.includes("LOVABLE_API_KEY")
+        ? "AI_PROVIDER_FAILED"
+        : message.includes("AI generation failed") || message.includes("AI returned invalid format")
+        ? "AI_PROVIDER_FAILED"
+        : "INTERNAL_ERROR";
+    return failureResponse(
+      errorCode,
+      message,
+      debug,
+      {},
+      errorCode === "INVALID_REQUEST" ? 422 : errorCode === "AI_PROVIDER_FAILED" ? 200 : 500,
     );
   }
 });

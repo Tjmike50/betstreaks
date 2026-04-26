@@ -139,6 +139,96 @@ interface VerifiedGameRow {
   updated_at: string;
 }
 
+interface ManualGameInput {
+  away_team_abbr?: string;
+  home_team_abbr?: string;
+  game_time?: string;
+  status?: string;
+}
+
+interface EspnSlateGame {
+  id: string;
+  home_team_abbr: string | null;
+  away_team_abbr: string | null;
+  game_time: string | null;
+  status: string;
+  canonical_game_key: string | null;
+  commence_time_iso: string;
+}
+
+function easternDateString(date = new Date()): string {
+  return date.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+function compactDateString(isoDate: string): string {
+  return isoDate.replace(/-/g, "");
+}
+
+function teamPairKey(awayAbbr: string | null, homeAbbr: string | null): string | null {
+  if (!awayAbbr || !homeAbbr) return null;
+  return `${awayAbbr}_${homeAbbr}`;
+}
+
+function normalizeEspnTeamAbbr(raw: string | null | undefined): string | null {
+  const abbr = String(raw ?? "").trim().toUpperCase();
+  if (!abbr) return null;
+  if (abbr === "SA") return "SAS";
+  if (abbr === "GS") return "GSW";
+  if (abbr === "NO") return "NOP";
+  if (abbr === "NY") return "NYK";
+  if (abbr === "PHO") return "PHX";
+  return abbr;
+}
+
+async function fetchEspnNbaSlate(gameDate: string): Promise<EspnSlateGame[]> {
+  const url =
+    `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${compactDateString(gameDate)}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`ESPN scoreboard ${res.status}: ${body.slice(0, 300)}`);
+  }
+
+  const payload = await res.json();
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  const slate: EspnSlateGame[] = [];
+
+  for (const event of events) {
+    const competition = Array.isArray(event?.competitions) ? event.competitions[0] : null;
+    const competitors = Array.isArray(competition?.competitors) ? competition.competitors : [];
+    const home = competitors.find((c: any) => String(c?.homeAway ?? "").toLowerCase() === "home");
+    const away = competitors.find((c: any) => String(c?.homeAway ?? "").toLowerCase() === "away");
+    const homeAbbr = normalizeEspnTeamAbbr(home?.team?.abbreviation);
+    const awayAbbr = normalizeEspnTeamAbbr(away?.team?.abbreviation);
+    const eventDate = String(event?.date ?? "").trim();
+    const commence = eventDate ? new Date(eventDate) : null;
+    const gameTime = commence && !Number.isNaN(commence.getTime())
+      ? commence.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "America/New_York",
+      })
+      : null;
+    const status =
+      String(competition?.status?.type?.description ?? competition?.status?.type?.name ?? event?.status?.type?.description ?? "Scheduled");
+
+    slate.push({
+      id: String(event?.id ?? `espn_${gameDate}_${awayAbbr}_${homeAbbr}`),
+      home_team_abbr: homeAbbr,
+      away_team_abbr: awayAbbr,
+      game_time: gameTime,
+      status,
+      canonical_game_key: buildCanonicalKey("NBA", gameDate, awayAbbr, homeAbbr),
+      commence_time_iso: commence && !Number.isNaN(commence.getTime())
+        ? commence.toISOString()
+        : `${gameDate}T00:00:00.000Z`,
+    });
+  }
+
+  return slate;
+}
+
 /**
  * Resolve duplicates: when multiple candidates share a canonical_game_key,
  * keep the one with the most complete data; prefer h2h provider entries.
@@ -274,6 +364,11 @@ serve(async (req) => {
     const sport: SportKey =
       rawSport === "WNBA" ? "WNBA" : rawSport === "MLB" ? "MLB" : "NBA";
     const cfg = SPORT_CONFIG[sport];
+    const requestedGameDate = typeof reqBody?.game_date === "string" && reqBody.game_date.trim().length > 0
+      ? reqBody.game_date.trim()
+      : easternDateString();
+    const manualGames = Array.isArray(reqBody?.manual_games) ? reqBody.manual_games as ManualGameInput[] : [];
+    const replaceSlate = reqBody?.replace_slate === true || (sport === "NBA" && manualGames.length === 0);
 
     // Offseason short-circuit
     if (cfg.seasonState === "offseason") {
@@ -288,11 +383,23 @@ serve(async (req) => {
       );
     }
 
-    const todayStr = new Date().toISOString().split("T")[0];
-    console.log(`[${sport}] Collecting line snapshots for ${todayStr}...`);
+    const todayStr = requestedGameDate;
+    console.log(`[${sport}] Collecting line snapshots for ${todayStr}... manualGames=${manualGames.length}`);
 
     // ── 1. Fetch today's games via get-odds (game-level h2h) ──
     let gamesOddsResponse: any;
+    let sourceGamesFetchedCount = 0;
+    let normalizedGamesCount = 0;
+    let activeGamesCount = 0;
+    const skippedGames: Array<{ reason: string; game?: string | null; raw_home_team?: string | null; raw_away_team?: string | null }> = [];
+    const canonicalKeys: string[] = [];
+    let espnGamesFetchedCount = 0;
+    const espnCanonicalKeys: string[] = [];
+    const oddsCanonicalKeys: string[] = [];
+    const matchedKeys: string[] = [];
+    const missingFromOddsKeys: string[] = [];
+    const staleDeactivatedKeys: string[] = [];
+    let scheduleSourceUsed = "odds_provider";
     try {
       const res = await fetch(`${fnBase}/get-odds`, {
         method: "POST",
@@ -310,6 +417,7 @@ serve(async (req) => {
     const oddsProvider = gamesOddsResponse.meta?.provider || "unknown";
     const oddsFallback = gamesOddsResponse.meta?.fallbackUsed || false;
     const oddsStale = gamesOddsResponse.meta?.isStale || false;
+    sourceGamesFetchedCount = oddsData.length;
 
     console.log(`[${sport}] Got ${oddsData.length} game-odds entries from ${oddsProvider} (fallback=${oddsFallback}, stale=${oddsStale})`);
 
@@ -328,7 +436,71 @@ serve(async (req) => {
     const gamesData = [...eventMap.values()];
     console.log(`[${sport}] Found ${gamesData.length} unique games`);
 
-    if (gamesData.length === 0) {
+    const oddsByTeamPair = new Map<string, any>();
+    for (const game of gamesData) {
+      const homeAbbr = cfg.teamMap[game.home_team] || null;
+      const awayAbbr = cfg.teamMap[game.away_team] || null;
+      const pairKey = teamPairKey(awayAbbr, homeAbbr);
+      if (pairKey && !oddsByTeamPair.has(pairKey)) oddsByTeamPair.set(pairKey, game);
+      const oddsGameDate = game.commence_time
+        ? easternDateString(new Date(game.commence_time))
+        : requestedGameDate;
+      const oddsCanonicalKey = buildCanonicalKey(sport, oddsGameDate, awayAbbr, homeAbbr);
+      if (oddsCanonicalKey) oddsCanonicalKeys.push(oddsCanonicalKey);
+    }
+
+    let espnSlateGames: EspnSlateGame[] = [];
+    if (sport === "NBA" && manualGames.length === 0) {
+      try {
+        espnSlateGames = await fetchEspnNbaSlate(requestedGameDate);
+        espnGamesFetchedCount = espnSlateGames.length;
+        for (const row of espnSlateGames) {
+          if (row.canonical_game_key) espnCanonicalKeys.push(row.canonical_game_key);
+        }
+        if (espnSlateGames.length > 0) scheduleSourceUsed = "espn_scoreboard";
+        console.log(`[${sport}] ESPN scoreboard returned ${espnSlateGames.length} games for ${requestedGameDate}`);
+      } catch (e) {
+        console.error(`[${sport}] ESPN scoreboard fetch failed:`, e);
+      }
+    }
+
+    if (manualGames.length > 0) {
+      console.warn(`[${sport}] Applying manual emergency slate for ${todayStr} with ${manualGames.length} games`);
+      scheduleSourceUsed = "manual_emergency";
+      for (const game of manualGames) {
+        const awayAbbr = String(game.away_team_abbr ?? "").trim().toUpperCase() || null;
+        const homeAbbr = String(game.home_team_abbr ?? "").trim().toUpperCase() || null;
+        if (!awayAbbr || !homeAbbr) {
+          skippedGames.push({
+            reason: "manual_missing_team_abbr",
+            raw_home_team: homeAbbr,
+            raw_away_team: awayAbbr,
+          });
+          continue;
+        }
+        const manualId = `manual_${sport}_${todayStr}_${awayAbbr}_${homeAbbr}`;
+        const existingIndex = gamesData.findIndex((g) => g.id === manualId);
+        const manualGame = {
+          id: manualId,
+          home_team: homeAbbr,
+          away_team: awayAbbr,
+          commence_time: `${todayStr}T${String(game.game_time ?? "12:00 PM")}`,
+          manual: true,
+          manual_source: "emergency_manual",
+          manual_status: String(game.status ?? "Scheduled"),
+          manual_game_time: String(game.game_time ?? "12:00 PM"),
+        };
+        if (existingIndex >= 0) gamesData[existingIndex] = manualGame;
+        else gamesData.push(manualGame);
+      }
+    }
+
+    const scheduleSeedCount =
+      sport === "NBA" && manualGames.length === 0 && espnSlateGames.length > 0
+        ? espnSlateGames.length
+        : gamesData.length;
+
+    if (scheduleSeedCount === 0) {
       await supabase.from("refresh_status").upsert(
         { id: cfg.refreshStatusId, sport: cfg.refreshStatusLabel, last_run: new Date().toISOString() },
         { onConflict: "id" }
@@ -343,34 +515,109 @@ serve(async (req) => {
     const candidates: GameCandidate[] = [];
     const gameIdToDate = new Map<string, string>();
     const allGameDates = new Set<string>();
+    if (sport === "NBA" && manualGames.length === 0 && espnSlateGames.length > 0) {
+      for (const game of espnSlateGames) {
+        if (!game.home_team_abbr || !game.away_team_abbr) {
+          skippedGames.push({
+            reason: "espn_missing_team_abbreviation",
+            game: game.id,
+          });
+          continue;
+        }
+        const pairKey = teamPairKey(game.away_team_abbr, game.home_team_abbr);
+        if (pairKey && oddsByTeamPair.has(pairKey) && game.canonical_game_key) matchedKeys.push(game.canonical_game_key);
+        if (pairKey && !oddsByTeamPair.has(pairKey) && game.canonical_game_key) missingFromOddsKeys.push(game.canonical_game_key);
+        if (game.canonical_game_key) canonicalKeys.push(game.canonical_game_key);
 
-    for (const game of gamesData) {
-      const commence = new Date(game.commence_time);
-      const gameDate = commence.toISOString().split("T")[0];
-      const homeAbbr = cfg.teamMap[game.home_team] || null;
-      const awayAbbr = cfg.teamMap[game.away_team] || null;
-      const gameTime = commence.toLocaleTimeString("en-US", {
-        hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/New_York",
-      });
+        candidates.push({
+          id: `espn_${game.id}`,
+          sport,
+          game_date: todayStr,
+          home_team_abbr: game.home_team_abbr,
+          away_team_abbr: game.away_team_abbr,
+          game_time: game.game_time,
+          status: game.status,
+          commence_time_iso: game.commence_time_iso,
+          source: "espn_scoreboard",
+          canonical_game_key: game.canonical_game_key,
+        });
 
-      const canonicalKey = buildCanonicalKey(sport, gameDate, awayAbbr, homeAbbr);
+        gameIdToDate.set(`espn_${game.id}`, todayStr);
+        allGameDates.add(todayStr);
+      }
+    } else {
+      for (const game of gamesData) {
+        const isManualGame = game.manual === true;
+        const commence = isManualGame ? null : new Date(game.commence_time);
+        const gameDate = isManualGame ? todayStr : commence?.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+        const homeAbbr = isManualGame
+          ? String(game.home_team ?? "").trim().toUpperCase() || null
+          : cfg.teamMap[game.home_team] || null;
+        const awayAbbr = isManualGame
+          ? String(game.away_team ?? "").trim().toUpperCase() || null
+          : cfg.teamMap[game.away_team] || null;
+        const gameTime = isManualGame
+          ? (String(game.manual_game_time ?? "").trim() || null)
+          : commence?.toLocaleTimeString("en-US", {
+            hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/New_York",
+          }) ?? null;
 
-      candidates.push({
-        id: game.id,
-        sport,
-        game_date: gameDate,
-        home_team_abbr: homeAbbr,
-        away_team_abbr: awayAbbr,
-        game_time: gameTime,
-        status: "Scheduled",
-        commence_time_iso: commence.toISOString(),
-        source: `odds_api_${oddsProvider}`,
-        canonical_game_key: canonicalKey,
-      });
+        if (!gameDate) {
+          skippedGames.push({
+            reason: "missing_game_date",
+            game: game.id,
+            raw_home_team: game.home_team ?? null,
+            raw_away_team: game.away_team ?? null,
+          });
+          continue;
+        }
 
-      gameIdToDate.set(game.id, gameDate);
-      allGameDates.add(gameDate);
+        if (gameDate !== todayStr) {
+          skippedGames.push({
+            reason: "outside_requested_game_date",
+            game: game.id,
+            raw_home_team: game.home_team ?? null,
+            raw_away_team: game.away_team ?? null,
+          });
+          continue;
+        }
+
+        if (!homeAbbr || !awayAbbr) {
+          skippedGames.push({
+            reason: "missing_team_abbreviation_mapping",
+            game: game.id,
+            raw_home_team: game.home_team ?? null,
+            raw_away_team: game.away_team ?? null,
+          });
+        }
+
+        const canonicalKey = buildCanonicalKey(sport, gameDate, awayAbbr, homeAbbr);
+        if (canonicalKey) canonicalKeys.push(canonicalKey);
+
+        candidates.push({
+          id: game.id,
+          sport,
+          game_date: gameDate,
+          home_team_abbr: homeAbbr,
+          away_team_abbr: awayAbbr,
+          game_time: gameTime,
+          status: isManualGame ? String(game.manual_status ?? "Scheduled") : "Scheduled",
+          commence_time_iso: isManualGame ? `${todayStr}T00:00:00.000Z` : commence.toISOString(),
+          source: isManualGame ? "manual_emergency" : `odds_api_${oddsProvider}`,
+          canonical_game_key: canonicalKey,
+        });
+
+        gameIdToDate.set(game.id, gameDate);
+        allGameDates.add(gameDate);
+      }
     }
+    normalizedGamesCount = candidates.length;
+
+    const propSourceGames = sport === "NBA" && scheduleSourceUsed === "espn_scoreboard"
+      ? candidates
+          .map((candidate) => oddsByTeamPair.get(teamPairKey(candidate.away_team_abbr, candidate.home_team_abbr) ?? ""))
+          .filter(Boolean)
+      : gamesData;
 
     // ── 1c. Duplicate resolution ──
     const resolved = resolveDuplicates(candidates);
@@ -384,8 +631,8 @@ serve(async (req) => {
       .eq("sport", sport)
       .in("game_date", [...allGameDates]);
 
-    const existingByKey = new Map<string, { verification_status: string; source_secondary: string | null }>();
-    const existingById = new Map<string, { verification_status: string; source_secondary: string | null }>();
+    const existingByKey = new Map<string, { id: string; verification_status: string; source_secondary: string | null }>();
+    const existingById = new Map<string, { id: string; verification_status: string; source_secondary: string | null }>();
     for (const row of existingGames || []) {
       if (row.canonical_game_key) existingByKey.set(row.canonical_game_key, row);
       existingById.set(row.id, row);
@@ -399,11 +646,20 @@ serve(async (req) => {
     for (const [key, { winner, dupeCount, mismatchFlags }] of resolved.entries()) {
       if (dupeCount > 1) dupesMerged += dupeCount - 1;
       const existing = existingByKey.get(key) || existingById.get(winner.id) || null;
-      const { verification_status, schedule_confidence, source_secondary } = computeVerification(winner, mismatchFlags, dupeCount, existing);
+      let { verification_status, schedule_confidence, source_secondary } = computeVerification(winner, mismatchFlags, dupeCount, existing);
+      const pairKey = teamPairKey(winner.away_team_abbr, winner.home_team_abbr);
+      const oddsMatched = pairKey ? oddsByTeamPair.has(pairKey) : false;
+      if (winner.source === "espn_scoreboard") {
+        verification_status = oddsMatched ? "verified" : "missing_secondary";
+        schedule_confidence = oddsMatched ? 95 : 80;
+        source_secondary = oddsMatched ? "odds_provider" : null;
+      } else if (winner.source === "manual_emergency") {
+        source_secondary = oddsMatched ? "odds_provider" : source_secondary;
+      }
       const { is_active, is_postponed } = deriveActiveFlags(winner.status);
 
       gamesTodayRows.push({
-        id: winner.id,
+        id: existing?.id ?? winner.id,
         sport: winner.sport,
         game_date: winner.game_date,
         home_team_abbr: winner.home_team_abbr,
@@ -411,11 +667,24 @@ serve(async (req) => {
         game_time: winner.game_time,
         status: winner.status,
         canonical_game_key: key,
-        source_primary: `odds_api_${oddsProvider}`,
+        source_primary:
+          winner.source === "manual_emergency"
+            ? "manual_emergency"
+            : winner.source === "espn_scoreboard"
+            ? "espn_scoreboard"
+            : `odds_api_${oddsProvider}`,
         source_secondary,
         verification_status,
-        schedule_confidence,
-        mismatch_flags: mismatchFlags.length > 0 ? mismatchFlags.map(f => ({ flag: f, detected_at: now })) : [],
+        schedule_confidence:
+          winner.source === "manual_emergency" ? Math.min(schedule_confidence, 35) : schedule_confidence,
+        mismatch_flags: [
+          ...(mismatchFlags.length > 0 ? mismatchFlags.map(f => ({ flag: f, detected_at: now })) : []),
+          ...(winner.source === "manual_emergency"
+            ? [{ flag: "manual_emergency_source", detected_at: now }]
+            : winner.source === "espn_scoreboard"
+            ? [{ flag: "espn_primary_schedule_source", detected_at: now }]
+            : []),
+        ],
         is_active,
         is_postponed,
         last_verified_at: now,
@@ -431,7 +700,7 @@ serve(async (req) => {
       const { is_active, is_postponed } = deriveActiveFlags(c.status);
 
       gamesTodayRows.push({
-        id: c.id,
+        id: existing?.id ?? c.id,
         sport: c.sport,
         game_date: c.game_date,
         home_team_abbr: c.home_team_abbr,
@@ -439,11 +708,16 @@ serve(async (req) => {
         game_time: c.game_time,
         status: c.status,
         canonical_game_key: null,
-        source_primary: `odds_api_${oddsProvider}`,
+        source_primary: c.source === "manual_emergency" ? "manual_emergency" : `odds_api_${oddsProvider}`,
         source_secondary,
         verification_status,
         schedule_confidence: Math.min(schedule_confidence, 40), // cap for orphans
-        mismatch_flags: flags.map(f => ({ flag: f, detected_at: now })),
+        mismatch_flags: [
+          ...flags.map(f => ({ flag: f, detected_at: now })),
+          ...(c.source === "manual_emergency"
+            ? [{ flag: "manual_emergency_source", detected_at: now }]
+            : []),
+        ],
         is_active,
         is_postponed,
         last_verified_at: now,
@@ -458,6 +732,39 @@ serve(async (req) => {
       if (gtErr) console.error("games_today upsert error:", gtErr);
       else console.log(`Upserted ${gamesTodayRows.length} games_today rows (${dupesMerged} dupes merged)`);
     }
+
+    if (sport === "NBA" && replaceSlate) {
+      const slateKeys = new Set(gamesTodayRows.map((row) => row.canonical_game_key).filter(Boolean));
+      const { data: existingSlateRows } = await supabase
+        .from("games_today")
+        .select("id, canonical_game_key")
+        .eq("sport", sport)
+        .eq("game_date", todayStr)
+        .eq("is_active", true);
+
+      const staleIds = (existingSlateRows ?? [])
+        .filter((row) => row.canonical_game_key && !slateKeys.has(row.canonical_game_key))
+        .map((row) => ({ id: row.id, canonical_game_key: row.canonical_game_key as string }));
+
+      for (const row of staleIds) staleDeactivatedKeys.push(row.canonical_game_key);
+
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const slice = staleIds.slice(i, i + 100);
+        if (slice.length === 0) continue;
+        const { error } = await supabase
+          .from("games_today")
+          .update({
+            is_active: false,
+            is_postponed: false,
+            status: "Deactivated",
+            updated_at: now,
+          })
+          .in("id", slice.map((row) => row.id));
+        if (error) console.error(`[${sport}] stale slate deactivation error:`, error);
+      }
+    }
+
+    activeGamesCount = gamesTodayRows.filter((r) => r.is_active).length;
 
     console.log(`Game dates: ${[...allGameDates].sort().join(", ")}`);
 
@@ -484,7 +791,11 @@ serve(async (req) => {
     let mlbUnresolvedPlayers = 0;
     const propMarkets = cfg.propMarkets;
 
-    for (const game of gamesData.slice(0, 5)) {
+    for (const game of propSourceGames.slice(0, 5)) {
+      if (String(game.id).startsWith("manual_")) {
+        console.log(`[${sport}] Skipping prop fetch for manual game ${game.id}`);
+        continue;
+      }
       const gameDate = gameIdToDate.get(game.id) || todayStr;
       try {
         const propsRes = await fetch(`${fnBase}/get-odds`, {
@@ -635,7 +946,7 @@ serve(async (req) => {
 
     // ── 7. Chain pipeline ──
     const pipelineResults: Record<string, any> = {};
-    const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const todayET = easternDateString();
 
     if (allGameDates.has(todayET) && gamesProcessed > 0) {
       try {
@@ -682,6 +993,20 @@ serve(async (req) => {
 
     // Verification summary for response
     const verificationSummary = {
+      schedule_source_used: scheduleSourceUsed,
+      espn_games_fetched_count: espnGamesFetchedCount,
+      espn_canonical_keys: espnCanonicalKeys,
+      odds_games_fetched_count: sourceGamesFetchedCount,
+      odds_canonical_keys: oddsCanonicalKeys,
+      matched_keys: matchedKeys,
+      missing_from_odds_keys: missingFromOddsKeys,
+      stale_deactivated_keys: staleDeactivatedKeys,
+      source_games_fetched_count: sourceGamesFetchedCount,
+      normalized_games_count: normalizedGamesCount,
+      upserted_games_count: gamesTodayRows.length,
+      active_games_count: activeGamesCount,
+      skipped_games: skippedGames,
+      canonical_keys: canonicalKeys,
       total_rows: gamesTodayRows.length,
       dupes_merged: dupesMerged,
       by_status: {

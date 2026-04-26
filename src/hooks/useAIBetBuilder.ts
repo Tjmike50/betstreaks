@@ -75,11 +75,13 @@ export function useAIBetBuilder() {
         const context = (fnError as any).context as Response | undefined;
         const status = context?.status;
         let bodyError: string | null = null;
+        let bodyErrorCode: string | null = null;
         let bodyMessage: string | null = null;
         try {
           if (context) {
             const body = await context.json();
             bodyError = body?.error || null;
+            bodyErrorCode = body?.error_code || null;
             bodyMessage = body?.message || null;
           }
         } catch {
@@ -87,14 +89,14 @@ export function useAIBetBuilder() {
         }
 
         // 401 — not authenticated
-        if (status === 401 || bodyError?.includes("Authentication")) {
+        if (status === 401 || bodyErrorCode === "AUTH_REQUIRED" || bodyError?.includes("Authentication")) {
           setError("Please log in to use the AI Builder.");
           setErrorType("auth");
           toast({ title: "Login required", description: "Sign in to generate AI slips.", variant: "destructive" });
           return;
         }
         // 429 — free limit reached
-        if (status === 429 || bodyError === "free_limit_reached") {
+        if (status === 429 || bodyErrorCode === "FREE_LIMIT_REACHED" || bodyError === "free_limit_reached") {
           setError(bodyMessage || "You've used your free AI slip for today. Upgrade to Premium for unlimited.");
           setErrorType("limit");
           toast({ title: "Daily limit reached", description: bodyMessage || "Upgrade to Premium for unlimited AI slips.", variant: "destructive" });
@@ -119,6 +121,30 @@ export function useAIBetBuilder() {
         setErrorType("generic");
         toast({ title: "Something went wrong", description: bodyMessage || "Please try again later.", variant: "destructive" });
         return;
+      }
+
+      if (data && data.ok === false) {
+        const errorCode = data.error_code || "GENERIC_ERROR";
+        const message = data.message || "Something went wrong. Please try again.";
+        if (errorCode === "FREE_LIMIT_REACHED") {
+          setError(message);
+          setErrorType("limit");
+          toast({ title: "Daily limit reached", description: message, variant: "destructive" });
+          return;
+        }
+        if (errorCode === "SCHEDULE_EMPTY" || errorCode === "NO_CANDIDATES" || errorCode === "GAME_NOT_FOUND") {
+          setError(message);
+          setErrorType("no-data");
+          toast({ title: "No data available", description: message, variant: "destructive" });
+          return;
+        }
+        if (errorCode === "AI_PROVIDER_FAILED") {
+          setError(message);
+          setErrorType("generic");
+          toast({ title: "AI temporarily unavailable", description: message, variant: "destructive" });
+          return;
+        }
+        throw new Error(message);
       }
 
       if (data?.error) {

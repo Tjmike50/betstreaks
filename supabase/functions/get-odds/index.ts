@@ -130,13 +130,24 @@ async function getOddsFromOddsApiIo(
   const now = new Date().toISOString();
   const results: NormalizedOdds[] = [];
 
+  const leagueBySport: Record<string, { sport: string; league: string } | null> = {
+    basketball_nba: { sport: "basketball", league: "usa-nba" },
+    basketball_wnba: { sport: "basketball", league: "usa-wnba" },
+  };
+  const leagueConfig = leagueBySport[sport] ?? null;
+  if (!leagueConfig) {
+    console.warn(`[get-odds] Odds-API.io backup not configured for sport=${sport}`);
+    return results;
+  }
+
   // Step 1: Get event IDs (unless one was provided)
   let eventIds: number[] = [];
 
   if (eventId) {
     eventIds = [Number(eventId)];
   } else {
-    const eventsUrl = `${baseUrl}/events?apiKey=${apiKey}&sport=basketball&league=usa-nba&status=pending`;
+    const eventsUrl =
+      `${baseUrl}/events?apiKey=${apiKey}&sport=${leagueConfig.sport}&league=${leagueConfig.league}`;
     console.log(`[get-odds] Odds-API.io fetching events: ${eventsUrl.replace(apiKey, "***")}`);
     const eventsRes = await fetch(eventsUrl);
     if (!eventsRes.ok) {
