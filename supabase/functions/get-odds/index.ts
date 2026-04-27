@@ -114,6 +114,57 @@ const ODDS_API_IO_MARKET_MAP: Record<string, string> = {
   player_steals: "Player Props",
 };
 
+const ODDS_API_IO_MARKET_ALIASES: Record<string, string[]> = {
+  h2h: ["ml", "moneyline"],
+  spreads: ["spread", "spreads"],
+  totals: ["total", "totals"],
+  player_points: ["player props points", "player points", "points", "pts"],
+  player_rebounds: ["player props rebounds", "player rebounds", "rebounds", "reb"],
+  player_assists: ["player props assists", "player assists", "assists", "ast"],
+  player_threes: ["player props threes", "player threes", "three pointers", "3-pointers", "3 pointers", "triples"],
+  player_blocks: ["player props blocks", "player blocks", "blocks", "blk"],
+  player_steals: ["player props steals", "player steals", "steals", "stl"],
+};
+
+function normalizeMarketText(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function inferOddsApiIoInternalMarketKey(
+  requestedMarkets: string[],
+  marketRow: Record<string, unknown>,
+): string | null {
+  const searchText = [
+    marketRow.name,
+    marketRow.label,
+    marketRow.header,
+    marketRow.market,
+    marketRow.type,
+    marketRow.key,
+  ].map(normalizeMarketText).filter(Boolean).join(" | ");
+
+  if (!searchText) {
+    return requestedMarkets.length === 1 ? requestedMarkets[0] : null;
+  }
+
+  for (const requestedMarket of requestedMarkets) {
+    const aliases = ODDS_API_IO_MARKET_ALIASES[requestedMarket] ?? [normalizeMarketText(requestedMarket)];
+    if (aliases.some((alias) => alias && searchText.includes(alias))) {
+      return requestedMarket;
+    }
+  }
+
+  const hasGenericPlayerProps = searchText.includes("player props");
+  if (hasGenericPlayerProps && requestedMarkets.length === 1 && requestedMarkets[0].startsWith("player_")) {
+    return requestedMarkets[0];
+  }
+
+  return null;
+}
+
 // Map bookmaker display names to slug keys
 function bmSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -129,6 +180,7 @@ async function getOddsFromOddsApiIo(
   const baseUrl = "https://api.odds-api.io/v3";
   const now = new Date().toISOString();
   const results: NormalizedOdds[] = [];
+  const requestedMarkets = market.split(",").map((m) => m.trim()).filter(Boolean);
 
   const leagueBySport: Record<string, { sport: string; league: string } | null> = {
     basketball_nba: { sport: "basketball", league: "usa-nba" },
@@ -163,7 +215,6 @@ async function getOddsFromOddsApiIo(
   if (eventIds.length === 0) return results;
 
   // Step 2: Fetch odds for each event (batch up to 10 concurrent)
-  const targetMarket = ODDS_API_IO_MARKET_MAP[market] || market;
   const bookmakerFilter = "DraftKings,FanDuel,BetMGM";
 
   const fetchOddsForEvent = async (eid: number) => {
@@ -187,14 +238,14 @@ async function getOddsFromOddsApiIo(
       if (!Array.isArray(markets)) continue;
 
       for (const mkt of markets as any[]) {
-        const mktName = mkt.name || "";
-        // Only process the market we're looking for
-        if (mktName !== targetMarket) continue;
+        const internalMarketKey = inferOddsApiIoInternalMarketKey(requestedMarkets, mkt as Record<string, unknown>);
+        if (!internalMarketKey) continue;
 
         const oddsEntries = mkt.odds || [];
         const outcomes: NormalizedOutcome[] = [];
 
         for (const odd of oddsEntries) {
+          const targetMarket = ODDS_API_IO_MARKET_MAP[internalMarketKey] || internalMarketKey;
           if (targetMarket === "ML") {
             // Moneyline: { home: "1.5", away: "2.3" }
             if (odd.home != null) {
@@ -246,7 +297,7 @@ async function getOddsFromOddsApiIo(
             provider: "odds-api-io",
             sportKey: sport,
             eventId: eventIdStr,
-            marketKey: market, // Keep our internal key for consistency
+            marketKey: internalMarketKey,
             bookmakerKey: bmSlug(bmName),
             homeTeam,
             awayTeam,
@@ -421,7 +472,15 @@ serve(async (req) => {
       if (BACKUP_KEY) {
         try {
           console.log(`[get-odds] Fetching from backup (odds-api-io)...`);
-          odds = await getOddsFromOddsApiIo(BACKUP_KEY, sport, market, eventId, bookmaker);
+          if (market.includes(",")) {
+            const segments = market.split(",").map((m: string) => m.trim()).filter(Boolean);
+            const settled = await Promise.allSettled(
+              segments.map((segment) => getOddsFromOddsApiIo(BACKUP_KEY, sport, segment, eventId, bookmaker)),
+            );
+            odds = settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+          } else {
+            odds = await getOddsFromOddsApiIo(BACKUP_KEY, sport, market, eventId, bookmaker);
+          }
           provider = "odds-api-io";
           fallbackUsed = true;
           console.log(`[get-odds] Backup returned ${odds.length} entries`);

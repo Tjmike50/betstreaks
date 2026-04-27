@@ -62,6 +62,23 @@ function easternDateString(date = new Date()): string {
   return date.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
+function teamPairKey(awayAbbr: string | null, homeAbbr: string | null): string | null {
+  if (!awayAbbr || !homeAbbr) return null;
+  return `${awayAbbr}_${homeAbbr}`;
+}
+
+function chooseOddsGameForSlateDate(
+  games: any[] | undefined,
+  requestedGameDate: string,
+): any | null {
+  if (!games || games.length === 0) return null;
+  const exact = games.find((game) => {
+    if (!game?.commence_time) return false;
+    return easternDateString(new Date(game.commence_time)) === requestedGameDate;
+  });
+  return exact ?? games[0] ?? null;
+}
+
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -605,6 +622,27 @@ interface DebugInfo {
   final_legs_accepted: number;
   final_legs_rejected_no_match: number;
   market_quality: MarketQualityDebug | null;
+  requested_sport?: string;
+  requested_date?: string;
+  selected_game_ids?: string[];
+  selected_game_keys?: string[];
+  active_games_count?: number;
+  active_games_returned?: { id: string; canonical_game_key: string | null; away_team_abbr: string | null; home_team_abbr: string | null; status: string | null }[];
+  candidate_source?: string;
+  odds_provider_used?: string;
+  odds_fallback_used?: boolean;
+  matched_odds_games_count?: number;
+  matched_odds_event_ids?: string[];
+  raw_candidate_count?: number;
+  candidates_after_sport_date_filter?: number;
+  candidates_after_game_filter?: number;
+  candidates_after_confidence_filter?: number;
+  candidates_after_availability_filter?: number;
+  candidates_after_dedupe_rules?: number;
+  final_selected_legs_count?: number;
+  no_slip_reason?: string | null;
+  no_candidates_reason?: string | null;
+  candidates_by_team?: Record<string, number>;
 }
 
 // =============================================================================
@@ -1083,7 +1121,7 @@ serve(async (req) => {
     live_props_found: 0, game_level_candidates: 0,
     verified_prop_candidates: 0, verified_candidates_passed_to_llm: 0,
     final_legs_accepted: 0, final_legs_rejected_no_match: 0,
-    market_quality: null,
+    market_quality: null, no_slip_reason: null, no_candidates_reason: null, candidates_by_team: {},
   };
 
   try {
@@ -1142,6 +1180,9 @@ serve(async (req) => {
 
     const todayStr = easternDateString();
     debug.db_query_date = todayStr;
+    debug.requested_sport = sport;
+    debug.requested_date = todayStr;
+    debug.selected_game_ids = Array.isArray(filters?.includeGames) ? filters.includeGames : [];
 
     // -------------------------------------------------------------------------
     // MLB v1 short-circuit
@@ -1240,6 +1281,21 @@ serve(async (req) => {
       status: g.status,
       canonical_game_key: g.canonical_game_key,
     }));
+    debug.active_games_count = (gamesTodayRows as any[])?.length ?? 0;
+    debug.active_games_returned = ((gamesTodayRows as any[]) || []).map((g: any) => ({
+      id: g.id,
+      canonical_game_key: g.canonical_game_key ?? null,
+      away_team_abbr: g.away_team_abbr ?? null,
+      home_team_abbr: g.home_team_abbr ?? null,
+      status: g.status ?? null,
+    }));
+    debug.selected_game_keys = ((gamesTodayRows as any[]) || [])
+      .filter((g: any) => (filters?.includeGames || []).includes(g.id))
+      .map((g: any) => g.canonical_game_key)
+      .filter(Boolean);
+    debug.candidate_source = "get-odds live props + line_snapshots fallback + player_prop_scores enrichment";
+    debug.odds_provider_used = oddsProviderUsed;
+    debug.odds_fallback_used = oddsFallbackUsed;
     for (const g of (gamesTodayRows as any[]) || []) {
       if (g.home_team_abbr) teamsPlayingToday.add(g.home_team_abbr.toUpperCase());
       if (g.away_team_abbr) teamsPlayingToday.add(g.away_team_abbr.toUpperCase());
@@ -1250,6 +1306,7 @@ serve(async (req) => {
     );
 
     if (((gamesTodayRows as any[])?.length ?? 0) === 0) {
+      debug.no_slip_reason = "schedule_empty";
       return failureResponse(
         "SCHEDULE_EMPTY",
         "No active games found for this slate yet. Refresh the schedule or try again shortly.",
@@ -1269,6 +1326,7 @@ serve(async (req) => {
         }
       }
       if (gameFilterTeams.size === 0) {
+        debug.no_slip_reason = "selected_game_not_found";
         return failureResponse(
           "GAME_NOT_FOUND",
           "The selected game is not in today’s active verified slate.",
@@ -1288,13 +1346,40 @@ serve(async (req) => {
     const playerToGameTeams = new Map<string, { home: string; away: string }>();
 
     if (includePlayerProps) {
-      const gamesToFetchProps = gameFilterTeams && gameFilterTeams.size > 0
-        ? gamesData.filter((g: any) => {
-            const homeAbbr = resolveToAbbr(g.home_team || "");
-            const awayAbbr = resolveToAbbr(g.away_team || "");
-            return gameFilterTeams!.has(homeAbbr) || gameFilterTeams!.has(awayAbbr);
-          })
-        : gamesData;
+      const oddsByTeamPair = new Map<string, any[]>();
+      for (const game of gamesData) {
+        const homeAbbr = resolveToAbbr(game.home_team || "");
+        const awayAbbr = resolveToAbbr(game.away_team || "");
+        const pairKey = teamPairKey(awayAbbr, homeAbbr);
+        if (!pairKey) continue;
+        if (!oddsByTeamPair.has(pairKey)) oddsByTeamPair.set(pairKey, []);
+        oddsByTeamPair.get(pairKey)!.push(game);
+      }
+
+      const targetSlateGames = gameFilterTeams && gameFilterTeams.size > 0
+        ? ((gamesTodayRows as any[]) || []).filter((g: any) => (filters?.includeGames || []).includes(g.id))
+        : ((gamesTodayRows as any[]) || []);
+      const matchedOddsGames = targetSlateGames
+        .map((g: any) => chooseOddsGameForSlateDate(
+          oddsByTeamPair.get(teamPairKey(g.away_team_abbr ?? null, g.home_team_abbr ?? null) ?? ""),
+          todayStr,
+        ))
+        .filter(Boolean);
+      const dedupedMatchedOddsGames = [...new Map(matchedOddsGames.map((g: any) => [String(g.id), g])).values()];
+      const gamesToFetchProps = dedupedMatchedOddsGames.length > 0
+        ? dedupedMatchedOddsGames
+        : (gameFilterTeams && gameFilterTeams.size > 0
+          ? gamesData.filter((g: any) => {
+              const homeAbbr = resolveToAbbr(g.home_team || "");
+              const awayAbbr = resolveToAbbr(g.away_team || "");
+              return gameFilterTeams!.has(homeAbbr) || gameFilterTeams!.has(awayAbbr);
+            })
+          : gamesData.filter((g: any) => {
+              const gameDate = g.commence_time ? easternDateString(new Date(g.commence_time)) : todayStr;
+              return gameDate === todayStr;
+            }));
+      debug.matched_odds_games_count = dedupedMatchedOddsGames.length;
+      debug.matched_odds_event_ids = dedupedMatchedOddsGames.map((g: any) => String(g.id));
       console.log(`[AI-Builder] Fetching props from ${gamesToFetchProps.length} games via get-odds`);
 
       for (const game of gamesToFetchProps.slice(0, 5)) {
@@ -1353,13 +1438,17 @@ serve(async (req) => {
 
     // Aggregate best lines with main-line detection
     let bestLines = aggregateBestLines(allLiveProps);
+    debug.raw_candidate_count = bestLines.size;
+    debug.candidates_after_sport_date_filter = bestLines.size;
 
     // Snapshot fallback if no live odds
     if (bestLines.size === 0 && includePlayerProps) {
       console.log("[AI-Builder] No live odds — falling back to line_snapshots...");
       const { data: snapshotFallback } = await serviceClient.from("line_snapshots")
         .select("player_name, stat_type, threshold, over_odds, under_odds, sportsbook")
-        .eq("game_date", todayStr).order("snapshot_at", { ascending: false }).limit(800);
+        .eq("game_date", todayStr)
+        .in("stat_type", ["Points", "Rebounds", "Assists", "3-Pointers", "Steals", "Blocks"])
+        .order("snapshot_at", { ascending: false }).limit(800);
       if (snapshotFallback && snapshotFallback.length > 0) {
         const fallbackProps = snapshotFallback.map((s: any) => ({
           player_name: s.player_name, stat_type: s.stat_type, threshold: Number(s.threshold),
@@ -1368,6 +1457,8 @@ serve(async (req) => {
         bestLines = aggregateBestLines(fallbackProps);
         debug.fallback_used = true;
         debug.fallback_reason = `Snapshot fallback: ${bestLines.size} unique props from ${snapshotFallback.length} snapshots`;
+        debug.raw_candidate_count = bestLines.size;
+        debug.candidates_after_sport_date_filter = bestLines.size;
         console.log(`[AI-Builder] Snapshot fallback: ${bestLines.size} unique props`);
       }
     }
@@ -1404,7 +1495,7 @@ serve(async (req) => {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
           },
-          body: JSON.stringify({ top_n: 500, market_lines: marketLines }),
+          body: JSON.stringify({ top_n: 500, sport, game_date: todayStr, market_lines: marketLines }),
         }),
         new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("scoring-timeout")), 45000)),
       ]);
@@ -1416,7 +1507,7 @@ serve(async (req) => {
       const scoringResult = await scoringRes.json();
       console.log(`[AI-Builder] Scoring engine completed: ${scoringResult.scored_count ?? "?"} props scored (market_lines=${marketLines.length})`);
       const { data: freshScores } = await serviceClient.from("player_prop_scores")
-        .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(1000);
+        .select("*").eq("sport", sport).eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(1000);
       if (freshScores && freshScores.length > scoredProps.length) {
         scoredProps = freshScores;
         debug.db_candidates_found = scoredProps.length;
@@ -1428,7 +1519,7 @@ serve(async (req) => {
 
     if (includePlayerProps) {
       const { data: dbCandidates } = await serviceClient.from("player_prop_scores")
-        .select("*").eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(1000);
+        .select("*").eq("sport", sport).eq("game_date", todayStr).order("confidence_score", { ascending: false }).limit(1000);
       scoredProps = dbCandidates || [];
       debug.db_candidates_found = scoredProps.length;
 
@@ -1477,7 +1568,7 @@ serve(async (req) => {
         if (scoredProps.length < SCORING_SPARSE_THRESHOLD) {
           const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
           const { data: yestCandidates } = await serviceClient.from("player_prop_scores")
-            .select("*").eq("game_date", yesterday).order("confidence_score", { ascending: false }).limit(500);
+            .select("*").eq("sport", sport).eq("game_date", yesterday).order("confidence_score", { ascending: false }).limit(500);
           if (yestCandidates && yestCandidates.length > scoredProps.length) {
             scoredProps = yestCandidates;
             debug.fallback_used = true;
@@ -1719,6 +1810,7 @@ serve(async (req) => {
 
     mqDebug.after_market_filters = marketFilteredCandidates.length;
     debug.market_quality = mqDebug;
+    debug.candidates_after_confidence_filter = marketFilteredCandidates.length;
     console.log(`[AI-Builder] Market quality filters: ${verifiedCandidates.length} → ${marketFilteredCandidates.length} (removed: verified=${mqDebug.removed_by_verified_only}, mainLine=${mqDebug.removed_by_main_lines_only}, minBooks=${mqDebug.removed_by_min_books}, minConf=${mqDebug.removed_by_min_confidence}, singleBook=${mqDebug.removed_by_single_book_exclude})`);
 
     // ===== PHASE 3c: APPLY USER FILTERS to market-quality-filtered candidates =====
@@ -1737,6 +1829,7 @@ serve(async (req) => {
           })();
           return teamAbbr && gameFilterTeams!.has(teamAbbr.toUpperCase());
         });
+        debug.candidates_after_game_filter = filteredCandidates.length;
         console.log(`[AI-Builder] After game filter: ${filteredCandidates.length} candidates`);
       }
       if (f.statTypes?.length > 0) {
@@ -1774,7 +1867,11 @@ serve(async (req) => {
       if (f.minSampleSize != null) {
         filteredCandidates = filteredCandidates.filter(c => (c.total_games ?? 0) >= f.minSampleSize);
       }
+      debug.candidates_after_confidence_filter = filteredCandidates.length;
       console.log(`[AI-Builder] After user filters: ${filteredCandidates.length} verified candidates`);
+    } else {
+      debug.candidates_after_game_filter = filteredCandidates.length;
+      debug.candidates_after_confidence_filter = filteredCandidates.length;
     }
 
     // Filter to teams playing today
@@ -1811,7 +1908,13 @@ serve(async (req) => {
     }
 
     debug.candidates_after_diversity = diversifiedCandidates.length;
+    debug.candidates_after_dedupe_rules = diversifiedCandidates.length;
     const uniquePlayers = new Set(diversifiedCandidates.map(c => normName(c.player_name)));
+    debug.candidates_by_team = diversifiedCandidates.reduce<Record<string, number>>((acc, c) => {
+      const key = c.team_abbr || "unknown";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
     debug.unique_players_in_pool = uniquePlayers.size;
     console.log(`[AI-Builder] After diversity: ${diversifiedCandidates.length} from ${uniquePlayers.size} players`);
 
@@ -1858,9 +1961,13 @@ serve(async (req) => {
 
     // Check we have SOMETHING
     if (diversifiedCandidates.length === 0 && gameLevelCandidates.length === 0) {
+      debug.no_slip_reason = bestLines.size === 0
+        ? "no_live_or_snapshot_props"
+        : "all_candidates_filtered_before_availability";
+      debug.no_candidates_reason = debug.no_slip_reason;
       return failureResponse(
         "NO_CANDIDATES",
-        "No eligible props found for this slate yet. Try all games or refresh odds.",
+        "No eligible NBA props found for today's slate yet. Refresh odds/player props or try again later.",
         debug,
         { available_games: availableGames },
       );
@@ -1889,11 +1996,19 @@ serve(async (req) => {
     if (finalCandidates.length < preAvailCount) {
       console.log(`[AI-Builder] Removed ${preAvailCount - finalCandidates.length} OUT players from candidates`);
     }
+    debug.candidates_after_availability_filter = finalCandidates.length;
+    debug.candidates_by_team = finalCandidates.reduce<Record<string, number>>((acc, c) => {
+      const key = c.team_abbr || "unknown";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
 
     // Fetch recent snapshots for movement detection
     const { data: recentSnapshots } = await serviceClient.from("line_snapshots")
       .select("player_name, stat_type, threshold, over_odds, under_odds, snapshot_at")
-      .eq("game_date", todayStr).order("snapshot_at", { ascending: false }).limit(500);
+      .eq("game_date", todayStr)
+      .in("stat_type", ["Points", "Rebounds", "Assists", "3-Pointers", "Steals", "Blocks"])
+      .order("snapshot_at", { ascending: false }).limit(500);
     const snapshotsByProp = new Map<string, { over_odds: string | null; under_odds: string | null; snapshot_at: string }[]>();
     for (const s of recentSnapshots || []) {
       const key = `${s.player_name.toLowerCase()}|${s.stat_type}|${s.threshold}`;
@@ -2550,6 +2665,9 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         ? `Live market verification was not available for enough player props to build a slip. ${marketRejections.length} prop(s) were rejected because no matching verified sportsbook market was found. Try again later when markets are open, or switch to game-level bets.`
         : "AI could not build valid slips from today's verified candidates. Try a different prompt or adjust your filters.";
 
+      debug.no_slip_reason = isMarketIssue ? "llm_selected_unverified_or_missing_markets" : "llm_returned_no_valid_slips";
+      debug.no_candidates_reason = debug.no_slip_reason;
+      debug.final_selected_legs_count = 0;
       return failureResponse(
         "NO_CANDIDATES",
         isMarketIssue ? "No eligible props found for this slate yet. Try all games or refresh odds." : errorMsg,
@@ -2557,6 +2675,8 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         { available_games: availableGames, rejected_legs: debug.rejected_legs },
       );
     }
+
+    debug.final_selected_legs_count = parsed.slips.reduce((sum: number, slip: any) => sum + (Array.isArray(slip.legs) ? slip.legs.length : 0), 0);
 
     // ===== PHASE 6: Save to database =====
     const savedSlips = [];
