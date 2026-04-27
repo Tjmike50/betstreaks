@@ -54,12 +54,14 @@ interface SportConfig {
   statRewrite: Record<string, string> | "passthrough";
 }
 
-const NBA_PROP_MARKETS = "player_points,player_rebounds,player_assists,player_threes";
+const NBA_PROP_MARKETS = "player_points,player_rebounds,player_assists,player_threes,player_blocks,player_steals";
 const NBA_STAT_REWRITE: Record<string, string> = {
   player_points: "Points",
   player_rebounds: "Rebounds",
   player_assists: "Assists",
   player_threes: "3-Pointers",
+  player_blocks: "Blocks",
+  player_steals: "Steals",
 };
 
 const SPORT_CONFIG: Record<SportKey, SportConfig> = {
@@ -169,6 +171,61 @@ function teamPairKey(awayAbbr: string | null, homeAbbr: string | null): string |
   return `${awayAbbr}_${homeAbbr}`;
 }
 
+function resolveBasketballTeamAbbr(raw: string | null | undefined, teamMap: Record<string, string>): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  const upper = value.toUpperCase();
+  const direct = teamMap[value] || teamMap[upper] || null;
+  if (direct) return direct;
+  if (["ATL","BOS","BKN","CHA","CHI","CLE","DAL","DEN","DET","GSW","HOU","IND","LAC","LAL","MEM","MIA","MIL","MIN","NOP","NYK","OKC","ORL","PHI","PHX","POR","SAC","SAS","TOR","UTA","WAS"].includes(upper)) {
+    return upper;
+  }
+  if (upper === "SA") return "SAS";
+  if (upper === "GS") return "GSW";
+  if (upper === "NO") return "NOP";
+  if (upper === "NY") return "NYK";
+  if (upper === "PHO") return "PHX";
+  const lastWord = upper.split(" ").pop() || upper;
+  const nicknameMap: Record<string, string> = {
+    HAWKS: "ATL", CELTICS: "BOS", NETS: "BKN", HORNETS: "CHA", BULLS: "CHI", CAVALIERS: "CLE",
+    MAVERICKS: "DAL", NUGGETS: "DEN", PISTONS: "DET", WARRIORS: "GSW", ROCKETS: "HOU", PACERS: "IND",
+    CLIPPERS: "LAC", LAKERS: "LAL", GRIZZLIES: "MEM", HEAT: "MIA", BUCKS: "MIL", TIMBERWOLVES: "MIN",
+    PELICANS: "NOP", KNICKS: "NYK", THUNDER: "OKC", MAGIC: "ORL", "76ERS": "PHI", SIXERS: "PHI",
+    SUNS: "PHX", BLAZERS: "POR", KINGS: "SAC", SPURS: "SAS", RAPTORS: "TOR", JAZZ: "UTA", WIZARDS: "WAS",
+  };
+  return nicknameMap[lastWord] || null;
+}
+
+function chooseOddsGameForSlateDate(
+  games: any[] | undefined,
+  requestedGameDate: string,
+): any | null {
+  if (!games || games.length === 0) return null;
+  const exact = games.find((game) => {
+    if (!game?.commence_time) return false;
+    return easternDateString(new Date(game.commence_time)) === requestedGameDate;
+  });
+  return exact ?? games[0] ?? null;
+}
+
+function rankOddsGamesForSlateDate(
+  games: any[] | undefined,
+  requestedGameDate: string,
+): any[] {
+  if (!games || games.length === 0) return [];
+  const requestedTs = new Date(`${requestedGameDate}T12:00:00-04:00`).getTime();
+  return [...games].sort((a, b) => {
+    const aDate = a?.commence_time ? easternDateString(new Date(a.commence_time)) : "";
+    const bDate = b?.commence_time ? easternDateString(new Date(b.commence_time)) : "";
+    const aExact = aDate === requestedGameDate ? 0 : 1;
+    const bExact = bDate === requestedGameDate ? 0 : 1;
+    if (aExact !== bExact) return aExact - bExact;
+    const aTs = a?.commence_time ? new Date(a.commence_time).getTime() : requestedTs;
+    const bTs = b?.commence_time ? new Date(b.commence_time).getTime() : requestedTs;
+    return Math.abs(aTs - requestedTs) - Math.abs(bTs - requestedTs);
+  });
+}
+
 function normalizeEspnTeamAbbr(raw: string | null | undefined): string | null {
   const abbr = String(raw ?? "").trim().toUpperCase();
   if (!abbr) return null;
@@ -178,6 +235,110 @@ function normalizeEspnTeamAbbr(raw: string | null | undefined): string | null {
   if (abbr === "NY") return "NYK";
   if (abbr === "PHO") return "PHX";
   return abbr;
+}
+
+function buildTheOddsApiUrlShape(
+  sport: string,
+  eventId: string,
+  marketParam: string,
+  bookmakers = "draftkings,fanduel,betmgm,pointsbetus",
+): string {
+  return `https://api.the-odds-api.com/v4/sports/${sport}/events/${eventId}/odds?regions=us&markets=${marketParam}&oddsFormat=american&bookmakers=${bookmakers}&apiKey=***`;
+}
+
+function summarizeOddsApiResponseBody(body: any): {
+  response_body_sample_keys: string[];
+  bookmakers_count: number;
+  markets_returned: string[];
+  outcomes_count_by_market: Record<string, number>;
+  first_bookmaker_title: string | null;
+  first_market_key: string | null;
+  first_outcome_sample: Record<string, unknown> | null;
+} {
+  const responseBodySampleKeys = body && typeof body === "object" && !Array.isArray(body)
+    ? Object.keys(body).slice(0, 20)
+    : [];
+
+  const events = Array.isArray(body) ? body : body ? [body] : [];
+  const marketsReturned = new Set<string>();
+  const outcomesCountByMarket: Record<string, number> = {};
+  let bookmakersCount = 0;
+  let firstBookmakerTitle: string | null = null;
+  let firstMarketKey: string | null = null;
+  let firstOutcomeSample: Record<string, unknown> | null = null;
+
+  for (const event of events) {
+    for (const bookmaker of event?.bookmakers || []) {
+      bookmakersCount++;
+      if (!firstBookmakerTitle) {
+        firstBookmakerTitle = String(bookmaker?.title ?? bookmaker?.key ?? "");
+      }
+      for (const market of bookmaker?.markets || []) {
+        const marketKey = String(market?.key ?? "");
+        if (!marketKey) continue;
+        marketsReturned.add(marketKey);
+        const outcomes = Array.isArray(market?.outcomes) ? market.outcomes : [];
+        outcomesCountByMarket[marketKey] = (outcomesCountByMarket[marketKey] || 0) + outcomes.length;
+        if (!firstMarketKey) firstMarketKey = marketKey;
+        if (!firstOutcomeSample && outcomes.length > 0) {
+          const firstOutcome = outcomes[0];
+          firstOutcomeSample = {
+            player: firstOutcome?.description ?? null,
+            description: firstOutcome?.description ?? null,
+            name: firstOutcome?.name ?? null,
+            price: firstOutcome?.price ?? null,
+            point: firstOutcome?.point ?? null,
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    response_body_sample_keys: responseBodySampleKeys,
+    bookmakers_count: bookmakersCount,
+    markets_returned: [...marketsReturned],
+    outcomes_count_by_market: outcomesCountByMarket,
+    first_bookmaker_title: firstBookmakerTitle,
+    first_market_key: firstMarketKey,
+    first_outcome_sample: firstOutcomeSample,
+  };
+}
+
+async function fetchTheOddsApiEventDiagnostic(
+  sport: string,
+  eventId: string,
+  marketParam: string,
+): Promise<Record<string, unknown>> {
+  const apiKey = Deno.env.get("ODDS_API_KEY");
+  if (!apiKey) {
+    return {
+      provider_url_shape: buildTheOddsApiUrlShape(sport, eventId, marketParam),
+      http_status: null,
+      error_code: "ODDS_API_KEY_MISSING",
+    };
+  }
+
+  const url = buildTheOddsApiUrlShape(sport, eventId, marketParam).replace("***", apiKey);
+  const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  const rawText = await response.text().catch(() => "");
+  let parsedBody: any = null;
+  try {
+    parsedBody = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    parsedBody = null;
+  }
+
+  return {
+    provider_url_shape: buildTheOddsApiUrlShape(sport, eventId, marketParam),
+    http_status: response.status,
+    ...summarizeOddsApiResponseBody(parsedBody),
+    raw_response_error_body_sample: response.ok
+      ? null
+      : (typeof parsedBody === "object" && parsedBody !== null
+          ? JSON.stringify(parsedBody).slice(0, 400)
+          : rawText.slice(0, 400)),
+  };
 }
 
 async function fetchEspnNbaSlate(gameDate: string): Promise<EspnSlateGame[]> {
@@ -340,7 +501,6 @@ function deriveActiveFlags(status: string | null): { is_active: boolean; is_post
   const s = (status || "").toLowerCase();
   if (s.includes("postponed") || s.includes("ppd")) return { is_active: false, is_postponed: true };
   if (s.includes("cancel") || s.includes("suspended")) return { is_active: false, is_postponed: false };
-  if (s.includes("final") || s.includes("completed")) return { is_active: false, is_postponed: false };
   return { is_active: true, is_postponed: false };
 }
 
@@ -369,6 +529,7 @@ serve(async (req) => {
       : easternDateString();
     const manualGames = Array.isArray(reqBody?.manual_games) ? reqBody.manual_games as ManualGameInput[] : [];
     const replaceSlate = reqBody?.replace_slate === true || (sport === "NBA" && manualGames.length === 0);
+    const diagnoseProps = reqBody?.diagnose_props === true;
 
     // Offseason short-circuit
     if (cfg.seasonState === "offseason") {
@@ -436,12 +597,19 @@ serve(async (req) => {
     const gamesData = [...eventMap.values()];
     console.log(`[${sport}] Found ${gamesData.length} unique games`);
 
-    const oddsByTeamPair = new Map<string, any>();
+    const oddsByTeamPair = new Map<string, any[]>();
     for (const game of gamesData) {
-      const homeAbbr = cfg.teamMap[game.home_team] || null;
-      const awayAbbr = cfg.teamMap[game.away_team] || null;
+      const homeAbbr = sport === "NBA" || sport === "WNBA"
+        ? resolveBasketballTeamAbbr(game.home_team, cfg.teamMap)
+        : cfg.teamMap[game.home_team] || null;
+      const awayAbbr = sport === "NBA" || sport === "WNBA"
+        ? resolveBasketballTeamAbbr(game.away_team, cfg.teamMap)
+        : cfg.teamMap[game.away_team] || null;
       const pairKey = teamPairKey(awayAbbr, homeAbbr);
-      if (pairKey && !oddsByTeamPair.has(pairKey)) oddsByTeamPair.set(pairKey, game);
+      if (pairKey) {
+        if (!oddsByTeamPair.has(pairKey)) oddsByTeamPair.set(pairKey, []);
+        oddsByTeamPair.get(pairKey)!.push(game);
+      }
       const oddsGameDate = game.commence_time
         ? easternDateString(new Date(game.commence_time))
         : requestedGameDate;
@@ -525,8 +693,9 @@ serve(async (req) => {
           continue;
         }
         const pairKey = teamPairKey(game.away_team_abbr, game.home_team_abbr);
-        if (pairKey && oddsByTeamPair.has(pairKey) && game.canonical_game_key) matchedKeys.push(game.canonical_game_key);
-        if (pairKey && !oddsByTeamPair.has(pairKey) && game.canonical_game_key) missingFromOddsKeys.push(game.canonical_game_key);
+        const matchedOddsGame = pairKey ? chooseOddsGameForSlateDate(oddsByTeamPair.get(pairKey), requestedGameDate) : null;
+        if (matchedOddsGame && game.canonical_game_key) matchedKeys.push(game.canonical_game_key);
+        if (!matchedOddsGame && game.canonical_game_key) missingFromOddsKeys.push(game.canonical_game_key);
         if (game.canonical_game_key) canonicalKeys.push(game.canonical_game_key);
 
         candidates.push({
@@ -613,10 +782,18 @@ serve(async (req) => {
     }
     normalizedGamesCount = candidates.length;
 
+    const nbaPropTargets = sport === "NBA" && scheduleSourceUsed === "espn_scoreboard"
+      ? candidates.map((candidate) => {
+          const pairKey = teamPairKey(candidate.away_team_abbr, candidate.home_team_abbr);
+          return {
+            candidate,
+            oddsEvents: pairKey ? rankOddsGamesForSlateDate(oddsByTeamPair.get(pairKey), requestedGameDate) : [],
+          };
+        })
+      : [];
+
     const propSourceGames = sport === "NBA" && scheduleSourceUsed === "espn_scoreboard"
-      ? candidates
-          .map((candidate) => oddsByTeamPair.get(teamPairKey(candidate.away_team_abbr, candidate.home_team_abbr) ?? ""))
-          .filter(Boolean)
+      ? nbaPropTargets.flatMap((target) => target.oddsEvents)
       : gamesData;
 
     // ── 1c. Duplicate resolution ──
@@ -787,130 +964,219 @@ serve(async (req) => {
     const newRows: any[] = [];
     let skippedDupes = 0;
     let gamesProcessed = 0;
+    let gamesAttempted = 0;
+    let gamesWithProps = 0;
+    let gamesWithoutProps = 0;
+    let marketsAttempted = 0;
+    const matchedProviderEventsByGame: Record<string, string[]> = {};
+    const providerEventIdsAttempted: string[] = [];
+    const marketsAttemptedByEvent: Record<string, string[]> = {};
+    const providerStatusByEventMarket: Record<string, string> = {};
+    const bookmakerCountByEventMarket: Record<string, number> = {};
+    const providerDiagnosticsByEvent: Record<string, Record<string, unknown>> = {};
+    const snapshotsWrittenByGame: Record<string, number> = {};
+    const snapshotsWrittenByStatType: Record<string, number> = {};
+    const providerErrorsByGame: Record<string, string[]> = {};
+    let providerUnavailableReason: string | null = null;
     let mlbResolvedPlayers = 0;
     let mlbUnresolvedPlayers = 0;
     const propMarkets = cfg.propMarkets;
+    const propMarketList = propMarkets.split(",").map((m) => m.trim()).filter(Boolean);
 
-    for (const game of propSourceGames.slice(0, 5)) {
-      if (String(game.id).startsWith("manual_")) {
-        console.log(`[${sport}] Skipping prop fetch for manual game ${game.id}`);
-        continue;
-      }
-      const gameDate = gameIdToDate.get(game.id) || todayStr;
-      try {
-        const propsRes = await fetch(`${fnBase}/get-odds`, {
-          method: "POST",
-          headers: svcHeaders,
-          body: JSON.stringify({
-            sport: cfg.oddsApiSport,
-            market: propMarkets,
-            eventId: game.id,
-            ttl: 120,
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
-        const propsResponse = await propsRes.json();
-        if (!propsResponse.ok && (!propsResponse.data || propsResponse.data.length === 0)) {
-          console.warn(`No props for game ${game.id}`);
+    const fetchTargets = sport === "NBA" && scheduleSourceUsed === "espn_scoreboard"
+      ? nbaPropTargets.slice(0, 5).map((target) => ({
+          gameDate: target.candidate.game_date || todayStr,
+          targetKey: target.candidate.canonical_game_key || `${target.candidate.away_team_abbr}_${target.candidate.home_team_abbr}`,
+          oddsEvents: target.oddsEvents,
+          status: target.candidate.status,
+          commence_time_iso: target.candidate.commence_time_iso,
+        }))
+      : propSourceGames.slice(0, 5).map((game) => ({
+          gameDate: gameIdToDate.get(game.id) || todayStr,
+          targetKey: String(game.id),
+          oddsEvents: [game],
+          status: "Scheduled",
+          commence_time_iso: game?.commence_time || null,
+        }));
+
+    for (const target of fetchTargets) {
+      gamesAttempted++;
+      let wroteAnyForTarget = false;
+      let sawPropsPayload = false;
+      matchedProviderEventsByGame[target.targetKey] = target.oddsEvents.map((g: any) => String(g.id));
+
+      for (const game of target.oddsEvents) {
+        if (String(game.id).startsWith("manual_")) {
+          console.log(`[${sport}] Skipping prop fetch for manual game ${game.id}`);
           continue;
         }
+        const gameDate = target.gameDate;
+        try {
+          providerEventIdsAttempted.push(String(game.id));
+          const marketRequests =
+            (sport === "NBA" || sport === "WNBA")
+              ? [propMarkets, ...propMarketList]
+              : [propMarkets];
+          marketsAttemptedByEvent[String(game.id)] = [];
 
-        gamesProcessed++;
-        const propsData = propsResponse.data || [];
+          for (const marketRequest of marketRequests) {
+            const requestedMarkets = marketRequest.split(",").map((m) => m.trim()).filter(Boolean);
+            marketsAttempted += requestedMarkets.length;
+            marketsAttemptedByEvent[String(game.id)].push(marketRequest);
 
-        for (const entry of propsData) {
-          let statType: string | null;
-          if (cfg.statRewrite === "passthrough") {
-            statType = MLB_ODDS_API_MARKETS.includes(entry.marketKey) ? entry.marketKey : null;
-          } else {
-            statType = cfg.statRewrite[entry.marketKey] ?? null;
-          }
-          if (!statType) continue;
+            if (diagnoseProps && sport === "NBA") {
+              providerDiagnosticsByEvent[`${game.id}:${marketRequest}`] =
+                await fetchTheOddsApiEventDiagnostic(cfg.oddsApiSport, String(game.id), marketRequest);
+            }
 
-          const outcomesByPlayer: Record<string, { over?: string; under?: string; point?: number; player?: string }> = {};
-          for (const o of entry.outcomes || []) {
-            const desc = (o as any).description || o.name;
-            const key = `${desc}_${o.point}`;
-            if (!outcomesByPlayer[key]) outcomesByPlayer[key] = { player: desc, point: o.point };
-            if (o.name === "Over") outcomesByPlayer[key].over = String(o.price);
-            if (o.name === "Under") outcomesByPlayer[key].under = String(o.price);
-          }
+            const propsRes = await fetch(`${fnBase}/get-odds`, {
+              method: "POST",
+              headers: svcHeaders,
+              body: JSON.stringify({
+                sport: cfg.oddsApiSport,
+                market: marketRequest,
+                eventId: game.id,
+                ttl: 120,
+              }),
+              signal: AbortSignal.timeout(30_000),
+            });
+            const propsResponse = await propsRes.json();
+            const propsData = propsResponse.data || [];
+            const statusKey = `${game.id}:${marketRequest}`;
 
-          for (const prop of Object.values(outcomesByPlayer)) {
-            if (!prop.player || prop.point == null) continue;
-
-            const dedupKey = `${prop.player}|${statType}|${entry.bookmakerKey}|${gameDate}`;
-            const prev = latestByKey.get(dedupKey);
-            if (prev &&
-                prev.threshold === prop.point &&
-                prev.over_odds === (prop.over || null) &&
-                prev.under_odds === (prop.under || null)) {
-              skippedDupes++;
+            if (!propsResponse.ok && propsData.length === 0) {
+              providerStatusByEventMarket[statusKey] = "no_props";
+              bookmakerCountByEventMarket[statusKey] = 0;
+              (providerErrorsByGame[target.targetKey] ||= []).push(`no_props:${game.id}:${marketRequest}`);
               continue;
             }
 
-            let playerId: number | null = null;
-            if (sport === "MLB") {
-              const primaryRole = MLB_PRIMARY_ROLE_BY_MARKET[statType] ?? null;
-              const teamAbbr = null;
+            if (propsData.length === 0) {
+              providerStatusByEventMarket[statusKey] = "empty_props";
+              bookmakerCountByEventMarket[statusKey] = 0;
+              (providerErrorsByGame[target.targetKey] ||= []).push(`empty_props:${game.id}:${marketRequest}`);
+              continue;
+            }
 
-              try {
-                const { data: resolutionRows, error: resolutionError } = await supabase.rpc(
-                  "resolve_mlb_player_for_odds",
-                  {
-                    p_raw_name: prop.player,
-                    p_team_abbr: teamAbbr,
-                    p_market_key: statType,
-                    p_sportsbook: entry.bookmakerKey,
-                    p_event_id: game.id,
-                    p_primary_role: primaryRole ?? undefined,
-                  },
-                );
+            sawPropsPayload = true;
+            providerStatusByEventMarket[statusKey] = `ok:${[...new Set(propsData.map((entry: any) => entry.marketKey))].join(",")}`;
+            bookmakerCountByEventMarket[statusKey] =
+              new Set(propsData.map((entry: any) => entry.bookmakerKey).filter(Boolean)).size;
 
-                if (resolutionError) {
-                  console.error(
-                    `[MLB] resolve_mlb_player_for_odds failed for ${prop.player} (${statType}, ${entry.bookmakerKey}, ${game.id}):`,
-                    resolutionError,
-                  );
-                  mlbUnresolvedPlayers++;
-                } else {
-                  const resolved = Array.isArray(resolutionRows) ? resolutionRows[0] : null;
-                  if (resolved && typeof resolved.player_id === "number" && Number.isFinite(resolved.player_id)) {
-                    playerId = resolved.player_id;
-                    mlbResolvedPlayers++;
-                  } else {
+            for (const entry of propsData) {
+              let statType: string | null;
+              if (cfg.statRewrite === "passthrough") {
+                statType = MLB_ODDS_API_MARKETS.includes(entry.marketKey) ? entry.marketKey : null;
+              } else {
+                statType = cfg.statRewrite[entry.marketKey] ?? null;
+              }
+              if (!statType) continue;
+
+              const outcomesByPlayer: Record<string, { over?: string; under?: string; point?: number; player?: string }> = {};
+              for (const o of entry.outcomes || []) {
+                const desc = (o as any).description || o.name;
+                const key = `${desc}_${o.point}`;
+                if (!outcomesByPlayer[key]) outcomesByPlayer[key] = { player: desc, point: o.point };
+                if (o.name === "Over") outcomesByPlayer[key].over = String(o.price);
+                if (o.name === "Under") outcomesByPlayer[key].under = String(o.price);
+              }
+
+              for (const prop of Object.values(outcomesByPlayer)) {
+                if (!prop.player || prop.point == null) continue;
+
+                const dedupKey = `${prop.player}|${statType}|${entry.bookmakerKey}|${gameDate}`;
+                const prev = latestByKey.get(dedupKey);
+                if (prev &&
+                    prev.threshold === prop.point &&
+                    prev.over_odds === (prop.over || null) &&
+                    prev.under_odds === (prop.under || null)) {
+                  skippedDupes++;
+                  continue;
+                }
+
+                let playerId: number | null = null;
+                if (sport === "MLB") {
+                  const primaryRole = MLB_PRIMARY_ROLE_BY_MARKET[statType] ?? null;
+                  const teamAbbr = null;
+
+                  try {
+                    const { data: resolutionRows, error: resolutionError } = await supabase.rpc(
+                      "resolve_mlb_player_for_odds",
+                      {
+                        p_raw_name: prop.player,
+                        p_team_abbr: teamAbbr,
+                        p_market_key: statType,
+                        p_sportsbook: entry.bookmakerKey,
+                        p_event_id: game.id,
+                        p_primary_role: primaryRole ?? undefined,
+                      },
+                    );
+
+                    if (resolutionError) {
+                      console.error(
+                        `[MLB] resolve_mlb_player_for_odds failed for ${prop.player} (${statType}, ${entry.bookmakerKey}, ${game.id}):`,
+                        resolutionError,
+                      );
+                      mlbUnresolvedPlayers++;
+                    } else {
+                      const resolved = Array.isArray(resolutionRows) ? resolutionRows[0] : null;
+                      if (resolved && typeof resolved.player_id === "number" && Number.isFinite(resolved.player_id)) {
+                        playerId = resolved.player_id;
+                        mlbResolvedPlayers++;
+                      } else {
+                        mlbUnresolvedPlayers++;
+                      }
+                    }
+                  } catch (resolutionErr) {
+                    console.error(
+                      `[MLB] resolver exception for ${prop.player} (${statType}, ${entry.bookmakerKey}, ${game.id}):`,
+                      resolutionErr,
+                    );
                     mlbUnresolvedPlayers++;
                   }
                 }
-              } catch (resolutionErr) {
-                console.error(
-                  `[MLB] resolver exception for ${prop.player} (${statType}, ${entry.bookmakerKey}, ${game.id}):`,
-                  resolutionErr,
-                );
-                mlbUnresolvedPlayers++;
+
+                newRows.push({
+                  player_id: playerId,
+                  player_name: prop.player,
+                  stat_type: statType,
+                  threshold: prop.point,
+                  over_odds: prop.over || null,
+                  under_odds: prop.under || null,
+                  sportsbook: entry.bookmakerKey,
+                  game_date: gameDate,
+                });
+                wroteAnyForTarget = true;
+                snapshotsWrittenByGame[target.targetKey] = (snapshotsWrittenByGame[target.targetKey] || 0) + 1;
+                snapshotsWrittenByStatType[statType] = (snapshotsWrittenByStatType[statType] || 0) + 1;
+
+                latestByKey.set(dedupKey, {
+                  over_odds: prop.over || null,
+                  under_odds: prop.under || null,
+                  threshold: prop.point,
+                });
               }
             }
 
-            newRows.push({
-              player_id: playerId,
-              player_name: prop.player,
-              stat_type: statType,
-              threshold: prop.point,
-              over_odds: prop.over || null,
-              under_odds: prop.under || null,
-              sportsbook: entry.bookmakerKey,
-              game_date: gameDate,
-            });
-
-            latestByKey.set(dedupKey, {
-              over_odds: prop.over || null,
-              under_odds: prop.under || null,
-              threshold: prop.point,
-            });
+            if (wroteAnyForTarget) {
+              gamesProcessed++;
+              break;
+            }
           }
+          if (wroteAnyForTarget) break;
+        } catch (e) {
+          console.error(`Error processing game ${game.id}:`, e);
+          (providerErrorsByGame[target.targetKey] ||= []).push(`error:${game.id}:${e instanceof Error ? e.message : String(e)}`);
         }
-      } catch (e) {
-        console.error(`Error processing game ${game.id}:`, e);
+      }
+
+      if (wroteAnyForTarget || sawPropsPayload) gamesWithProps++;
+      else {
+        gamesWithoutProps++;
+        const statusText = String(target.status ?? "").toLowerCase();
+        if (sport === "NBA" && (statusText.includes("final") || statusText.includes("progress") || statusText.includes("halftime"))) {
+          providerUnavailableReason = "PROVIDER_PROPS_CLOSED_OR_UNAVAILABLE";
+        }
       }
     }
 
@@ -972,7 +1238,7 @@ serve(async (req) => {
           body: JSON.stringify(
             sport === "MLB"
               ? { game_date: todayET }
-              : { score_all_market_players: true, sport },
+              : { score_all_market_players: true, sport, game_date: todayET },
           ),
           signal: AbortSignal.timeout(60_000),
         });
@@ -1017,14 +1283,44 @@ serve(async (req) => {
       },
     };
 
+    if (!providerUnavailableReason && newRows.length === 0) {
+      const diagnosticValues = Object.values(providerDiagnosticsByEvent);
+      const has4xxOr5xx = diagnosticValues.some((value) => {
+        const status = Number((value as Record<string, unknown>)?.http_status ?? 0);
+        return status >= 400;
+      });
+      if (has4xxOr5xx) {
+        providerUnavailableReason = "PROVIDER_MARKET_NOT_AVAILABLE";
+      }
+    }
+
     const result = {
       ok: insertErrors === 0,
       game_dates: [...allGameDates].sort(),
       games_processed: gamesProcessed,
       new_snapshots: newRows.length,
+      snapshots_prepared_count: newRows.length,
+      snapshots_inserted_count: insertErrors === 0 ? newRows.length : Math.max(0, newRows.length - insertErrors),
       new_by_date: dateCounts,
       skipped_dupes: skippedDupes,
+      snapshots_skipped_duplicate_count: skippedDupes,
       total_across_dates: totalToday || 0,
+      active_espn_games_count: espnSlateGames.length,
+      games_attempted: gamesAttempted,
+      games_with_props: gamesWithProps,
+      games_without_props: gamesWithoutProps,
+      matched_provider_events_by_game: matchedProviderEventsByGame,
+      provider_event_ids_attempted: [...new Set(providerEventIdsAttempted)],
+      markets_attempted: marketsAttempted,
+      markets_attempted_by_event: marketsAttemptedByEvent,
+      provider_status_by_event_market: providerStatusByEventMarket,
+      bookmaker_count_by_event_market: bookmakerCountByEventMarket,
+      provider_diagnostics_by_event: diagnoseProps ? providerDiagnosticsByEvent : undefined,
+      snapshots_written_by_game: snapshotsWrittenByGame,
+      snapshots_written_by_stat_type: snapshotsWrittenByStatType,
+      provider_errors_by_game: providerErrorsByGame,
+      first_provider_error_sample: Object.values(providerErrorsByGame).flat()[0] ?? null,
+      provider_unavailable_reason: providerUnavailableReason,
       mlb_resolved_players: mlbResolvedPlayers,
       mlb_unresolved_players: mlbUnresolvedPlayers,
       odds_provider: oddsProvider,

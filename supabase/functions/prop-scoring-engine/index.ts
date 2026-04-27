@@ -1138,6 +1138,24 @@ function normStatScoring(s: string): string {
   return lower;
 }
 
+function deriveConfidenceTier(score: number | null | undefined): "elite" | "strong" | "lean" | "pass" {
+  const value = Number(score ?? 0);
+  if (value >= 75) return "elite";
+  if (value >= 60) return "strong";
+  if (value >= 45) return "lean";
+  return "pass";
+}
+
+function isPlayableSameDayStatus(status: string | null | undefined, isPostponed?: boolean | null): boolean {
+  if (isPostponed) return false;
+  const s = String(status ?? "").toLowerCase();
+  if (!s) return true;
+  if (s.includes("postponed") || s.includes("ppd")) return false;
+  if (s.includes("cancel")) return false;
+  if (s.includes("suspend")) return false;
+  return true;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -1147,26 +1165,80 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     const body = await req.json().catch(() => ({}));
-    const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines, score_all_market_players } = body;
+    const { game_date, top_n = 200, stat_types, thresholds_override, matchups, market_lines } = body;
+    const scoreAllMarketPlayers =
+      body?.score_all_market_players === true ||
+      body?.scoring_all_players === true ||
+      body?.scoreAllMarketPlayers === true;
     const sport: "NBA" | "WNBA" = body?.sport === "WNBA" ? "WNBA" : "NBA";
 
     // market_lines: optional array of {player_name, stat_type, threshold} from live market
     // When provided, we use market thresholds per player instead of defaults
     // Build market thresholds from provided market_lines or auto-fetch from line_snapshots
     let effectiveMarketLines = market_lines;
+    let lineSnapshotsCount = 0;
+    let lineSnapshotStatTypes: string[] = [];
+    let playerPropScoresExistingCount = 0;
+    let repairedExistingScoresCount = 0;
+    let repairedExistingTiersCount = 0;
+    const requestBodyFlagsReceived = {
+      score_all_market_players: body?.score_all_market_players === true,
+      scoring_all_players: body?.scoring_all_players === true,
+      scoreAllMarketPlayers: body?.scoreAllMarketPlayers === true,
+    };
 
     const today = game_date || new Date().toISOString().split("T")[0];
     console.log(`[${sport}] prop-scoring-engine starting for ${today}`);
 
+    {
+      const { count } = await supabase
+        .from("player_prop_scores")
+        .select("player_id", { count: "exact", head: true })
+        .eq("sport", sport)
+        .eq("game_date", today);
+      playerPropScoresExistingCount = count || 0;
+    }
+
+    {
+      const { data: rowsToRepair } = await supabase
+        .from("player_prop_scores")
+        .select("id, confidence_score, score_overall, confidence_tier")
+        .eq("sport", sport)
+        .eq("game_date", today);
+
+      for (const row of rowsToRepair || []) {
+        if (row.confidence_score == null) continue;
+        const needsScore = row.score_overall == null;
+        const needsTier = row.confidence_tier == null;
+        if (!needsScore && !needsTier) continue;
+        const { error } = await supabase
+          .from("player_prop_scores")
+          .update({
+            score_overall: row.score_overall ?? row.confidence_score,
+            confidence_tier: row.confidence_tier ?? deriveConfidenceTier(row.confidence_score),
+          })
+          .eq("id", row.id);
+        if (!error) {
+          if (needsScore) repairedExistingScoresCount += 1;
+          if (needsTier) repairedExistingTiersCount += 1;
+        }
+      }
+    }
+
     // Auto-fetch all market lines from line_snapshots for full coverage
     // Filter out stale lines for teams not playing today
-    if (score_all_market_players && !effectiveMarketLines) {
-      // Use trusted verified slate for today's playing teams (sport-scoped)
-      const { data: todayGames } = await supabase.rpc("get_trusted_games_today", {
-        p_sport: sport,
-        p_target_date: today,
-        p_timezone: "America/New_York",
-      });
+    if (scoreAllMarketPlayers && !effectiveMarketLines) {
+      const { data: rawTodayGames } = await supabase
+        .from("games_today")
+        .select("id, canonical_game_key, home_team_abbr, away_team_abbr, status, is_active, is_postponed")
+        .eq("sport", sport)
+        .eq("game_date", today);
+
+      const todayGames = (rawTodayGames || []).filter((g: any) =>
+        g.is_active === true &&
+        g.status !== "Deactivated" &&
+        isPlayableSameDayStatus(g.status, g.is_postponed)
+      );
       const playingTeams = new Set<string>();
       if (todayGames) {
         for (const g of todayGames) {
@@ -1192,6 +1264,8 @@ serve(async (req) => {
         lsOffset += LS_PAGE;
       }
       const lsRows = allLsRows;
+      lineSnapshotsCount = lsRows.length;
+      lineSnapshotStatTypes = [...new Set(lsRows.map((r: any) => String(r.stat_type ?? ""))).values()].filter(Boolean).sort();
 
       if (lsRows && lsRows.length > 0) {
         // Build a player→team lookup from game logs to filter stale lines
@@ -1235,23 +1309,75 @@ serve(async (req) => {
     // 1. Build team matchups
     const teamMatchups: Record<string, { opponent: string; homeAway: string }> = {};
 
+    let activeGameCount = 0;
+    let activeGamesRawCount = 0;
+    let activeGamesAfterStatusFilterCount = 0;
+    const activeGamesStatusBreakdown: Record<string, number> = {};
+    const activeGameKeys: string[] = [];
+    const excludedInactiveGameKeys: string[] = [];
     if (matchups && Array.isArray(matchups) && matchups.length > 0) {
       for (const m of matchups) {
         if (m.home_team) teamMatchups[m.home_team] = { opponent: m.away_team || "", homeAway: "home" };
         if (m.away_team) teamMatchups[m.away_team] = { opponent: m.home_team || "", homeAway: "away" };
       }
     } else {
-      const { data: games } = await supabase.rpc("get_trusted_games_today", { p_sport: sport, p_target_date: today, p_timezone: "America/New_York" });
-      if (games) {
-        for (const g of games) {
+      const { data: games } = await supabase
+        .from("games_today")
+        .select("id, canonical_game_key, home_team_abbr, away_team_abbr, status, is_active, is_postponed")
+        .eq("sport", sport)
+        .eq("game_date", today);
+      activeGamesRawCount = (games || []).length;
+      for (const g of games || []) {
+        const key = String(g.status ?? "unknown");
+        activeGamesStatusBreakdown[key] = (activeGamesStatusBreakdown[key] || 0) + 1;
+      }
+      const playableGames = (games || []).filter((g: any) => {
+        const keep = g.is_active === true &&
+          g.status !== "Deactivated" &&
+          isPlayableSameDayStatus(g.status, g.is_postponed);
+        if (!keep && g.canonical_game_key) excludedInactiveGameKeys.push(g.canonical_game_key);
+        return keep;
+      });
+      if (playableGames) {
+        activeGameCount = playableGames.length;
+        activeGamesAfterStatusFilterCount = playableGames.length;
+        for (const g of playableGames) {
           if (g.home_team_abbr) teamMatchups[g.home_team_abbr] = { opponent: g.away_team_abbr || "", homeAway: "home" };
           if (g.away_team_abbr) teamMatchups[g.away_team_abbr] = { opponent: g.home_team_abbr || "", homeAway: "away" };
+          if (g.canonical_game_key) activeGameKeys.push(g.canonical_game_key);
         }
       }
     }
 
     let teamsPlaying = Object.keys(teamMatchups);
     let scoringAllPlayers = teamsPlaying.length === 0;
+    const currentTeamByPlayerNorm = new Map<string, string>();
+    let currentTeamMappingHits = 0;
+    let currentTeamMappingMisses = 0;
+
+    if (scoreAllMarketPlayers && teamsPlaying.length > 0) {
+      const { data: stagingPlayers } = await supabase
+        .from("nba_players_staging")
+        .select("full_name, team_abbreviation")
+        .in("team_abbreviation", teamsPlaying);
+
+      const uniqueCurrentTeam = new Map<string, string | null>();
+      for (const row of stagingPlayers || []) {
+        const teamAbbr = row.team_abbreviation;
+        const fullName = row.full_name;
+        if (!teamAbbr || !fullName) continue;
+        const variants = getScoringNameVariants(normNameScoring(fullName));
+        for (const variant of variants) {
+          const prev = uniqueCurrentTeam.get(variant);
+          if (prev == null) uniqueCurrentTeam.set(variant, teamAbbr);
+          else if (prev !== teamAbbr) uniqueCurrentTeam.set(variant, null);
+        }
+      }
+      for (const [name, team] of uniqueCurrentTeam.entries()) {
+        if (team) currentTeamByPlayerNorm.set(name, team);
+      }
+      console.log(`[${sport}] Loaded ${currentTeamByPlayerNorm.size} current-team mappings from nba_players_staging for active slate teams`);
+    }
 
     // 2. Get player game logs
     const allLogs: GameLog[] = [];
@@ -1287,7 +1413,7 @@ serve(async (req) => {
     // === TEAM MISMATCH RESOLUTION ===
     // Detect market players whose game logs weren't loaded because their
     // stored team_abbr is stale (e.g., mid-season trade). Fetch by name.
-    if (score_all_market_players && effectiveMarketLines && effectiveMarketLines.length > 0) {
+    if (scoreAllMarketPlayers && effectiveMarketLines && effectiveMarketLines.length > 0) {
       const loadedNorms = new Set<string>();
       for (const log of allLogs) {
         if (log.player_name) loadedNorms.add(normNameScoring(log.player_name));
@@ -1385,7 +1511,7 @@ serve(async (req) => {
     }
 
     // 3b. Filter stale market lines: remove lines for players on non-playing teams
-    if (score_all_market_players && effectiveMarketLines && (body as any)._playingTeams) {
+    if (scoreAllMarketPlayers && effectiveMarketLines && (body as any)._playingTeams) {
       const playingTeamsSet = new Set<string>((body as any)._playingTeams);
       // Build player_name → team_abbr lookup from game logs
       const playerTeamLookup = new Map<string, string>();
@@ -1403,7 +1529,7 @@ serve(async (req) => {
       const beforeCount = effectiveMarketLines.length;
       effectiveMarketLines = effectiveMarketLines.filter((ml: any) => {
         const norm = normNameScoring(ml.player_name || "");
-        const team = playerTeamLookup.get(norm);
+        const team = currentTeamByPlayerNorm.get(norm) || playerTeamLookup.get(norm);
         // Keep if: team is playing today, or team is unknown (let scoring engine handle)
         return !team || playingTeamsSet.has(team);
       });
@@ -1502,7 +1628,10 @@ serve(async (req) => {
 
     for (const [pidStr, logs] of Object.entries(playerLogs)) {
       const playerId = Number(pidStr);
-      const team = logs[0]?.team_abbr;
+      const storedTeam = logs[0]?.team_abbr;
+      const playerNorm = normNameScoring(logs[0]?.player_name || "");
+      const resolvedCurrentTeam = currentTeamByPlayerNorm.get(playerNorm) || null;
+      const team = resolvedCurrentTeam || storedTeam;
       if (!team) continue;
 
       const matchup = teamMatchups[team];
@@ -1512,21 +1641,13 @@ serve(async (req) => {
       let opponent = matchup?.opponent || null;
       let homeAway = matchup?.homeAway || "unknown";
 
-      if (!matchup && score_all_market_players) {
-        // Traded player: stored team doesn't match playing teams
-        // Try all playing teams to find a potential matchup assignment
-        const playerNorm = normNameScoring(logs[0]?.player_name || "");
-        const hasMarketLines = marketThresholdsByPlayer.has(playerNorm);
-        if (hasMarketLines) {
-          // Assign to any playing team's matchup (best-effort for traded players)
-          // The scoring will still use their actual game history
-          for (const [tmKey, tmMatchup] of Object.entries(teamMatchups)) {
-            opponent = tmMatchup.opponent;
-            homeAway = tmMatchup.homeAway;
-            console.log(`Team mismatch override: ${logs[0]?.player_name} (logs: ${team}) → assigned matchup from ${tmKey}`);
-            break; // Use first available — not perfect but ensures scoring runs
-          }
-        }
+      if (!matchup && scoreAllMarketPlayers && resolvedCurrentTeam && teamMatchups[resolvedCurrentTeam]) {
+        opponent = teamMatchups[resolvedCurrentTeam].opponent;
+        homeAway = teamMatchups[resolvedCurrentTeam].homeAway;
+        currentTeamMappingHits++;
+        console.log(`Team mismatch override: ${logs[0]?.player_name} (logs: ${storedTeam}) → active team ${resolvedCurrentTeam}`);
+      } else if (!matchup && scoreAllMarketPlayers) {
+        currentTeamMappingMisses++;
       }
 
       logs.sort((a, b) => b.game_date.localeCompare(a.game_date));
@@ -1550,7 +1671,6 @@ serve(async (req) => {
 
       for (const stat of statsToScore) {
         // Use market thresholds if available for this player+stat, otherwise use defaults
-        const playerNorm = normNameScoring(logs[0]?.player_name || "");
         const playerMarket = marketThresholdsByPlayer.get(playerNorm);
         const marketThresholdsForStat = playerMarket?.get(stat);
         
@@ -1558,13 +1678,13 @@ serve(async (req) => {
         if (marketThresholdsForStat && marketThresholdsForStat.size > 0) {
           // When score_all_market_players, only score market thresholds (skip defaults to save CPU)
           // Otherwise merge market + defaults for full coverage
-          if (score_all_market_players) {
+          if (scoreAllMarketPlayers) {
             thresholds = [...marketThresholdsForStat].sort((a, b) => a - b);
           } else {
             const combined = new Set([...marketThresholdsForStat, ...(DEFAULT_THRESHOLDS[stat] || [])]);
             thresholds = [...combined].sort((a, b) => a - b);
           }
-        } else if (score_all_market_players) {
+        } else if (scoreAllMarketPlayers) {
           // In full market mode, skip players/stats without market lines
           continue;
         } else {
@@ -1574,18 +1694,18 @@ serve(async (req) => {
 
         const tmRosters = teamRosters[team] || new Map();
         // In full-market mode, skip expensive teammate analysis to stay within CPU limits
-        const teammateCtx = score_all_market_players
+        const teammateCtx = scoreAllMarketPlayers
           ? { minutes_trend: null, minutes_trend_note: null, role_label: null, key_teammates_out: [], teammate_notes: [], with_without_splits: [] } as TeammateContext
           : computeTeammateContext(playerId, logs, stat, thresholds[0] || 0, team, tmRosters, playerLogs);
 
-        const keyTmIds = score_all_market_players ? [] : teammateCtx.with_without_splits.map(s => {
+        const keyTmIds = scoreAllMarketPlayers ? [] : teammateCtx.with_without_splits.map(s => {
           for (const [pid, pLogs] of Object.entries(playerLogs)) {
             if (pLogs[0]?.player_name === s.teammate) return Number(pid);
           }
           return -1;
         }).filter(id => id > 0);
 
-        const availCtx = score_all_market_players
+        const availCtx = scoreAllMarketPlayers
           ? { player_status: "active", availability_notes: [], lineup_confidence: "high", key_teammate_statuses: [] } as AvailabilityContext
           : computeAvailabilityContext(playerId, logs, team, availabilityMap, keyTmIds, playerLogs, today, teamGameDates[team] || [], availabilityIsFresh);
 
@@ -1599,7 +1719,14 @@ serve(async (req) => {
 
           // Reuse teammate context for all thresholds (the threshold only affects scoring, not teammate identification)
           const scored = scoreProp(logs, stat, threshold, opponent, homeAway, restCtx, restHitCtx, defCtx, playerLogs, teammateCtx, availCtx, mktMovement);
-          if (scored) allScored.push(scored);
+          if (scored) {
+            if (resolvedCurrentTeam) {
+              scored.team_abbr = resolvedCurrentTeam;
+              scored.opponent_abbr = teamMatchups[resolvedCurrentTeam]?.opponent || scored.opponent_abbr;
+              scored.home_away = teamMatchups[resolvedCurrentTeam]?.homeAway || scored.home_away;
+            }
+            allScored.push(scored);
+          }
         }
       }
     }
@@ -1607,11 +1734,38 @@ serve(async (req) => {
     // 6. Sort by confidence and return top N
     allScored.sort((a, b) => b.confidence_score - a.confidence_score);
     const topProps = allScored.slice(0, top_n);
+    let fallbackPlayerPropScoresUsed = false;
+    let fallbackCandidateCount = 0;
+    let fallbackCandidatesByTeam: Record<string, number> = {};
+    let fallbackTopProps: any[] = [];
+
+    if (allScored.length === 0 && teamsPlaying.length > 0) {
+      const { data: fallbackRows } = await supabase
+        .from("player_prop_scores")
+        .select("*")
+        .eq("sport", sport)
+        .eq("game_date", today)
+        .in("team_abbr", teamsPlaying)
+        .not("score_overall", "is", null)
+        .order("score_overall", { ascending: false, nullsFirst: false })
+        .limit(top_n);
+
+      fallbackTopProps = fallbackRows || [];
+      fallbackCandidateCount = fallbackTopProps.length;
+      fallbackPlayerPropScoresUsed = fallbackCandidateCount > 0;
+      fallbackCandidatesByTeam = fallbackTopProps.reduce<Record<string, number>>((acc, row: any) => {
+        const key = row.team_abbr || "unknown";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+    }
 
     // 7. Cache ALL scores (not just top_n) to ensure full enrichment coverage
     // This eliminates data gaps where market players rank outside top_n
     const propsToCache = allScored; // cache everything
     if (propsToCache.length > 0) {
+      const playerPropScoresWrittenByTeam: Record<string, number> = {};
+      let rowsSkippedDueToNullScore = 0;
       const rows = propsToCache.map((p) => ({
         game_date: today,
         sport,
@@ -1622,6 +1776,8 @@ serve(async (req) => {
         home_away: p.home_away,
         stat_type: p.stat_type,
         threshold: p.threshold,
+        score_overall: p.confidence_score,
+        confidence_tier: deriveConfidenceTier(p.confidence_score),
         last3_avg: p.last3_avg,
         last5_avg: p.last5_avg,
         last10_avg: p.last10_avg,
@@ -1649,6 +1805,12 @@ serve(async (req) => {
         scored_at: new Date().toISOString(),
       }));
 
+      for (const p of propsToCache) {
+        const teamKey = p.team_abbr || "unknown";
+        playerPropScoresWrittenByTeam[teamKey] = (playerPropScoresWrittenByTeam[teamKey] || 0) + 1;
+        if (p.confidence_score == null) rowsSkippedDueToNullScore++;
+      }
+
       // Batch upsert in chunks of 25 to avoid CPU limits
       const CHUNK_SIZE = 25;
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
@@ -1659,17 +1821,86 @@ serve(async (req) => {
         if (error) console.error(`Cache upsert error (chunk ${i / CHUNK_SIZE}):`, error);
       }
       console.log(`Cached ${rows.length} scored props (all candidates) in ${Math.ceil(rows.length / CHUNK_SIZE)} batches`);
-    }
 
+      const lineSnapshotsCountByStatType = lineSnapshots.reduce<Record<string, number>>((acc, snap) => {
+        acc[snap.stat_type] = (acc[snap.stat_type] || 0) + 1;
+        return acc;
+      }, {});
+
+      const candidatesByTeam = allScored.reduce<Record<string, number>>((acc, p) => {
+        const key = p.team_abbr || "unknown";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+
+      return new Response(
+        JSON.stringify({
+          scored_props: topProps,
+          scored_count: topProps.length,
+          total_candidates: allScored.length,
+          teams_matched: teamsPlaying.length,
+          players_analyzed: Object.keys(playerLogs).length,
+          scoring_all_players: scoreAllMarketPlayers,
+          score_all_market_players_effective: scoreAllMarketPlayers,
+          request_body_flags_received: requestBodyFlagsReceived,
+          market_lines_used: marketThresholdsByPlayer.size > 0,
+          active_games_count: activeGameCount,
+          active_games_raw_count: activeGamesRawCount,
+          active_games_after_status_filter_count: activeGamesAfterStatusFilterCount,
+          active_games_status_breakdown: activeGamesStatusBreakdown,
+          active_game_keys: activeGameKeys,
+          excluded_inactive_game_keys: excludedInactiveGameKeys,
+          teams_expected: teamsPlaying,
+          line_snapshots_count: lineSnapshotsCount,
+          line_snapshots_stat_types: lineSnapshotStatTypes,
+          line_snapshots_count_by_stat_type: lineSnapshotsCountByStatType,
+          player_prop_scores_existing_count: playerPropScoresExistingCount,
+          repaired_existing_scores_count: repairedExistingScoresCount,
+          repaired_existing_tiers_count: repairedExistingTiersCount,
+          player_prop_scores_written_by_team: playerPropScoresWrittenByTeam,
+          candidates_by_team: candidatesByTeam,
+          fallback_player_prop_scores_used: fallbackPlayerPropScoresUsed,
+          fallback_candidate_count: fallbackCandidateCount,
+          rows_skipped_due_to_no_team: Object.values(playerLogs).filter((logs) => !(currentTeamByPlayerNorm.get(normNameScoring(logs[0]?.player_name || "")) || logs[0]?.team_abbr)).length,
+          rows_skipped_due_to_null_score: rowsSkippedDueToNullScore,
+          current_team_mapping_hits: currentTeamMappingHits,
+          current_team_mapping_misses: currentTeamMappingMisses,
+          skip_reasons: {
+            no_team: Object.values(playerLogs).filter((logs) => !(currentTeamByPlayerNorm.get(normNameScoring(logs[0]?.player_name || "")) || logs[0]?.team_abbr)).length,
+            null_score: rowsSkippedDueToNullScore,
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     return new Response(
       JSON.stringify({
-        scored_props: topProps,
-        scored_count: topProps.length,
-        total_candidates: allScored.length,
+        scored_props: fallbackPlayerPropScoresUsed ? fallbackTopProps : topProps,
+        scored_count: fallbackPlayerPropScoresUsed ? fallbackTopProps.length : topProps.length,
+        total_candidates: fallbackPlayerPropScoresUsed ? fallbackCandidateCount : allScored.length,
         teams_matched: teamsPlaying.length,
         players_analyzed: Object.keys(playerLogs).length,
-        scoring_all_players: scoringAllPlayers,
+        scoring_all_players: scoreAllMarketPlayers,
+        score_all_market_players_effective: scoreAllMarketPlayers,
+        request_body_flags_received: requestBodyFlagsReceived,
         market_lines_used: marketThresholdsByPlayer.size > 0,
+        active_games_count: activeGameCount,
+        active_games_raw_count: activeGamesRawCount,
+        active_games_after_status_filter_count: activeGamesAfterStatusFilterCount,
+        active_games_status_breakdown: activeGamesStatusBreakdown,
+        active_game_keys: activeGameKeys,
+        excluded_inactive_game_keys: excludedInactiveGameKeys,
+        teams_expected: teamsPlaying,
+        line_snapshots_count: lineSnapshotsCount,
+        line_snapshots_stat_types: lineSnapshotStatTypes,
+        player_prop_scores_existing_count: playerPropScoresExistingCount,
+        repaired_existing_scores_count: repairedExistingScoresCount,
+        repaired_existing_tiers_count: repairedExistingTiersCount,
+        candidates_by_team: fallbackCandidatesByTeam,
+        fallback_player_prop_scores_used: fallbackPlayerPropScoresUsed,
+        fallback_candidate_count: fallbackCandidateCount,
+        scored_props_fallback: fallbackPlayerPropScoresUsed ? fallbackTopProps : [],
+        skip_reasons: {},
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
