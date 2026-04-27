@@ -14,6 +14,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 
+function normalizeRate(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 0;
+  return value <= 1 ? value * 100 : value;
+}
+
 export default function MatchupCheatsheetPage() {
   const navigate = useNavigate();
   const { config } = useSport();
@@ -26,8 +31,8 @@ export default function MatchupCheatsheetPage() {
   });
 
   // Honor slider client-side; baseline server filter requires vs_opponent_games >= 2.
-  const filtered = (data ?? []).filter(
-    (r) => (r.vs_opponent_hit_rate ?? 0) >= minVsOppRate,
+  const filtered = (data?.rows ?? []).filter(
+    (r) => normalizeRate(r.vs_opponent_hit_rate) >= minVsOppRate,
   );
 
   return (
@@ -63,6 +68,13 @@ export default function MatchupCheatsheetPage() {
           <p className="text-sm text-muted-foreground mt-1">
             Players with strong historical hit rates against tonight's opponent.
           </p>
+          {data?.effectiveDate && (
+            <p className="text-xs text-muted-foreground mt-2">
+              {data.usingLatestFallback
+                ? `Showing latest available slate: ${data.effectiveDate}`
+                : `Slate date: ${data.effectiveDate}`}
+            </p>
+          )}
         </header>
 
         {showFilters && (
@@ -97,12 +109,13 @@ export default function MatchupCheatsheetPage() {
         {!isLoading && !error && filtered.length === 0 && (
           <div className="glass-card p-6 text-center">
             <p className="text-sm font-medium text-foreground mb-1">
-              No {config.name} matchup edges right now
+              No verified plays found for this category yet.
             </p>
             <p className="text-xs text-muted-foreground">
-              {config.seasonState === "offseason"
-                ? `${config.name} is in offseason. Check back when the season resumes.`
-                : "Try lowering the minimum hit rate, or check back closer to tip-off."}
+              {data?.emptyReason ?? `No ${config.name} matchup edges right now.`}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              {config.name} · {data?.effectiveDate ?? "No slate date"} · Try running `collect-line-snapshots` + `prop-scoring-engine` for the current slate.
             </p>
           </div>
         )}

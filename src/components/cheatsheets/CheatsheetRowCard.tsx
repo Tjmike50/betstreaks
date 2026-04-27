@@ -22,6 +22,14 @@ function fmtScore(v: number | null | undefined): string {
   return v.toFixed(0);
 }
 
+function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
 function scoreColor(v: number | null | undefined): string {
   if (v == null) return "text-muted-foreground";
   if (v >= 75) return "text-emerald-400";
@@ -61,6 +69,7 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
 
   const matchup = buildMatchup(row);
   const subtitle = matchup ? `Over ${row.threshold} · ${matchup}` : `Over ${row.threshold}`;
+  const tags = normalizeTags(row.reason_tags);
 
   return (
     <button
@@ -86,6 +95,15 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
             <span>L10: <span className="text-foreground font-medium">{fmtPct(row.last10_hit_rate)}</span></span>
             <span>Avg: <span className="text-foreground font-medium">{row.last10_avg?.toFixed(1) ?? "—"}</span></span>
           </div>
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {tags.map((tag) => (
+                <Badge key={tag} variant="secondary" className="text-[10px]">
+                  {tag.replace(/_/g, " ")}
+                </Badge>
+              ))}
+            </div>
+          )}
         </div>
         <div className="shrink-0 text-right">
           <div className={cn("text-2xl font-bold leading-none", highlightValue.color)}>
@@ -99,4 +117,3 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
     </button>
   );
 }
-

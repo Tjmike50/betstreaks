@@ -36,6 +36,7 @@ import ResearchPlayersPage from "./pages/research/ResearchPlayersPage";
 import ValueCheatsheetPage from "./pages/cheatsheets/ValueCheatsheetPage";
 import StreakCheatsheetPage from "./pages/cheatsheets/StreakCheatsheetPage";
 import MatchupCheatsheetPage from "./pages/cheatsheets/MatchupCheatsheetPage";
+import BestBetsCheatsheetPage from "./pages/cheatsheets/BestBetsCheatsheetPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -63,7 +64,7 @@ const App = () => (
                     <Route path="/cheatsheets/value" element={<ValueCheatsheetPage />} />
                     <Route path="/cheatsheets/streaks" element={<StreakCheatsheetPage />} />
                     <Route path="/cheatsheets/matchups" element={<MatchupCheatsheetPage />} />
-                    <Route path="/cheatsheets/best-bets" element={<BestBetsPage />} />
+                    <Route path="/cheatsheets/best-bets" element={<BestBetsCheatsheetPage />} />
                     <Route path="/alerts" element={<AlertsPage />} />
                     <Route path="/streak" element={<StreakDetailPage />} />
                     <Route path="/watchlist" element={<WatchlistPage />} />

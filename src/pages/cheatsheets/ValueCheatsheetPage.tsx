@@ -25,6 +25,7 @@ export default function ValueCheatsheetPage() {
     minValueScore,
     limit: 50,
   });
+  const rows = data?.rows ?? [];
 
   return (
     <div className="min-h-screen pb-24 md:pb-8">
@@ -59,6 +60,13 @@ export default function ValueCheatsheetPage() {
           <p className="text-sm text-muted-foreground mt-1">
             Props where recent form most exceeds the posted line.
           </p>
+          {data?.effectiveDate && (
+            <p className="text-xs text-muted-foreground mt-2">
+              {data.usingLatestFallback
+                ? `Showing latest available slate: ${data.effectiveDate}`
+                : `Slate date: ${data.effectiveDate}`}
+            </p>
+          )}
         </header>
 
         {showFilters && (
@@ -90,22 +98,23 @@ export default function ValueCheatsheetPage() {
           </div>
         )}
 
-        {!isLoading && !error && data && data.length === 0 && (
+        {!isLoading && !error && rows.length === 0 && (
           <div className="glass-card p-6 text-center">
             <p className="text-sm font-medium text-foreground mb-1">
-              No {config.name} value plays right now
+              No verified plays found for this category yet.
             </p>
             <p className="text-xs text-muted-foreground">
-              {config.seasonState === "offseason"
-                ? `${config.name} is in offseason. Check back when the season resumes.`
-                : "Try lowering the minimum value score, or check back closer to tip-off."}
+              {data?.emptyReason ?? `No ${config.name} value plays right now.`}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              {config.name} · {data?.effectiveDate ?? "No slate date"} · Try running `collect-line-snapshots` + `prop-scoring-engine` for the current slate.
             </p>
           </div>
         )}
 
-        {!isLoading && !error && data && data.length > 0 && (
+        {!isLoading && !error && rows.length > 0 && (
           <div className="space-y-2">
-            {data.map((row) => (
+            {rows.map((row) => (
               <CheatsheetRowCard key={row.id} row={row} highlight="value" />
             ))}
           </div>

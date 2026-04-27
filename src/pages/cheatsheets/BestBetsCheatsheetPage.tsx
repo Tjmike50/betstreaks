@@ -1,40 +1,28 @@
-// =============================================================================
-// StreakCheatsheetPage — players cashing 7+ of their last 10.
-// Reuses useCheatsheet (category=streaks) and CheatsheetRowCard.
-// =============================================================================
+import { ArrowLeft, SlidersHorizontal, Trophy } from "lucide-react";
 import { useState } from "react";
-import { ArrowLeft, Flame, SlidersHorizontal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useSport } from "@/contexts/SportContext";
-import { useCheatsheet } from "@/hooks/useCheatsheet";
 import { CheatsheetRowCard } from "@/components/cheatsheets/CheatsheetRowCard";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
-import { Label } from "@/components/ui/label";
+import { useSport } from "@/contexts/SportContext";
+import { useCheatsheet } from "@/hooks/useCheatsheet";
 
-function normalizeRate(value: number | null | undefined): number {
-  if (value == null || !Number.isFinite(value)) return 0;
-  return value <= 1 ? value * 100 : value;
-}
-
-export default function StreakCheatsheetPage() {
+export default function BestBetsCheatsheetPage() {
   const navigate = useNavigate();
   const { config } = useSport();
-  const [minHitRate, setMinHitRate] = useState(70);
+  const [minConfidence, setMinConfidence] = useState(55);
   const [showFilters, setShowFilters] = useState(false);
 
-  // useCheatsheet's "streaks" category enforces last10_hit_rate >= 70 by default.
-  // We re-filter client-side to honor the user's slider.
   const { data, isLoading, error } = useCheatsheet({
-    category: "streaks",
-    limit: 80,
+    category: "best-bets",
+    minConfidence,
+    limit: 50,
   });
 
-  const filtered = (data?.rows ?? []).filter(
-    (r) => normalizeRate(r.last10_hit_rate) >= minHitRate,
-  );
+  const rows = (data?.rows ?? []).filter((row) => (row.confidence_score ?? 0) >= minConfidence);
 
   return (
     <div className="min-h-screen pb-24 md:pb-8">
@@ -50,11 +38,11 @@ export default function StreakCheatsheetPage() {
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-primary mb-1">
-                {config.name} · Hot Streaks
+                {config.name} · Best Bets
               </p>
               <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-                <Flame className="h-6 w-6 text-emerald-400" />
-                Players Running Hot
+                <Trophy className="h-6 w-6 text-amber-400" />
+                Highest Confidence Plays
               </h1>
             </div>
             <Button
@@ -67,7 +55,7 @@ export default function StreakCheatsheetPage() {
             </Button>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Props hitting in 7+ of the last 10 games. Recent form is strong.
+            Top confidence-weighted plays from the latest verified scored slate.
           </p>
           {data?.effectiveDate && (
             <p className="text-xs text-muted-foreground mt-2">
@@ -81,13 +69,13 @@ export default function StreakCheatsheetPage() {
         {showFilters && (
           <div className="glass-card p-4 mb-4">
             <Label className="text-xs font-medium text-muted-foreground mb-2 block">
-              Minimum L10 hit rate: <span className="text-foreground font-semibold">{minHitRate}%</span>
+              Minimum confidence score: <span className="text-foreground font-semibold">{minConfidence}</span>
             </Label>
             <Slider
-              value={[minHitRate]}
-              onValueChange={(v) => setMinHitRate(v[0])}
-              min={60}
-              max={95}
+              value={[minConfidence]}
+              onValueChange={(v) => setMinConfidence(v[0])}
+              min={40}
+              max={90}
               step={5}
             />
           </div>
@@ -103,17 +91,17 @@ export default function StreakCheatsheetPage() {
 
         {error && (
           <div className="glass-card p-4 text-sm text-destructive">
-            Failed to load streak cheatsheet. Try again shortly.
+            Failed to load best bets cheatsheet. Try again shortly.
           </div>
         )}
 
-        {!isLoading && !error && filtered.length === 0 && (
+        {!isLoading && !error && rows.length === 0 && (
           <div className="glass-card p-6 text-center">
             <p className="text-sm font-medium text-foreground mb-1">
               No verified plays found for this category yet.
             </p>
             <p className="text-xs text-muted-foreground">
-              {data?.emptyReason ?? `No ${config.name} hot streaks right now.`}
+              {data?.emptyReason ?? `No ${config.name} best bets right now.`}
             </p>
             <p className="text-[11px] text-muted-foreground mt-2">
               {config.name} · {data?.effectiveDate ?? "No slate date"} · Try running `collect-line-snapshots` + `prop-scoring-engine` for the current slate.
@@ -121,16 +109,16 @@ export default function StreakCheatsheetPage() {
           </div>
         )}
 
-        {!isLoading && !error && filtered.length > 0 && (
+        {!isLoading && !error && rows.length > 0 && (
           <div className="space-y-2">
-            {filtered.map((row) => (
-              <CheatsheetRowCard key={row.id} row={row} highlight="last10" />
+            {rows.map((row) => (
+              <CheatsheetRowCard key={row.id} row={row} highlight="confidence" />
             ))}
           </div>
         )}
 
         <p className="text-[11px] text-muted-foreground mt-6 leading-relaxed">
-          Hit rates reflect historical game logs. Past performance is not a prediction or guarantee. Always bet responsibly.
+          Best bets highlight the strongest scored plays available for the selected slate. They are not predictions or guarantees. Always bet responsibly.
         </p>
       </div>
       <Footer />
