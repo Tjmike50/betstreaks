@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Crown, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { PREMIUM_FEATURES, PREMIUM_PRICING } from "@/lib/premiumFeatures";
+import { PREMIUM_FEATURES_WITH_ICONS, PREMIUM_PRICING } from "@/lib/premiumFeatures";
 
 interface PremiumLockModalProps {
   open: boolean;
@@ -45,29 +45,38 @@ export function PremiumLockModal({ open, onOpenChange }: PremiumLockModalProps) 
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-premium/20">
             <Crown className="h-6 w-6 text-premium" />
           </div>
-          <DialogTitle className="text-center">
-            Upgrade to Premium
+          <DialogTitle className="text-center text-xl">
+            Unlock Premium
           </DialogTitle>
           <DialogDescription className="text-center">
-            Unlock all features and catch streaks early
+            Everything BetStreaks offers, in one subscription.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2 py-2">
-          {PREMIUM_FEATURES.map((feature, index) => (
-            <div key={index} className="flex items-center gap-3">
-              <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                <Check className="h-3 w-3 text-primary" />
+        <div className="space-y-2.5 py-1">
+          {PREMIUM_FEATURES_WITH_ICONS.map((feature, index) => {
+            const Icon = feature.icon;
+            return (
+              <div key={index} className="flex items-center gap-3">
+                <div className="flex-shrink-0 w-7 h-7 rounded-md bg-premium/15 flex items-center justify-center">
+                  <Icon className="h-3.5 w-3.5 text-premium" />
+                </div>
+                <span className="text-sm text-foreground leading-snug">{feature.text}</span>
               </div>
-              <span className="text-sm text-foreground">{feature}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        <div className="text-center py-2">
-          <p className="text-sm text-muted-foreground">
-            Starting at <span className="font-semibold text-foreground">{PREMIUM_PRICING.monthly.display}/{PREMIUM_PRICING.monthly.period}</span> or{" "}
-            <span className="font-semibold text-foreground">{PREMIUM_PRICING.yearly.display}/{PREMIUM_PRICING.yearly.period}</span>
+        <div className="rounded-lg border border-border bg-card/60 p-3 text-center">
+          <p className="text-sm text-foreground">
+            <span className="font-bold">{PREMIUM_PRICING.monthly.display}</span>
+            <span className="text-muted-foreground">/{PREMIUM_PRICING.monthly.period}</span>
+            <span className="text-muted-foreground mx-2">·</span>
+            <span className="font-bold">{PREMIUM_PRICING.yearly.display}</span>
+            <span className="text-muted-foreground">/{PREMIUM_PRICING.yearly.period}</span>
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Cancel anytime. 21+. Please bet responsibly.
           </p>
         </div>
 
