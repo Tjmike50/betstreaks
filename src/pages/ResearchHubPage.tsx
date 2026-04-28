@@ -6,6 +6,7 @@ import { Users, CalendarDays, Flame } from "lucide-react";
 import { CheatsheetCard } from "@/components/cheatsheets/CheatsheetCard";
 import { useSport } from "@/contexts/SportContext";
 import { Footer } from "@/components/Footer";
+import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 
 export default function ResearchHubPage() {
   const { config } = useSport();
@@ -24,6 +25,10 @@ export default function ResearchHubPage() {
             Dig into players, games, and streaks before locking in a slip.
           </p>
         </header>
+
+        <div className="mb-4">
+          <DataFreshnessIndicator />
+        </div>
 
         <div className="grid gap-3">
           <CheatsheetCard

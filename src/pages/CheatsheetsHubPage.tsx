@@ -6,6 +6,7 @@ import { TrendingUp, Flame, Swords, Trophy } from "lucide-react";
 import { useSport } from "@/contexts/SportContext";
 import { CheatsheetCard } from "@/components/cheatsheets/CheatsheetCard";
 import { Footer } from "@/components/Footer";
+import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
 
 export default function CheatsheetsHubPage() {
   const { config } = useSport();
@@ -34,6 +35,10 @@ export default function CheatsheetsHubPage() {
               : "Curated views of today's top props — value, streaks, matchups, and best bets."}
           </p>
         </header>
+
+        <div className="mb-4">
+          <DataFreshnessIndicator />
+        </div>
 
         <div className="grid gap-3">
           <CheatsheetCard

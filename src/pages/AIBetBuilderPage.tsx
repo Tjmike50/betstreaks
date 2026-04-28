@@ -463,27 +463,26 @@ export default function AIBetBuilderPage() {
             <span className="text-sm font-semibold text-primary">AI Bet Builder</span>
           </div>
           <h1 className="text-2xl font-bold leading-tight">
-            Find high-probability {sportConfig.shortName} betting trends using AI + real data
+            Build smarter {sportConfig.shortName} slips with AI + real data
           </h1>
           <p className="text-sm text-muted-foreground">
-            No guessing. Just stats, hit rates, and streaks.
+            Hit rates, matchups, and live lines — all in one prompt.
           </p>
         </div>
 
-        {/* How It Works — compact 3-step */}
-        <div className="grid grid-cols-3 gap-2">
-          <div className="text-center space-y-1.5 p-3 rounded-lg bg-card border border-border/30">
-            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-xs font-bold text-primary">1</span>
-            <p className="text-[11px] text-muted-foreground leading-tight">Enter a prompt or tap a suggestion</p>
-          </div>
-          <div className="text-center space-y-1.5 p-3 rounded-lg bg-card border border-border/30">
-            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-xs font-bold text-primary">2</span>
-            <p className="text-[11px] text-muted-foreground leading-tight">AI analyzes real data, hit rates & matchups</p>
-          </div>
-          <div className="text-center space-y-1.5 p-3 rounded-lg bg-card border border-border/30">
-            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-xs font-bold text-primary">3</span>
-            <p className="text-[11px] text-muted-foreground leading-tight">Get data-driven slips instantly</p>
-          </div>
+        {/* Compact trust strip */}
+        <div className="flex items-center justify-center gap-3 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <Database className="h-3 w-3 text-primary" /> Real game logs
+          </span>
+          <span className="text-border">·</span>
+          <span className="inline-flex items-center gap-1">
+            <Activity className="h-3 w-3 text-primary" /> Live lines
+          </span>
+          <span className="text-border">·</span>
+          <span className="inline-flex items-center gap-1">
+            <Target className="h-3 w-3 text-primary" /> Hit rates
+          </span>
         </div>
 
         {/* Quick-Start Prompts — auto-run on click */}
