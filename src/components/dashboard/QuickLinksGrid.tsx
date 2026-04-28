@@ -2,7 +2,7 @@
 // QuickLinksGrid — Cheatsheets + Research shortcuts for the Dashboard.
 // Reuses CheatsheetCard for visual consistency.
 // =============================================================================
-import { BookOpen, Flame, Layers, Search, Users, CalendarDays } from "lucide-react";
+import { BookOpen, Trophy, Layers, Search, Users, CalendarDays, Swords } from "lucide-react";
 import { CheatsheetCard } from "@/components/cheatsheets/CheatsheetCard";
 
 export function QuickLinksGrid() {
@@ -22,16 +22,16 @@ export function QuickLinksGrid() {
             accent="primary"
           />
           <CheatsheetCard
-            title="Hot Streaks"
-            description="Players riding active runs."
-            icon={Flame}
-            to="/cheatsheets/streaks"
+            title="Best Bets"
+            description="Highest-confidence plays."
+            icon={Trophy}
+            to="/cheatsheets/best-bets"
             accent="amber"
           />
           <CheatsheetCard
             title="Matchup Edges"
             description="Who has the matchup tonight."
-            icon={Layers}
+            icon={Swords}
             to="/cheatsheets/matchups"
             accent="violet"
           />
