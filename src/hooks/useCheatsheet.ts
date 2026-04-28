@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSport } from "@/contexts/SportContext";
-import { isInScopeTeam, isLeagueTeam } from "@/lib/sports/leagueTeams";
+import { isLeagueTeam } from "@/lib/sports/leagueTeams";
 import type { SportKey } from "@/lib/sports/registry";
 
 export type CheatsheetCategory = "value" | "streaks" | "matchups" | "best-bets";
@@ -48,6 +48,8 @@ export interface CheatsheetResult {
   usingLatestFallback: boolean;
   activeTeams: string[];
   emptyReason: string | null;
+  rawRowCount: number;
+  filteredRowCount: number;
 }
 
 export interface UseCheatsheetOptions {
@@ -77,8 +79,7 @@ function getTodayEtDate(): string {
 }
 
 function passesScope(sport: SportKey, teamAbbr: string | null): boolean {
-  if (sport === "MLB") return true;
-  if (isInScopeTeam(sport, teamAbbr)) return true;
+  if (!teamAbbr) return true;
   return isLeagueTeam(sport, teamAbbr);
 }
 
@@ -241,6 +242,7 @@ export function useCheatsheet({
   const { sport: activeSport } = useSport();
   const sport = sportOverride ?? activeSport;
   const requestedDate = getTodayEtDate();
+  const usableScoreFilter = "score_overall.not.is.null,confidence_score.not.is.null";
 
   return useQuery({
     queryKey: ["cheatsheet", category, sport, limit, minValueScore, minConfidence, requestedDate],
@@ -251,7 +253,8 @@ export function useCheatsheet({
         .from("player_prop_scores")
         .select("id", { count: "exact", head: true })
         .eq("sport", sport)
-        .eq("game_date", requestedDate);
+        .eq("game_date", requestedDate)
+        .or(usableScoreFilter);
 
       if (requestedCountError) throw requestedCountError;
 
@@ -260,6 +263,7 @@ export function useCheatsheet({
           .from("player_prop_scores")
           .select("game_date")
           .eq("sport", sport)
+          .or(usableScoreFilter)
           .order("game_date", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -290,7 +294,7 @@ export function useCheatsheet({
         .select(SELECT_COLUMNS)
         .eq("sport", sport)
         .eq("game_date", effectiveDate)
-        .not("confidence_score", "is", null);
+        .or(usableScoreFilter);
 
       if (sport === "MLB") {
         query = query.in("stat_type", MLB_ANCHOR_STATS as unknown as string[]);
@@ -303,7 +307,9 @@ export function useCheatsheet({
         .filter((row) => passesScope(sport, row.team_abbr ?? null))
         .filter((row) => activeTeams.length === 0 || !row.team_abbr || activeTeams.includes(row.team_abbr));
 
+      const rawRowCount = rows.length;
       const filteredRows = filterRowsForCategory(rows, category, sport, minValueScore, minConfidence).slice(0, limit);
+      const filteredRowCount = filteredRows.length;
 
       let emptyReason: string | null = null;
       if (rows.length === 0) {
@@ -319,6 +325,8 @@ export function useCheatsheet({
         usingLatestFallback,
         activeTeams,
         emptyReason,
+        rawRowCount,
+        filteredRowCount,
       };
     },
     staleTime: 60_000,

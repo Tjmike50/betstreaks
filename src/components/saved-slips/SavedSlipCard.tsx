@@ -15,6 +15,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import type { AISlip } from "@/types/aiSlip";
+import { parlayAmerican } from "@/lib/parlayOdds";
 
 function getRiskBadge(risk: string) {
   switch (risk) {
@@ -43,6 +44,7 @@ export function SavedSlipCard({ slip, onRemove, onCopyToBuilder }: SavedSlipCard
   const [removing, setRemoving] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const RiskIcon = getRiskIcon(slip.risk_label);
+  const displayedOdds = parlayAmerican(slip.legs.map((leg) => leg.odds)) ?? slip.estimated_odds;
 
   const handleRemove = async () => {
     setRemoving(true);
@@ -62,8 +64,8 @@ export function SavedSlipCard({ slip, onRemove, onCopyToBuilder }: SavedSlipCard
                 <RiskIcon className="h-3 w-3 mr-1" />
                 {slip.risk_label}
               </Badge>
-              {slip.estimated_odds && (
-                <span className="text-sm font-mono font-black text-primary">{slip.estimated_odds}</span>
+              {displayedOdds && (
+                <span className="text-sm font-mono font-black text-primary">{displayedOdds}</span>
               )}
             </div>
           </div>

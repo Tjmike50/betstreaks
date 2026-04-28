@@ -19,6 +19,7 @@ import { DEFAULT_BUILDER_FILTERS, getActiveBuilderFilterCount } from "@/types/bu
 import { GameMatchupHeader } from "@/components/builder/GameMatchupHeader";
 import { MarketDepthSummary } from "@/components/builder/MarketDepthSummary";
 import { LegMarketBadges, getLegMarketBorderClass } from "@/components/builder/LegMarketBadges";
+import { parlayAmerican } from "@/lib/parlayOdds";
 
 const buildQuickPrompts = (sportLabel: string) => [
   { label: "🔥 High hit rate plays", prompt: "Build me a parlay with the highest hit-rate props tonight" },
@@ -222,6 +223,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const RiskIcon = getRiskIcon(slip.risk_label);
+  const displayedOdds = parlayAmerican(slip.legs.map((leg) => leg.odds)) ?? slip.estimated_odds;
 
   const handleSave = async () => {
     if (!user) {
@@ -259,7 +261,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
   };
 
   const handleCopy = () => {
-    const text = `${slip.slip_name} (${slip.estimated_odds})\n${slip.legs.map((l) => `• ${l.player_name} ${l.line} ${l.stat_type} ${l.odds || ""}`).join("\n")}`;
+    const text = `${slip.slip_name} (${displayedOdds ?? "odds unavailable"})\n${slip.legs.map((l) => `• ${l.player_name} ${l.line} ${l.stat_type} ${l.odds || ""}`).join("\n")}`;
     navigator.clipboard.writeText(text);
     toast({ title: "Copied to clipboard!" });
   };
@@ -276,8 +278,8 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
                 <RiskIcon className="h-3 w-3 mr-1" />
                 {slip.risk_label}
               </Badge>
-              {slip.estimated_odds && (
-                <span className="text-lg font-mono font-black text-primary">{slip.estimated_odds}</span>
+              {displayedOdds && (
+                <span className="text-lg font-mono font-black text-primary">{displayedOdds}</span>
               )}
             </div>
           </div>

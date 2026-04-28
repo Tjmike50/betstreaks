@@ -28,6 +28,10 @@ import {
   enrichMlbAnchorLegs,
   parlayAmerican,
 } from "../_shared/mlbOddsEnrichment.ts";
+import {
+  americanToDecimal,
+  decimalToAmerican,
+} from "../_shared/parlayOdds.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -156,25 +160,6 @@ function pickLegs(rows: PropScoreRow[], legCount: number): PropScoreRow[] {
 // =============================================================================
 // Odds enrichment helpers (DraftKings-only for v1)
 // =============================================================================
-function americanToDecimal(american: string | null | undefined): number | null {
-  if (!american) return null;
-  const trimmed = String(american).trim().replace(/^\+/, "");
-  const n = Number(trimmed);
-  if (!isFinite(n) || n === 0) return null;
-  if (n > 0) return n / 100 + 1;
-  return 100 / Math.abs(n) + 1;
-}
-
-function decimalToAmerican(decimal: number | null): string | null {
-  if (decimal == null || !isFinite(decimal) || decimal <= 1) return null;
-  if (decimal >= 2) {
-    const v = Math.round((decimal - 1) * 100);
-    return `+${v}`;
-  }
-  const v = Math.round(-100 / (decimal - 1));
-  return `${v}`; // already negative
-}
-
 // Map prop-score stat codes (pts/reb/ast/fg3m/...) → line_snapshots labels
 // (Points/Rebounds/Assists/3-Pointers/...). DK is our v1 source.
 const STAT_CODE_TO_SNAPSHOT_LABEL: Record<string, string[]> = {

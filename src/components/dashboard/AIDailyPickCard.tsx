@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RegenerateDailyPickButton } from "@/components/dashboard/RegenerateDailyPickButton";
+import { parlayAmerican } from "@/lib/parlayOdds";
 
 // Friendly display labels for stat codes (matches conventions used elsewhere
 // in the app — keeps deterministic per-leg text readable on mobile).
@@ -43,6 +44,7 @@ export function AIDailyPickCard() {
   const navigate = useNavigate();
   const { config } = useSport();
   const { data: pick, isLoading } = useAIDailyPick();
+  const displayedOdds = pick ? parlayAmerican(pick.legs.map((leg) => leg.odds)) ?? pick.estimated_odds : null;
 
   return (
     <section className="px-4 pt-5">
@@ -94,9 +96,9 @@ export function AIDailyPickCard() {
                 <Badge variant="secondary" className="text-[10px] capitalize">
                   {pick.risk_label}
                 </Badge>
-                {pick.estimated_odds && (
+                {displayedOdds && (
                   <span className="text-xs text-muted-foreground">
-                    Est. {pick.estimated_odds}
+                    Est. {displayedOdds}
                   </span>
                 )}
                 <span className="text-xs text-muted-foreground">

@@ -25,7 +25,7 @@ export function HotStreaksStrip() {
   const effectiveDateLabel =
     data?.effectiveDate &&
     (data.usingLatestFallback
-      ? `Showing latest available slate: ${data.effectiveDate}`
+      ? `Showing latest available ${config.shortName} slate: ${data.effectiveDate}`
       : `Slate date: ${data.effectiveDate}`);
 
   return (
@@ -68,7 +68,7 @@ export function HotStreaksStrip() {
               : data?.emptyReason ?? "No verified plays found for this category yet."}
           </p>
           <p className="text-[11px] text-muted-foreground mt-2">
-            {config.shortName} · Requested today, using {data?.effectiveDate ?? "latest available"}.
+            {config.shortName} · Requested {data?.requestedDate ?? "today"} · Using {data?.effectiveDate ?? "latest available"} · {data?.rawRowCount ?? 0} rows scanned · {data?.filteredRowCount ?? 0} matched.
           </p>
         </div>
       ) : (

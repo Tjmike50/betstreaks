@@ -164,32 +164,4 @@ export async function enrichMlbAnchorLegs<T extends MlbOddsLookupRow>(
   );
 }
 
-// ---------------------------------------------------------------------------
-// American-odds parlay math (mirrors generate-daily-pick basketball helpers).
-// Kept here so the MLB path doesn't reach into another edge function's file.
-// ---------------------------------------------------------------------------
-
-export function americanToDecimal(american: string | null): number | null {
-  if (!american) return null;
-  const n = Number(american.replace(/^\+/, ""));
-  if (!Number.isFinite(n) || n === 0) return null;
-  return n > 0 ? 1 + n / 100 : 1 + 100 / Math.abs(n);
-}
-
-export function decimalToAmerican(decimal: number): string | null {
-  if (!Number.isFinite(decimal) || decimal <= 1) return null;
-  if (decimal >= 2) {
-    const v = Math.round((decimal - 1) * 100);
-    return `+${v}`;
-  }
-  const v = Math.round(-100 / (decimal - 1));
-  return `${v}`;
-}
-
-/** Combine American odds across legs. Returns null if any leg is unpriced. */
-export function parlayAmerican(odds: Array<string | null>): string | null {
-  const decimals = odds.map(americanToDecimal);
-  if (decimals.some((d) => d == null)) return null;
-  const product = decimals.reduce((acc, d) => acc * (d as number), 1);
-  return decimalToAmerican(product);
-}
+export { americanToDecimal, decimalToAmerican, parlayAmerican } from "./parlayOdds.ts";

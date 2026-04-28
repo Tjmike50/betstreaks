@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAIBetAnalyzer } from "@/hooks/useAIBetAnalyzer";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import type { AnalyzerLegInput, BetAnalysis } from "@/types/aiSlip";
+import { parlayAmerican } from "@/lib/parlayOdds";
 
 const STAT_TYPES = ["Points", "Rebounds", "Assists", "3-Pointers", "Spread", "Total", "Moneyline"];
 
@@ -49,6 +50,12 @@ function AnalyzerLoadingState() {
 
 function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: AnalyzerLegInput[] }) {
   const gradeStyle = getGradeStyle(analysis.overall_grade);
+  const saferOdds = analysis.safer_rebuild?.legs?.length
+    ? parlayAmerican(analysis.safer_rebuild.legs.map((leg) => leg.odds ?? null)) ?? analysis.safer_rebuild.estimated_odds
+    : analysis.safer_rebuild?.estimated_odds;
+  const aggressiveOdds = analysis.aggressive_rebuild?.legs?.length
+    ? parlayAmerican(analysis.aggressive_rebuild.legs.map((leg) => leg.odds ?? null)) ?? analysis.aggressive_rebuild.estimated_odds
+    : analysis.aggressive_rebuild?.estimated_odds;
 
   return (
     <div className="space-y-3">
@@ -126,7 +133,7 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
             <CardTitle className="text-sm flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-success" />
               <span>Safer Rebuild</span>
-              <span className="font-mono text-primary text-xs">{analysis.safer_rebuild.estimated_odds}</span>
+              <span className="font-mono text-primary text-xs">{saferOdds}</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3 space-y-2">
@@ -147,7 +154,7 @@ function AnalysisResult({ analysis, legs }: { analysis: BetAnalysis; legs: Analy
             <CardTitle className="text-sm flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-danger" />
               <span>Higher Payout Version</span>
-              <span className="font-mono text-primary text-xs">{analysis.aggressive_rebuild.estimated_odds}</span>
+              <span className="font-mono text-primary text-xs">{aggressiveOdds}</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3 space-y-2">
