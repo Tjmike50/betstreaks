@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Crown, Check } from "lucide-react";
+import { Crown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { PREMIUM_FEATURES_WITH_ICONS, PREMIUM_PRICING } from "@/lib/premiumFeatures";
 
