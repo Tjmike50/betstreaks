@@ -108,15 +108,18 @@ export default function MatchupCheatsheetPage() {
 
         {!isLoading && !error && filtered.length === 0 && (
           <div className="glass-card p-6 text-center">
+            <Swords className="h-9 w-9 mx-auto text-muted-foreground/40 mb-2" />
             <p className="text-sm font-medium text-foreground mb-1">
-              No verified plays found for this category yet.
+              No matchup edges at this threshold
             </p>
             <p className="text-xs text-muted-foreground">
-              {data?.emptyReason ?? `No ${config.name} matchup edges right now.`}
+              {data?.emptyReason ?? `Try lowering the minimum vs-opponent hit rate. Matchup edges require at least 2 prior games vs tonight's opponent.`}
             </p>
-            <p className="text-[11px] text-muted-foreground mt-2">
-              {config.name} · {data?.effectiveDate ?? "No slate date"} · Try running `collect-line-snapshots` + `prop-scoring-engine` for the current slate.
-            </p>
+            {data?.effectiveDate && (
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Slate: {data.effectiveDate}
+              </p>
+            )}
           </div>
         )}
 

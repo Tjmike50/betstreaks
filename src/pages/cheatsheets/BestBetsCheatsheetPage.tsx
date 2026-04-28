@@ -97,15 +97,18 @@ export default function BestBetsCheatsheetPage() {
 
         {!isLoading && !error && rows.length === 0 && (
           <div className="glass-card p-6 text-center">
+            <Trophy className="h-9 w-9 mx-auto text-muted-foreground/40 mb-2" />
             <p className="text-sm font-medium text-foreground mb-1">
-              No verified plays found for this category yet.
+              No best bets at this confidence
             </p>
             <p className="text-xs text-muted-foreground">
-              {data?.emptyReason ?? `No ${config.name} best bets right now.`}
+              {data?.emptyReason ?? `Try lowering the confidence threshold, or check back once tonight's ${config.name} slate is scored.`}
             </p>
-            <p className="text-[11px] text-muted-foreground mt-2">
-              {config.name} · {data?.effectiveDate ?? "No slate date"} · Try running `collect-line-snapshots` + `prop-scoring-engine` for the current slate.
-            </p>
+            {data?.effectiveDate && (
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Slate: {data.effectiveDate}
+              </p>
+            )}
           </div>
         )}
 

@@ -109,15 +109,18 @@ export default function StreakCheatsheetPage() {
 
         {!isLoading && !error && filtered.length === 0 && (
           <div className="glass-card p-6 text-center">
+            <Flame className="h-9 w-9 mx-auto text-muted-foreground/40 mb-2" />
             <p className="text-sm font-medium text-foreground mb-1">
-              No verified plays found for this category yet.
+              No hot streaks at this threshold
             </p>
             <p className="text-xs text-muted-foreground">
-              {data?.emptyReason ?? `No ${config.name} hot streaks right now.`}
+              {data?.emptyReason ?? `Try lowering the minimum hit rate, or check back after tonight's ${config.name} games.`}
             </p>
-            <p className="text-[11px] text-muted-foreground mt-2">
-              {config.name} · {data?.effectiveDate ?? "No slate date"} · Try running `collect-line-snapshots` + `prop-scoring-engine` for the current slate.
-            </p>
+            {data?.effectiveDate && (
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Slate: {data.effectiveDate}
+              </p>
+            )}
           </div>
         )}
 
