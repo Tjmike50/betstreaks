@@ -42,7 +42,7 @@ export function BestPlaysPreview() {
         </div>
         <button
           type="button"
-          onClick={() => navigate("/best-bets")}
+          onClick={() => navigate("/cheatsheets/best-bets")}
           className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
         >
           View all

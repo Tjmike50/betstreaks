@@ -38,7 +38,7 @@ export function HotStreaksStrip() {
         {top.length > 0 && (
           <button
             type="button"
-            onClick={() => navigate("/streaks")}
+            onClick={() => navigate("/cheatsheets/hot-streaks")}
             className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
           >
             View all

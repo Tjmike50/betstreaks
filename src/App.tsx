@@ -63,6 +63,7 @@ const App = () => (
                     <Route path="/cheatsheets" element={<CheatsheetsHubPage />} />
                     <Route path="/cheatsheets/value" element={<ValueCheatsheetPage />} />
                     <Route path="/cheatsheets/streaks" element={<StreakCheatsheetPage />} />
+                    <Route path="/cheatsheets/hot-streaks" element={<StreakCheatsheetPage />} />
                     <Route path="/cheatsheets/matchups" element={<MatchupCheatsheetPage />} />
                     <Route path="/cheatsheets/best-bets" element={<BestBetsCheatsheetPage />} />
                     <Route path="/alerts" element={<AlertsPage />} />
