@@ -1,13 +1,25 @@
-import { Zap, BarChart3, Trophy, Heart, TrendingUp, Users, Target, type LucideIcon } from "lucide-react";
+import {
+  Wand2,
+  Brain,
+  Sparkles,
+  BookOpen,
+  Bookmark,
+  Layers,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 
+// Single source of truth for the Premium feature list.
+// Used by PremiumPage, PremiumLockModal, and PremiumLockedScreen.
+// Reflects the actual current BetStreaks product surfaces.
 export const PREMIUM_FEATURES = [
-  "Player combos (PTS+AST, PTS+REB, PRA, etc.)",
-  "Last 10 / 15 / 20 game splits",
-  "Real-time streak alerts",
-  "Best plays of the day (AI ranked)",
-  "Save favorite players",
-  "Double-Double & Triple-Double tracking",
-  "Historical matchup trends",
+  "AI Slip Builder — unlimited slips per day",
+  "Bet Analyzer — score any slip you're considering",
+  "Daily AI Pick across NBA, WNBA & MLB",
+  "Full Cheatsheets: Value, Best Bets, Streaks, Matchups",
+  "Research tools: player splits, recent form, vs-opponent",
+  "Save slips & track your history",
+  "Multi-sport coverage in one app",
 ] as const;
 
 export interface PremiumFeatureWithIcon {
@@ -16,13 +28,13 @@ export interface PremiumFeatureWithIcon {
 }
 
 export const PREMIUM_FEATURES_WITH_ICONS: PremiumFeatureWithIcon[] = [
-  { icon: Users, text: "Player combos (PTS+AST, PTS+REB, PRA, etc.)" },
-  { icon: BarChart3, text: "Last 10 / 15 / 20 game splits" },
-  { icon: Zap, text: "Real-time streak alerts" },
-  { icon: Trophy, text: "Best plays of the day (AI ranked)" },
-  { icon: Heart, text: "Save favorite players" },
-  { icon: Target, text: "Double-Double & Triple-Double tracking" },
-  { icon: TrendingUp, text: "Historical matchup trends" },
+  { icon: Wand2, text: "Unlimited AI Slip Builder" },
+  { icon: Brain, text: "Bet Analyzer for any slip" },
+  { icon: Sparkles, text: "Daily AI Pick (NBA · WNBA · MLB)" },
+  { icon: BookOpen, text: "Full Cheatsheets & Research tools" },
+  { icon: Bookmark, text: "Save slips & track results" },
+  { icon: Layers, text: "Multi-sport coverage" },
+  { icon: Zap, text: "Early-access to new features" },
 ];
 
 export const PREMIUM_PRICING = {
