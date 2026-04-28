@@ -958,6 +958,66 @@ export type Database = {
         }
         Relationships: []
       }
+      mlb_performance_summaries: {
+        Row: {
+          generated_at: string
+          graded_count: number
+          group_key: string
+          group_type: string
+          hit_count: number
+          hit_rate: number | null
+          id: string
+          metadata: Json
+          miss_count: number
+          pending_count: number
+          push_adjusted_hit_rate: number | null
+          push_count: number
+          sport: string
+          summary_date: string
+          summary_window: string
+          total_count: number
+          void_count: number
+        }
+        Insert: {
+          generated_at?: string
+          graded_count?: number
+          group_key: string
+          group_type: string
+          hit_count?: number
+          hit_rate?: number | null
+          id?: string
+          metadata?: Json
+          miss_count?: number
+          pending_count?: number
+          push_adjusted_hit_rate?: number | null
+          push_count?: number
+          sport?: string
+          summary_date: string
+          summary_window: string
+          total_count?: number
+          void_count?: number
+        }
+        Update: {
+          generated_at?: string
+          graded_count?: number
+          group_key?: string
+          group_type?: string
+          hit_count?: number
+          hit_rate?: number | null
+          id?: string
+          metadata?: Json
+          miss_count?: number
+          pending_count?: number
+          push_adjusted_hit_rate?: number | null
+          push_count?: number
+          sport?: string
+          summary_date?: string
+          summary_window?: string
+          total_count?: number
+          void_count?: number
+        }
+        Relationships: []
+      }
       mlb_pitcher_game_logs: {
         Row: {
           batters_faced: number | null
@@ -1099,6 +1159,48 @@ export type Database = {
         }
         Relationships: []
       }
+      mlb_player_external_ids: {
+        Row: {
+          confidence: number
+          created_at: string
+          external_player_id: string
+          id: string
+          metadata: Json
+          player_id: number
+          player_name: string | null
+          provider: string
+          source: string
+          team_abbr: string | null
+          updated_at: string
+        }
+        Insert: {
+          confidence?: number
+          created_at?: string
+          external_player_id: string
+          id?: string
+          metadata?: Json
+          player_id: number
+          player_name?: string | null
+          provider: string
+          source?: string
+          team_abbr?: string | null
+          updated_at?: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          external_player_id?: string
+          id?: string
+          metadata?: Json
+          player_id?: number
+          player_name?: string | null
+          provider?: string
+          source?: string
+          team_abbr?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       mlb_player_profiles: {
         Row: {
           bats: string | null
@@ -1195,6 +1297,69 @@ export type Database = {
           window_l15_hit_rate?: number | null
           window_l5_avg?: number | null
           window_l5_hit_rate?: number | null
+        }
+        Relationships: []
+      }
+      mlb_prop_outcomes: {
+        Row: {
+          actual_value: number | null
+          created_at: string
+          game_date: string
+          graded_at: string
+          id: string
+          metadata: Json
+          opponent_abbr: string | null
+          outcome: string
+          pick_side: string
+          player_id: number
+          player_name: string | null
+          player_prop_score_id: string
+          source: string
+          sport: string
+          stat_type: string
+          team_abbr: string | null
+          threshold: number | null
+          updated_at: string
+        }
+        Insert: {
+          actual_value?: number | null
+          created_at?: string
+          game_date: string
+          graded_at?: string
+          id?: string
+          metadata?: Json
+          opponent_abbr?: string | null
+          outcome?: string
+          pick_side?: string
+          player_id: number
+          player_name?: string | null
+          player_prop_score_id: string
+          source?: string
+          sport?: string
+          stat_type: string
+          team_abbr?: string | null
+          threshold?: number | null
+          updated_at?: string
+        }
+        Update: {
+          actual_value?: number | null
+          created_at?: string
+          game_date?: string
+          graded_at?: string
+          id?: string
+          metadata?: Json
+          opponent_abbr?: string | null
+          outcome?: string
+          pick_side?: string
+          player_id?: number
+          player_name?: string | null
+          player_prop_score_id?: string
+          source?: string
+          sport?: string
+          stat_type?: string
+          team_abbr?: string | null
+          threshold?: number | null
+          updated_at?: string
         }
         Relationships: []
       }
