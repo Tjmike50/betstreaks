@@ -1,32 +1,37 @@
 // =============================================================================
 // BestPlaysPreview — top 3 best plays for the active sport on the Dashboard.
-// Reuses useBestBets. Each row links into Research player page (or streak
-// detail for team rows). Footer CTA → /best-bets.
+// Uses the same scored-props cheatsheet source as the category pages so the
+// dashboard can fall back to the latest verified slate instead of legacy
+// streak-only data.
 // =============================================================================
 import { useNavigate } from "react-router-dom";
 import { Trophy, ArrowRight, Flame } from "lucide-react";
-import { useBestBets, DEFAULT_BEST_BETS_FILTERS } from "@/hooks/useBestBets";
+import { useCheatsheet, type CheatsheetRow } from "@/hooks/useCheatsheet";
 import { useSport } from "@/contexts/SportContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import type { Streak } from "@/types/streak";
+import { compactStatLabel } from "@/lib/mlbStatLabels";
 
-const PREVIEW_FILTERS = { ...DEFAULT_BEST_BETS_FILTERS, limit: 3 };
-
-function rowHref(streak: Streak): string {
-  if (streak.entity_type === "player" && streak.player_id) {
-    return `/research/player/${streak.player_id}`;
-  }
-  // Team rows → streak detail page
-  return `/streak?id=${streak.id}`;
+function rowHref(row: CheatsheetRow): string {
+  return `/research/player/${row.player_id}`;
 }
 
 export function BestPlaysPreview() {
   const navigate = useNavigate();
   const { config } = useSport();
-  const { data: streaks, isLoading, error } = useBestBets(PREVIEW_FILTERS);
+  const { data, isLoading, error } = useCheatsheet({
+    category: "best-bets",
+    limit: 3,
+    minConfidence: 55,
+  });
 
   const isOffseason = config.seasonState === "offseason";
+  const rows = data?.rows ?? [];
+  const effectiveDateLabel =
+    data?.effectiveDate &&
+    (data.usingLatestFallback
+      ? `Showing latest available slate: ${data.effectiveDate}`
+      : `Slate date: ${data.effectiveDate}`);
 
   return (
     <section className="px-4 pt-5">
@@ -44,6 +49,9 @@ export function BestPlaysPreview() {
           <ArrowRight className="h-3 w-3" />
         </button>
       </div>
+      {effectiveDateLabel && (
+        <p className="text-[11px] text-muted-foreground mb-2">{effectiveDateLabel}</p>
+      )}
 
       {isLoading ? (
         <div className="space-y-2">
@@ -57,7 +65,7 @@ export function BestPlaysPreview() {
             Couldn't load best plays. Try again soon.
           </p>
         </div>
-      ) : !streaks || streaks.length === 0 ? (
+      ) : rows.length === 0 ? (
         <div className="glass-card p-5 text-center">
           <Trophy className="h-7 w-7 mx-auto text-muted-foreground/50 mb-2" />
           <p className="text-sm font-medium text-foreground">
@@ -68,16 +76,19 @@ export function BestPlaysPreview() {
           <p className="text-xs text-muted-foreground mt-0.5">
             {isOffseason
               ? "Best Plays will return when the season resumes."
-              : "Streak data hasn't surfaced any high-confidence plays today."}
+              : data?.emptyReason ?? "No verified plays found for this category yet."}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            {config.shortName} · Requested today, using {data?.effectiveDate ?? "latest available"}.
           </p>
         </div>
       ) : (
         <ul className="space-y-2">
-          {streaks.map((streak, idx) => (
-            <li key={streak.id}>
+          {rows.map((row, idx) => (
+            <li key={row.id}>
               <button
                 type="button"
-                onClick={() => navigate(rowHref(streak))}
+                onClick={() => navigate(rowHref(row))}
                 className="w-full glass-card p-3 flex items-center gap-3 text-left hover:border-primary/40 transition-colors"
               >
                 <div
@@ -94,17 +105,19 @@ export function BestPlaysPreview() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-medium text-foreground truncate">
-                      {streak.player_name}
+                      {row.player_name}
                     </p>
-                    {streak.team_abbr && (
+                    {row.team_abbr && (
                       <span className="text-[10px] text-muted-foreground">
-                        {streak.team_abbr}
+                        {row.team_abbr}
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground truncate">
-                    {streak.stat} {streak.threshold}+ ·{" "}
-                    {Math.round((streak.last10_hit_pct ?? 0))}% L10
+                    {compactStatLabel(row.stat_type)} O{row.threshold} ·{" "}
+                    {row.opponent_abbr
+                      ? `${row.team_abbr ?? ""} ${row.home_away === "away" ? "@" : "vs"} ${row.opponent_abbr}`
+                      : `${Math.round(row.last10_hit_rate ?? 0)}% L10`}
                   </p>
                 </div>
                 <Badge
@@ -112,7 +125,7 @@ export function BestPlaysPreview() {
                   className="gap-1 text-xs flex-shrink-0"
                 >
                   <Flame className="h-3 w-3 text-amber-400" />
-                  {streak.streak_len}
+                  {Math.round(row.confidence_score ?? row.score_overall ?? 0)}
                 </Badge>
               </button>
             </li>

@@ -1,39 +1,32 @@
 // =============================================================================
 // HotStreaksStrip — top active player streaks for the active sport.
-// Reuses useStreaks + StreakCard. Sport-aware empty state.
+// Uses the scored-props cheatsheet source so the dashboard can fall back to the
+// latest verified slate even when legacy streak tables are sparse.
 // =============================================================================
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Flame } from "lucide-react";
-import { useLineFirstStreaks } from "@/hooks/useLineFirstStreaks";
+import { useCheatsheet } from "@/hooks/useCheatsheet";
 import { useSport } from "@/contexts/SportContext";
-import { StreakCard } from "@/components/StreakCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { StreakFilters } from "@/types/streak";
-
-const HOT_STREAKS_FILTERS: StreakFilters = {
-  stat: "All",
-  minStreak: 3,
-  minSeasonWinPct: 0,
-  playerSearch: "",
-  advanced: false,
-  entityType: "player",
-  sortBy: "streak",
-  bestBets: false,
-  thresholdMin: null,
-  thresholdMax: null,
-  teamFilter: "All",
-  recentOnly: true,
-};
+import { CheatsheetRowCard } from "@/components/cheatsheets/CheatsheetRowCard";
 
 const MAX_ROWS = 3;
 
 export function HotStreaksStrip() {
   const navigate = useNavigate();
   const { config } = useSport();
-  const { data: streaks, isLoading } = useLineFirstStreaks(HOT_STREAKS_FILTERS);
+  const { data, isLoading } = useCheatsheet({
+    category: "streaks",
+    limit: MAX_ROWS,
+  });
 
   const isOffseason = config.seasonState === "offseason";
-  const top = (streaks ?? []).slice(0, MAX_ROWS);
+  const top = data?.rows ?? [];
+  const effectiveDateLabel =
+    data?.effectiveDate &&
+    (data.usingLatestFallback
+      ? `Showing latest available slate: ${data.effectiveDate}`
+      : `Slate date: ${data.effectiveDate}`);
 
   return (
     <section className="px-4 pt-5">
@@ -53,6 +46,9 @@ export function HotStreaksStrip() {
           </button>
         )}
       </div>
+      {effectiveDateLabel && (
+        <p className="text-[11px] text-muted-foreground mb-2">{effectiveDateLabel}</p>
+      )}
 
       {isLoading ? (
         <div className="space-y-3">
@@ -69,13 +65,16 @@ export function HotStreaksStrip() {
           <p className="text-xs text-muted-foreground mt-0.5">
             {isOffseason
               ? "We'll surface fresh streaks when the season tips off."
-              : "Check back after tonight's games for fresh streaks."}
+              : data?.emptyReason ?? "No verified plays found for this category yet."}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            {config.shortName} · Requested today, using {data?.effectiveDate ?? "latest available"}.
           </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {top.map((streak) => (
-            <StreakCard key={streak.id} streak={streak} showStarButton={false} />
+          {top.map((row) => (
+            <CheatsheetRowCard key={row.id} row={row} highlight="last10" />
           ))}
         </div>
       )}

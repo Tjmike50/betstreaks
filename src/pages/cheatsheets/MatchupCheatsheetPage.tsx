@@ -19,6 +19,10 @@ function normalizeRate(value: number | null | undefined): number {
   return value <= 1 ? value * 100 : value;
 }
 
+function hasHistoricalVsOppData(vsOppRate: number | null | undefined, vsOppGames: number | null | undefined): boolean {
+  return normalizeRate(vsOppRate) > 0 && (vsOppGames ?? 0) >= 2;
+}
+
 export default function MatchupCheatsheetPage() {
   const navigate = useNavigate();
   const { config } = useSport();
@@ -30,10 +34,21 @@ export default function MatchupCheatsheetPage() {
     limit: 80,
   });
 
-  // Honor slider client-side; baseline server filter requires vs_opponent_games >= 2.
+  // Honor the slider only when we actually have opponent-history metrics.
+  // For MLB, fallback matchup rows can still be useful even if the backend
+  // hasn't populated robust vs-opponent history yet.
   const filtered = (data?.rows ?? []).filter(
-    (r) => normalizeRate(r.vs_opponent_hit_rate) >= minVsOppRate,
+    (r) => {
+      if (!hasHistoricalVsOppData(r.vs_opponent_hit_rate, r.vs_opponent_games)) {
+        return true;
+      }
+      return normalizeRate(r.vs_opponent_hit_rate) >= minVsOppRate;
+    },
   );
+
+  const hasOnlyFallbackRows =
+    (data?.rows ?? []).length > 0 &&
+    (data?.rows ?? []).every((row) => !hasHistoricalVsOppData(row.vs_opponent_hit_rate, row.vs_opponent_games));
 
   return (
     <div className="min-h-screen pb-24 md:pb-8">
@@ -110,10 +125,12 @@ export default function MatchupCheatsheetPage() {
           <div className="glass-card p-6 text-center">
             <Swords className="h-9 w-9 mx-auto text-muted-foreground/40 mb-2" />
             <p className="text-sm font-medium text-foreground mb-1">
-              No matchup edges at this threshold
+              {config.key === "MLB" ? "Matchup edges coming soon" : "No matchup edges at this threshold"}
             </p>
             <p className="text-xs text-muted-foreground">
-              {data?.emptyReason ?? `Try lowering the minimum vs-opponent hit rate. Matchup edges require at least 2 prior games vs tonight's opponent.`}
+              {config.key === "MLB"
+                ? data?.emptyReason ?? "MLB matchup history is still being filled in. No verified matchup data is available for this slate yet."
+                : data?.emptyReason ?? "Try lowering the minimum vs-opponent hit rate. Matchup edges require at least 2 prior games vs tonight's opponent."}
             </p>
             {data?.effectiveDate && (
               <p className="text-[11px] text-muted-foreground mt-2">
@@ -125,6 +142,11 @@ export default function MatchupCheatsheetPage() {
 
         {!isLoading && !error && filtered.length > 0 && (
           <div className="space-y-2">
+            {config.key === "MLB" && hasOnlyFallbackRows && (
+              <div className="glass-card p-4 text-xs text-muted-foreground">
+                Matchup history is still limited for MLB, so these cards are using fallback matchup scoring from the latest verified prop slate.
+              </div>
+            )}
             {filtered.map((row) => (
               <CheatsheetRowCard key={row.id} row={row} highlight="vs_opp" />
             ))}
