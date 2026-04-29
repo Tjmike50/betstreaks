@@ -2657,57 +2657,6 @@ export type Database = {
         }
         Relationships: []
       }
-      tmp_strikeouts_before: {
-        Row: {
-          confidence_score: number | null
-          game_date: string | null
-          player_id: number | null
-          player_name: string | null
-          reason_tags: Json | null
-          score_matchup: number | null
-          score_opportunity: number | null
-          score_overall: number | null
-          score_recent_form: number | null
-          score_value: number | null
-          scored_at: string | null
-          stat_type: string | null
-          summary_json: Json | null
-          threshold: number | null
-        }
-        Insert: {
-          confidence_score?: number | null
-          game_date?: string | null
-          player_id?: number | null
-          player_name?: string | null
-          reason_tags?: Json | null
-          score_matchup?: number | null
-          score_opportunity?: number | null
-          score_overall?: number | null
-          score_recent_form?: number | null
-          score_value?: number | null
-          scored_at?: string | null
-          stat_type?: string | null
-          summary_json?: Json | null
-          threshold?: number | null
-        }
-        Update: {
-          confidence_score?: number | null
-          game_date?: string | null
-          player_id?: number | null
-          player_name?: string | null
-          reason_tags?: Json | null
-          score_matchup?: number | null
-          score_opportunity?: number | null
-          score_overall?: number | null
-          score_recent_form?: number | null
-          score_value?: number | null
-          scored_at?: string | null
-          stat_type?: string | null
-          summary_json?: Json | null
-          threshold?: number | null
-        }
-        Relationships: []
-      }
       unmatched_props_queue: {
         Row: {
           created_at: string
