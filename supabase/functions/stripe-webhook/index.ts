@@ -42,6 +42,44 @@ serve(async (req) => {
     { auth: { persistSession: false } }
   );
 
+  function unixSecondsToIso(
+    value: unknown,
+    fieldName: string,
+    context: { eventType: string; subscriptionId?: string | null },
+  ): string | null {
+    if (value == null) {
+      console.warn("Stripe webhook timestamp missing", {
+        eventType: context.eventType,
+        subscriptionId: context.subscriptionId ?? null,
+        fieldName,
+      });
+      return null;
+    }
+
+    const seconds = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      console.warn("Stripe webhook timestamp invalid", {
+        eventType: context.eventType,
+        subscriptionId: context.subscriptionId ?? null,
+        fieldName,
+        receivedType: typeof value,
+      });
+      return null;
+    }
+
+    const date = new Date(seconds * 1000);
+    if (Number.isNaN(date.getTime())) {
+      console.warn("Stripe webhook timestamp produced invalid date", {
+        eventType: context.eventType,
+        subscriptionId: context.subscriptionId ?? null,
+        fieldName,
+      });
+      return null;
+    }
+
+    return date.toISOString();
+  }
+
   try {
     // Get the signature from headers
     const signature = req.headers.get("stripe-signature");
@@ -98,18 +136,22 @@ serve(async (req) => {
     // Helper function to upsert subscription record
     async function upsertSubscription(
       userId: string,
-      subscription: Stripe.Subscription
+      subscription: Stripe.Subscription,
+      eventType: string,
     ) {
       console.log(`Upserting subscription ${subscription.id} for user ${userId}`);
+      const currentPeriodEndIso = unixSecondsToIso(
+        subscription.current_period_end,
+        "current_period_end",
+        { eventType, subscriptionId: subscription.id },
+      );
       const { error } = await supabaseAdmin.from("stripe_subscriptions").upsert(
         {
           user_id: userId,
           stripe_subscription_id: subscription.id,
           status: subscription.status,
           price_id: subscription.items.data[0]?.price?.id ?? null,
-          current_period_end: new Date(
-            subscription.current_period_end * 1000
-          ).toISOString(),
+          current_period_end: currentPeriodEndIso,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "stripe_subscription_id" }
@@ -190,7 +232,7 @@ serve(async (req) => {
         }
 
         // Upsert subscription record
-        await upsertSubscription(userId, subscription);
+        await upsertSubscription(userId, subscription, event.type);
 
         // Update premium status based on subscription status
         const isActive = ["active", "trialing"].includes(subscription.status);
@@ -211,7 +253,7 @@ serve(async (req) => {
         }
 
         // Update subscription record
-        await upsertSubscription(userId, subscription);
+        await upsertSubscription(userId, subscription, event.type);
 
         // Set premium to false
         await updatePremiumStatus(userId, false);
