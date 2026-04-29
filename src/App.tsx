@@ -10,13 +10,11 @@ import { DesktopSidebar } from "@/components/DesktopSidebar";
 import { MobileHeader } from "@/components/MobileHeader";
 import { BottomNav } from "@/components/BottomNav";
 import DashboardPage from "./pages/DashboardPage";
-import StreaksPage from "./pages/StreaksPage";
 import TodayPage from "./pages/TodayPage";
 import PlayerPage from "./pages/PlayerPage";
 import StreakDetailPage from "./pages/StreakDetailPage";
 import WatchlistPage from "./pages/WatchlistPage";
 import FavoritesPage from "./pages/FavoritesPage";
-import BestBetsPage from "./pages/BestBetsPage";
 import AlertsPage from "./pages/AlertsPage";
 import AccountPage from "./pages/AccountPage";
 import PremiumPage from "./pages/PremiumPage";
@@ -57,9 +55,9 @@ const App = () => (
                 <main className="flex-1">
                   <Routes>
                     <Route path="/" element={<DashboardPage />} />
-                    <Route path="/streaks" element={<StreaksPage />} />
+                    <Route path="/streaks" element={<StreakCheatsheetPage />} />
                     <Route path="/today" element={<TodayPage />} />
-                    <Route path="/best-bets" element={<BestBetsPage />} />
+                    <Route path="/best-bets" element={<BestBetsCheatsheetPage />} />
                     <Route path="/cheatsheets" element={<CheatsheetsHubPage />} />
                     <Route path="/cheatsheets/value" element={<ValueCheatsheetPage />} />
                     <Route path="/cheatsheets/streaks" element={<StreakCheatsheetPage />} />

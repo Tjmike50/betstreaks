@@ -75,6 +75,15 @@ function humanizeBuilderNoDataMessage(data: any): string {
     }
   }
 
+  if (requestedSport === "NBA" || requestedSport === "WNBA") {
+    if (quotaExhausted || providerUnavailableReason === "OUT_OF_USAGE_CREDITS") {
+      return "Verified live basketball lines are temporarily unavailable because the odds provider quota is exhausted. The slate is loaded, but live market snapshots are unavailable right now. Try again after odds refresh or on the next slate.";
+    }
+    if (verifiedCandidateCount === 0 && debug?.live_props_found === 0) {
+      return "No verified live basketball props are available for this slate yet. The schedule is loaded, but live market snapshots have not populated yet. Try again after odds refresh or on the next slate.";
+    }
+  }
+
   return message;
 }
 

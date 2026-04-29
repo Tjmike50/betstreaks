@@ -14,14 +14,30 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
+  const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
+  const stripeWebhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const missingEnv = [
+    !stripeSecretKey ? "STRIPE_SECRET_KEY" : null,
+    !stripeWebhookSecret ? "STRIPE_WEBHOOK_SECRET" : null,
+    !supabaseUrl ? "SUPABASE_URL" : null,
+    !supabaseServiceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY" : null,
+  ].filter(Boolean);
+
+  if (missingEnv.length > 0) {
+    console.error("Missing required webhook env vars:", missingEnv.join(", "));
+    return new Response("Webhook configuration error", { status: 500 });
+  }
+
+  const stripe = new Stripe(stripeSecretKey, {
     apiVersion: "2023-10-16",
   });
 
   // Create Supabase admin client (use service role for writes)
   const supabaseAdmin = createClient(
-    Deno.env.get("SUPABASE_URL") ?? "",
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    supabaseUrl,
+    supabaseServiceRoleKey,
     { auth: { persistSession: false } }
   );
 
@@ -42,7 +58,7 @@ serve(async (req) => {
       event = stripe.webhooks.constructEvent(
         body,
         signature,
-        Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? ""
+        stripeWebhookSecret
       );
     } catch (err) {
       console.error("Webhook signature verification failed:", err);

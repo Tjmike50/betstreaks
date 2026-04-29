@@ -27,12 +27,12 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 const mainNav = [
   { title: "Home", url: "/", icon: Flame },
-  { title: "Streaks", url: "/streaks", icon: TrendingUp },
+  { title: "Streaks", url: "/cheatsheets/hot-streaks", icon: TrendingUp },
   { title: "Today", url: "/today", icon: Calendar },
   { title: "AI Builder", url: "/ai-builder", icon: Brain },
   { title: "Research", url: "/research", icon: Search },
   { title: "Cheatsheets", url: "/cheatsheets", icon: BookOpen },
-  { title: "Best Bets", url: "/best-bets", icon: TrendingUp },
+  { title: "Best Bets", url: "/cheatsheets/best-bets", icon: TrendingUp },
   { title: "Saved Slips", url: "/saved-slips", icon: Bookmark },
   { title: "Alerts", url: "/alerts", icon: Bell, hasBadge: true },
   { title: "Favorites", url: "/favorites", icon: Heart },

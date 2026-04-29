@@ -643,6 +643,43 @@ interface DebugInfo {
   no_slip_reason?: string | null;
   no_candidates_reason?: string | null;
   candidates_by_team?: Record<string, number>;
+  latest_available_game_date?: string | null;
+  provider_unavailable_reason?: string | null;
+  quota_exhausted?: boolean | null;
+}
+
+async function readQuotaAlertState(
+  // deno-lint-ignore no-explicit-any
+  serviceClient: any,
+  sport: "NBA" | "WNBA" | "MLB",
+  gameDate: string,
+): Promise<{ providerUnavailableReason: string | null; quotaExhausted: boolean }> {
+  try {
+    const { data: quotaAlerts } = await serviceClient
+      .from("backend_alerts")
+      .select("metadata, created_at")
+      .eq("sport", sport)
+      .eq("alert_type", "odds_api_quota_exhausted")
+      .or("resolved.is.false,resolved.is.null")
+      .gte("created_at", `${gameDate}T00:00:00-04:00`)
+      .lt("created_at", `${gameDate}T23:59:59-04:00`)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if ((quotaAlerts?.length ?? 0) > 0) {
+      return {
+        providerUnavailableReason: "OUT_OF_USAGE_CREDITS",
+        quotaExhausted: true,
+      };
+    }
+  } catch (e) {
+    console.warn(`[AI-Builder/${sport}] failed to read quota alert state:`, e);
+  }
+
+  return {
+    providerUnavailableReason: null,
+    quotaExhausted: false,
+  };
 }
 
 // =============================================================================
@@ -685,28 +722,7 @@ async function handleMlbBuilder(args: MlbBuilderArgs): Promise<Response> {
   const { prompt, slipCount, supabase, serviceClient, userId, isPremium, gameDate, requestedGameDate } = args;
   const startedAt = Date.now();
   const latestAvailableGameDate = gameDate !== requestedGameDate ? gameDate : null;
-  let providerUnavailableReason: string | null = null;
-  let quotaExhausted = false;
-
-  try {
-    const { data: quotaAlerts } = await serviceClient
-      .from("backend_alerts")
-      .select("metadata, created_at")
-      .eq("sport", "MLB")
-      .eq("alert_type", "odds_api_quota_exhausted")
-      .or("resolved.is.false,resolved.is.null")
-      .gte("created_at", `${gameDate}T00:00:00-04:00`)
-      .lt("created_at", `${gameDate}T23:59:59-04:00`)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if ((quotaAlerts?.length ?? 0) > 0) {
-      providerUnavailableReason = "OUT_OF_USAGE_CREDITS";
-      quotaExhausted = true;
-    }
-  } catch (e) {
-    console.warn("[AI-Builder/MLB] failed to read quota alert state:", e);
-  }
+  const { providerUnavailableReason, quotaExhausted } = await readQuotaAlertState(serviceClient, "MLB", gameDate);
 
   const scoredCandidates = await getMlbBuilderCandidates(serviceClient, {
     gameDate,
@@ -1350,6 +1366,8 @@ serve(async (req) => {
     debug.requested_sport = sport;
     debug.requested_date = todayStr;
     debug.selected_game_ids = Array.isArray(filters?.includeGames) ? filters.includeGames : [];
+    let providerUnavailableReason: string | null = null;
+    let quotaExhausted = false;
 
     // -------------------------------------------------------------------------
     // MLB v1 short-circuit
@@ -1388,6 +1406,10 @@ serve(async (req) => {
         requestedGameDate: todayStr,
       });
     }
+
+    ({ providerUnavailableReason, quotaExhausted } = await readQuotaAlertState(serviceClient, sport, todayStr));
+    debug.provider_unavailable_reason = providerUnavailableReason;
+    debug.quota_exhausted = quotaExhausted;
 
     const betType = filters?.betType || null;
     const includePlayerProps = !betType || betType === "player_props" || betType === "mixed";
@@ -2151,7 +2173,11 @@ serve(async (req) => {
       debug.no_candidates_reason = debug.no_slip_reason;
       return failureResponse(
         "NO_CANDIDATES",
-        "No eligible NBA props found for today's slate yet. Refresh odds/player props or try again later.",
+        quotaExhausted || providerUnavailableReason === "OUT_OF_USAGE_CREDITS"
+          ? "Verified NBA live props are temporarily unavailable because the odds provider quota is exhausted. Today’s scored slate is loaded, but live market snapshots are unavailable. Try again after odds refresh or on the next slate."
+          : bestLines.size === 0
+            ? "No verified NBA live props are available for this slate yet. The schedule is loaded, but live market snapshots have not populated yet. Refresh odds/player props or try again later."
+            : "No eligible NBA props found for today's slate yet. Refresh odds/player props or try again later.",
         debug,
         { available_games: availableGames },
       );
