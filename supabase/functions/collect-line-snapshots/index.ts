@@ -481,6 +481,10 @@ async function fetchTheOddsApiEventDiagnostic(
   return {
     provider_url_shape: buildTheOddsApiUrlShape(sport, eventId, marketParam),
     http_status: response.status,
+    error_code:
+      typeof parsedBody?.error_code === "string"
+        ? parsedBody.error_code
+        : null,
     ...summarizeOddsApiResponseBody(parsedBody),
     raw_response_error_body_sample: response.ok
       ? null
@@ -488,6 +492,26 @@ async function fetchTheOddsApiEventDiagnostic(
           ? JSON.stringify(parsedBody).slice(0, 400)
           : rawText.slice(0, 400)),
   };
+}
+
+function isQuotaExhaustedPayload(payload: unknown): boolean {
+  const record = typeof payload === "object" && payload !== null
+    ? payload as Record<string, unknown>
+    : null;
+  const errorCode = typeof record?.error_code === "string" ? record.error_code : null;
+  const meta = typeof record?.meta === "object" && record.meta !== null
+    ? record.meta as Record<string, unknown>
+    : null;
+  const metaPrimary = typeof meta?.primaryError === "object" && meta.primaryError !== null
+    ? meta.primaryError as Record<string, unknown>
+    : null;
+  const metaReason = typeof meta?.providerUnavailableReason === "string" ? meta.providerUnavailableReason : null;
+  return (
+    errorCode === "OUT_OF_USAGE_CREDITS" ||
+    metaReason === "OUT_OF_USAGE_CREDITS" ||
+    (typeof meta?.quotaExhausted === "boolean" && meta.quotaExhausted === true) ||
+    (typeof metaPrimary?.errorCode === "string" && metaPrimary.errorCode === "OUT_OF_USAGE_CREDITS")
+  );
 }
 
 async function fetchEspnNbaSlate(gameDate: string): Promise<EspnSlateGame[]> {
@@ -1242,6 +1266,13 @@ serve(async (req) => {
     const snapshotsWrittenByStatType: Record<string, number> = {};
     const providerErrorsByGame: Record<string, string[]> = {};
     let providerUnavailableReason: string | null = null;
+    let quotaExhausted = false;
+    let quotaExhaustedAtEventId: string | null = null;
+    let providerCallsAttempted = 0;
+    let providerCallsSkippedAfterQuotaStop = 0;
+    let noPropsEventsCount = 0;
+    let providerUnavailableEventsCount = 0;
+    let gamesUncheckedDueToQuotaCount = 0;
     let mlbResolvedPlayers = 0;
     let mlbUnresolvedPlayers = 0;
     const propMarkets = cfg.propMarkets;
@@ -1264,12 +1295,27 @@ serve(async (req) => {
         }));
 
     for (const target of fetchTargets) {
+      if (quotaExhausted) {
+        gamesUncheckedDueToQuotaCount++;
+        providerCallsSkippedAfterQuotaStop += Math.max(1, target.oddsEvents.length);
+        providerErrorsByGame[target.targetKey] = [
+          ...(providerErrorsByGame[target.targetKey] || []),
+          "skipped_due_to_quota_exhaustion",
+        ];
+        continue;
+      }
+
       gamesAttempted++;
       let wroteAnyForTarget = false;
       let sawPropsPayload = false;
+      let targetProviderUnavailable = false;
       matchedProviderEventsByGame[target.targetKey] = target.oddsEvents.map((g: any) => String(g.id));
 
       for (const game of target.oddsEvents) {
+        if (quotaExhausted) {
+          providerCallsSkippedAfterQuotaStop++;
+          break;
+        }
         if (String(game.id).startsWith("manual_")) {
           console.log(`[${sport}] Skipping prop fetch for manual game ${game.id}`);
           continue;
@@ -1284,6 +1330,10 @@ serve(async (req) => {
           marketsAttemptedByEvent[String(game.id)] = [];
 
           for (const marketRequest of marketRequests) {
+            if (quotaExhausted) {
+              providerCallsSkippedAfterQuotaStop++;
+              break;
+            }
             const requestedMarkets = marketRequest.split(",").map((m) => m.trim()).filter(Boolean);
             marketsAttempted += requestedMarkets.length;
             marketsAttemptedByEvent[String(game.id)].push(marketRequest);
@@ -1291,8 +1341,20 @@ serve(async (req) => {
             if (diagnoseProps) {
               providerDiagnosticsByEvent[`${game.id}:${marketRequest}`] =
                 await fetchTheOddsApiEventDiagnostic(cfg.oddsApiSport, String(game.id), marketRequest);
+              if (isQuotaExhaustedPayload(providerDiagnosticsByEvent[`${game.id}:${marketRequest}`])) {
+                quotaExhausted = true;
+                quotaExhaustedAtEventId ||= String(game.id);
+                providerUnavailableReason = "OUT_OF_USAGE_CREDITS";
+                targetProviderUnavailable = true;
+                providerUnavailableEventsCount++;
+                providerStatusByEventMarket[`${game.id}:${marketRequest}`] = "quota_exhausted";
+                bookmakerCountByEventMarket[`${game.id}:${marketRequest}`] = 0;
+                (providerErrorsByGame[target.targetKey] ||= []).push(`quota_exhausted:${game.id}:${marketRequest}`);
+                break;
+              }
             }
 
+            providerCallsAttempted++;
             const propsRes = await fetch(`${fnBase}/get-odds`, {
               method: "POST",
               headers: svcHeaders,
@@ -1308,17 +1370,32 @@ serve(async (req) => {
             const propsData = propsResponse.data || [];
             const statusKey = `${game.id}:${marketRequest}`;
 
-            if (!propsResponse.ok && propsData.length === 0) {
-              providerStatusByEventMarket[statusKey] = "no_props";
+            if (isQuotaExhaustedPayload(propsResponse)) {
+              quotaExhausted = true;
+              quotaExhaustedAtEventId ||= String(game.id);
+              providerUnavailableReason = "OUT_OF_USAGE_CREDITS";
+              targetProviderUnavailable = true;
+              providerUnavailableEventsCount++;
+              providerStatusByEventMarket[statusKey] = "quota_exhausted";
               bookmakerCountByEventMarket[statusKey] = 0;
-              (providerErrorsByGame[target.targetKey] ||= []).push(`no_props:${game.id}:${marketRequest}`);
+              (providerErrorsByGame[target.targetKey] ||= []).push(`quota_exhausted:${game.id}:${marketRequest}`);
+              break;
+            }
+
+            if (!propsResponse.ok && propsData.length === 0) {
+              providerStatusByEventMarket[statusKey] = "provider_unavailable";
+              bookmakerCountByEventMarket[statusKey] = 0;
+              targetProviderUnavailable = true;
+              providerUnavailableEventsCount++;
+              (providerErrorsByGame[target.targetKey] ||= []).push(`provider_unavailable:${game.id}:${marketRequest}`);
               continue;
             }
 
             if (propsData.length === 0) {
-              providerStatusByEventMarket[statusKey] = "empty_props";
+              providerStatusByEventMarket[statusKey] = "no_props";
               bookmakerCountByEventMarket[statusKey] = 0;
-              (providerErrorsByGame[target.targetKey] ||= []).push(`empty_props:${game.id}:${marketRequest}`);
+              noPropsEventsCount++;
+              (providerErrorsByGame[target.targetKey] ||= []).push(`no_props:${game.id}:${marketRequest}`);
               continue;
             }
 
@@ -1427,20 +1504,62 @@ serve(async (req) => {
               break;
             }
           }
+          if (quotaExhausted) break;
           if (wroteAnyForTarget) break;
         } catch (e) {
           console.error(`Error processing game ${game.id}:`, e);
+          targetProviderUnavailable = true;
+          providerUnavailableEventsCount++;
           (providerErrorsByGame[target.targetKey] ||= []).push(`error:${game.id}:${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
       if (wroteAnyForTarget || sawPropsPayload) gamesWithProps++;
-      else {
+      else if (quotaExhausted || targetProviderUnavailable) {
+        // Do not count provider-unavailable or quota-skipped targets as no-props.
+      } else {
         gamesWithoutProps++;
         const statusText = String(target.status ?? "").toLowerCase();
         if (sport === "NBA" && (statusText.includes("final") || statusText.includes("progress") || statusText.includes("halftime"))) {
           providerUnavailableReason = "PROVIDER_PROPS_CLOSED_OR_UNAVAILABLE";
         }
+      }
+    }
+
+    if (quotaExhausted) {
+      try {
+        const quotaAlertType = "odds_api_quota_exhausted";
+        const { data: existingQuotaAlerts } = await supabase
+          .from("backend_alerts")
+          .select("id")
+          .eq("sport", sport)
+          .eq("alert_type", quotaAlertType)
+          .or("resolved.is.false,resolved.is.null")
+          .gte("created_at", `${requestedGameDate}T00:00:00-04:00`)
+          .lt("created_at", `${requestedGameDate}T23:59:59-04:00`)
+          .limit(1);
+
+        if (!existingQuotaAlerts || existingQuotaAlerts.length === 0) {
+          const { error: quotaAlertErr } = await supabase.from("backend_alerts").insert({
+            sport,
+            alert_type: quotaAlertType,
+            severity: "warning",
+            message: `The Odds API quota exhausted during ${sport} line collection.`,
+            metadata: {
+              game_date: requestedGameDate,
+              odds_provider: oddsProvider,
+              quota_exhausted_at_event_id: quotaExhaustedAtEventId,
+              provider_calls_attempted: providerCallsAttempted,
+              provider_calls_skipped_after_quota_stop: providerCallsSkippedAfterQuotaStop,
+            },
+            resolved: false,
+          });
+          if (quotaAlertErr) {
+            console.error(`[${sport}] backend_alerts quota insert failed:`, quotaAlertErr);
+          }
+        }
+      } catch (alertErr) {
+        console.error(`[${sport}] backend_alerts quota write failed:`, alertErr);
       }
     }
 
@@ -1585,6 +1704,13 @@ serve(async (req) => {
       provider_errors_by_game: providerErrorsByGame,
       first_provider_error_sample: Object.values(providerErrorsByGame).flat()[0] ?? null,
       provider_unavailable_reason: providerUnavailableReason,
+      quota_exhausted: quotaExhausted,
+      quota_exhausted_at_event_id: quotaExhaustedAtEventId,
+      provider_calls_attempted: providerCallsAttempted,
+      provider_calls_skipped_after_quota_stop: providerCallsSkippedAfterQuotaStop,
+      no_props_events_count: noPropsEventsCount,
+      provider_unavailable_events_count: providerUnavailableEventsCount,
+      games_unchecked_due_to_quota_count: gamesUncheckedDueToQuotaCount,
       mlb_resolved_players: mlbResolvedPlayers,
       mlb_unresolved_players: mlbUnresolvedPlayers,
       mlb_team_mapping_missing_names: [...mlbTeamMappingMissingNames].sort(),

@@ -29,6 +29,13 @@ interface NormalizedOdds {
   fetchedAt: string;
 }
 
+type ProviderFailureInfo = {
+  provider: string;
+  status: number | null;
+  errorCode: string | null;
+  message: string;
+};
+
 // ===== PROVIDER 1: The Odds API =====
 
 async function getOddsFromTheOddsApi(
@@ -63,7 +70,30 @@ async function getOddsFromTheOddsApi(
   const res = await fetch(url);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`the-odds-api ${res.status}: ${body}`);
+    let parsedBody: Record<string, unknown> | null = null;
+    try {
+      parsedBody = body ? JSON.parse(body) : null;
+    } catch {
+      parsedBody = null;
+    }
+    const errorCode = typeof parsedBody?.error_code === "string" ? parsedBody.error_code : null;
+    const errorMessage =
+      typeof parsedBody?.message === "string"
+        ? parsedBody.message
+        : typeof parsedBody?.error === "string"
+        ? parsedBody.error
+        : body.slice(0, 400);
+    const err = new Error(`the-odds-api ${res.status}: ${errorMessage}`);
+    (err as Error & {
+      provider?: string;
+      status?: number;
+      errorCode?: string | null;
+      rawBodySample?: string;
+    }).provider = "the-odds-api";
+    (err as Error & { status?: number }).status = res.status;
+    (err as Error & { errorCode?: string | null }).errorCode = errorCode;
+    (err as Error & { rawBodySample?: string }).rawBodySample = body.slice(0, 400);
+    throw err;
   }
 
   const raw = await res.json();
@@ -204,7 +234,10 @@ async function getOddsFromOddsApiIo(
     const eventsRes = await fetch(eventsUrl);
     if (!eventsRes.ok) {
       const body = await eventsRes.text().catch(() => "");
-      throw new Error(`odds-api-io events ${eventsRes.status}: ${body}`);
+      const err = new Error(`odds-api-io events ${eventsRes.status}: ${body.slice(0, 400)}`);
+      (err as Error & { provider?: string; status?: number }).provider = "odds-api-io";
+      (err as Error & { status?: number }).status = eventsRes.status;
+      throw err;
     }
     const eventsData = await eventsRes.json();
     const eventsList = Array.isArray(eventsData) ? eventsData : (eventsData.data || []);
@@ -453,6 +486,8 @@ serve(async (req) => {
     let odds: NormalizedOdds[] | null = null;
     let provider = "none";
     let fallbackUsed = false;
+    let primaryFailure: ProviderFailureInfo | null = null;
+    let backupFailure: ProviderFailureInfo | null = null;
 
     const PRIMARY_KEY = Deno.env.get("ODDS_API_KEY");
     if (PRIMARY_KEY) {
@@ -463,6 +498,14 @@ serve(async (req) => {
         console.log(`[get-odds] Primary returned ${odds.length} entries`);
       } catch (e) {
         console.error(`[get-odds] Primary failed:`, e);
+        primaryFailure = {
+          provider: "the-odds-api",
+          status: typeof (e as { status?: unknown })?.status === "number" ? (e as { status: number }).status : null,
+          errorCode: typeof (e as { errorCode?: unknown })?.errorCode === "string"
+            ? (e as { errorCode: string }).errorCode
+            : null,
+          message: e instanceof Error ? e.message : String(e),
+        };
       }
     }
 
@@ -486,6 +529,14 @@ serve(async (req) => {
           console.log(`[get-odds] Backup returned ${odds.length} entries`);
         } catch (e) {
           console.error(`[get-odds] Backup failed:`, e);
+          backupFailure = {
+            provider: "odds-api-io",
+            status: typeof (e as { status?: unknown })?.status === "number" ? (e as { status: number }).status : null,
+            errorCode: typeof (e as { errorCode?: unknown })?.errorCode === "string"
+              ? (e as { errorCode: string }).errorCode
+              : null,
+            message: e instanceof Error ? e.message : String(e),
+          };
         }
       }
     }
@@ -507,6 +558,13 @@ serve(async (req) => {
           fallbackUsed,
           fromCache: false,
           count: odds.length,
+          quotaExhausted: primaryFailure?.errorCode === "OUT_OF_USAGE_CREDITS",
+          providerUnavailableReason:
+            primaryFailure?.errorCode === "OUT_OF_USAGE_CREDITS"
+              ? "OUT_OF_USAGE_CREDITS"
+              : null,
+          primaryError: primaryFailure,
+          backupError: backupFailure,
         },
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -524,6 +582,13 @@ serve(async (req) => {
           fallbackUsed: true,
           fromCache: true,
           count: cached.stale.length,
+          quotaExhausted: primaryFailure?.errorCode === "OUT_OF_USAGE_CREDITS",
+          providerUnavailableReason:
+            primaryFailure?.errorCode === "OUT_OF_USAGE_CREDITS"
+              ? "OUT_OF_USAGE_CREDITS"
+              : null,
+          primaryError: primaryFailure,
+          backupError: backupFailure,
         },
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -533,6 +598,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       ok: false,
       data: [],
+      error_code: primaryFailure?.errorCode ?? null,
       meta: {
         provider: "none",
         fetchedAt: new Date().toISOString(),
@@ -540,8 +606,18 @@ serve(async (req) => {
         fallbackUsed: true,
         fromCache: false,
         count: 0,
+        quotaExhausted: primaryFailure?.errorCode === "OUT_OF_USAGE_CREDITS",
+        providerUnavailableReason:
+          primaryFailure?.errorCode === "OUT_OF_USAGE_CREDITS"
+            ? "OUT_OF_USAGE_CREDITS"
+            : null,
+        primaryError: primaryFailure,
+        backupError: backupFailure,
       },
-      error: "No odds available from any provider or cache",
+      error:
+        primaryFailure?.errorCode === "OUT_OF_USAGE_CREDITS"
+          ? "The Odds API quota is exhausted."
+          : "No odds available from any provider or cache",
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e) {
