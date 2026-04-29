@@ -991,7 +991,7 @@ serve(async (req) => {
           status: target.candidate.status,
           commence_time_iso: target.candidate.commence_time_iso,
         }))
-      : propSourceGames.slice(0, 5).map((game) => ({
+      : propSourceGames.map((game) => ({
           gameDate: gameIdToDate.get(game.id) || todayStr,
           targetKey: String(game.id),
           oddsEvents: [game],
@@ -1024,7 +1024,7 @@ serve(async (req) => {
             marketsAttempted += requestedMarkets.length;
             marketsAttemptedByEvent[String(game.id)].push(marketRequest);
 
-            if (diagnoseProps && sport === "NBA") {
+            if (diagnoseProps) {
               providerDiagnosticsByEvent[`${game.id}:${marketRequest}`] =
                 await fetchTheOddsApiEventDiagnostic(cfg.oddsApiSport, String(game.id), marketRequest);
             }
