@@ -437,10 +437,6 @@ export default function AIBetBuilderPage() {
   const handleSubmit = (overridePrompt?: string) => {
     const p = (overridePrompt ?? prompt).trim();
     if (!p) return;
-    if (!user) {
-      navigate("/auth?redirect=/ai-builder");
-      return;
-    }
     setHasInteracted(true);
     const slipCount = isPremium ? filters.slipCount : 1;
     buildSlips(p, slipCount, { ...filters, sport });
@@ -713,10 +709,15 @@ export default function AIBetBuilderPage() {
                 <p className="text-sm text-muted-foreground">
                   Try one of the suggestions above or type your own request
                 </p>
+                {!user && (
+                  <p className="text-xs text-muted-foreground">
+                    You can generate a slip while logged out. Log in if you want to save it.
+                  </p>
+                )}
               </div>
               {!user && (
-                <Button className="w-full" onClick={() => navigate("/auth")}>
-                  Log in to get started
+                <Button variant="outline" className="w-full" onClick={() => navigate("/auth?redirect=/ai-builder")}>
+                  Log in to save slips
                 </Button>
               )}
             </CardContent>

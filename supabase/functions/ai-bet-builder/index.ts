@@ -671,7 +671,7 @@ interface MlbBuilderArgs {
   supabase: any;
   // deno-lint-ignore no-explicit-any
   serviceClient: any;
-  userId: string;
+  userId: string | null;
   isPremium: boolean;
   gameDate: string;
   requestedGameDate: string;
@@ -1241,7 +1241,7 @@ async function mlbDeterministicFallback(
 }
 
 // deno-lint-ignore no-explicit-any
-async function persistMlbSlips(supabase: any, slips: any[], prompt: string, userId: string): Promise<any[]> {
+async function persistMlbSlips(supabase: any, slips: any[], prompt: string, userId: string | null): Promise<any[]> {
   const out: any[] = [];
   for (const slip of slips) {
     const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
@@ -1326,11 +1326,8 @@ serve(async (req) => {
 
     // --- Auth & usage limits ---
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return failureResponse("AUTH_REQUIRED", "Authentication required. Please log in.", debug, {}, 401);
-    }
     let isPremium = false;
-    {
+    if (user) {
       const { data: flags } = await supabase.from("user_flags").select("is_premium").eq("user_id", user.id).single();
       isPremium = flags?.is_premium ?? false;
       if (!isPremium) {
@@ -1385,7 +1382,7 @@ serve(async (req) => {
         slipCount,
         supabase,
         serviceClient,
-        userId: user.id,
+        userId: user?.id ?? null,
         isPremium,
         gameDate: effectiveMlbDate,
         requestedGameDate: todayStr,
