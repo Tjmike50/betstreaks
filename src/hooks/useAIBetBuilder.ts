@@ -53,6 +53,31 @@ export interface AIBuildAvailableGame {
 
 export type ErrorType = "credits" | "limit" | "auth" | "no-data" | "network" | "generic";
 
+function humanizeBuilderNoDataMessage(data: any): string {
+  const message = data?.message || "No eligible props found for this slate yet. Try all games or refresh odds.";
+  const debug = data?.debug || {};
+  const requestedSport = String(debug?.sport || "").toUpperCase();
+  const latestAvailableGameDate = debug?.latest_available_game_date || null;
+  const quotaExhausted = debug?.quota_exhausted === true;
+  const providerUnavailableReason = debug?.provider_unavailable_reason || null;
+  const verifiedCandidateCount = Number(debug?.verified_market_candidate_count ?? 0);
+
+  if (requestedSport === "MLB") {
+    if (quotaExhausted || providerUnavailableReason === "OUT_OF_USAGE_CREDITS") {
+      return latestAvailableGameDate
+        ? `Verified MLB live lines are temporarily unavailable because the odds provider quota is exhausted. Latest available scored MLB slate: ${latestAvailableGameDate}. Try again after odds refresh or on the next slate.`
+        : "Verified MLB live lines are temporarily unavailable because the odds provider quota is exhausted. Try again after odds refresh or on the next slate.";
+    }
+    if (verifiedCandidateCount === 0) {
+      return latestAvailableGameDate
+        ? `No verified MLB live props are available for this slate yet. Latest available scored MLB slate: ${latestAvailableGameDate}. Try again after odds refresh or on the next slate.`
+        : "No verified MLB live props are available for this slate yet. Try again after odds refresh or on the next slate.";
+    }
+  }
+
+  return message;
+}
+
 export function useAIBetBuilder() {
   const [slips, setSlips] = useState<AISlip[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -148,10 +173,11 @@ export function useAIBetBuilder() {
           return;
         }
         if (errorCode === "SCHEDULE_EMPTY" || errorCode === "NO_CANDIDATES" || errorCode === "GAME_NOT_FOUND") {
-          setError(message);
+          const humanMessage = humanizeBuilderNoDataMessage(data);
+          setError(humanMessage);
           setErrorType("no-data");
           setAvailableGames(responseAvailableGames);
-          toast({ title: "No data available", description: message, variant: "destructive" });
+          toast({ title: "No data available", description: humanMessage, variant: "destructive" });
           return;
         }
         if (errorCode === "AI_PROVIDER_FAILED") {
@@ -191,12 +217,13 @@ export function useAIBetBuilder() {
       }
 
       if (nextSlips.length === 0) {
-        setError(data?.message || "No eligible props found for this slate yet. Try all games or refresh odds.");
+        const humanMessage = humanizeBuilderNoDataMessage(data);
+        setError(humanMessage);
         setErrorType("no-data");
         setAvailableGames(Array.isArray(data?.available_games) ? data.available_games : []);
         toast({
           title: "No slips generated",
-          description: data?.message || "No eligible props found for this slate yet. Try all games or refresh odds.",
+          description: humanMessage,
           variant: "destructive",
         });
         return;

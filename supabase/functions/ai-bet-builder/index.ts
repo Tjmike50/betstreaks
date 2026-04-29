@@ -674,6 +674,7 @@ interface MlbBuilderArgs {
   userId: string;
   isPremium: boolean;
   gameDate: string;
+  requestedGameDate: string;
 }
 
 const MLB_AI_GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
@@ -681,8 +682,31 @@ const MLB_AI_MODEL = "google/gemini-3-flash-preview";
 type VerifiedMlbOdds = Awaited<ReturnType<typeof enrichMlbAnchorLegs>>[number];
 
 async function handleMlbBuilder(args: MlbBuilderArgs): Promise<Response> {
-  const { prompt, slipCount, supabase, serviceClient, userId, isPremium, gameDate } = args;
+  const { prompt, slipCount, supabase, serviceClient, userId, isPremium, gameDate, requestedGameDate } = args;
   const startedAt = Date.now();
+  const latestAvailableGameDate = gameDate !== requestedGameDate ? gameDate : null;
+  let providerUnavailableReason: string | null = null;
+  let quotaExhausted = false;
+
+  try {
+    const { data: quotaAlerts } = await serviceClient
+      .from("backend_alerts")
+      .select("metadata, created_at")
+      .eq("sport", "MLB")
+      .eq("alert_type", "odds_api_quota_exhausted")
+      .or("resolved.is.false,resolved.is.null")
+      .gte("created_at", `${gameDate}T00:00:00-04:00`)
+      .lt("created_at", `${gameDate}T23:59:59-04:00`)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if ((quotaAlerts?.length ?? 0) > 0) {
+      providerUnavailableReason = "OUT_OF_USAGE_CREDITS";
+      quotaExhausted = true;
+    }
+  } catch (e) {
+    console.warn("[AI-Builder/MLB] failed to read quota alert state:", e);
+  }
 
   const scoredCandidates = await getMlbBuilderCandidates(serviceClient, {
     gameDate,
@@ -711,12 +735,16 @@ async function handleMlbBuilder(args: MlbBuilderArgs): Promise<Response> {
       {
         sport: "MLB",
         game_date: gameDate,
+        requested_game_date: requestedGameDate,
+        latest_available_game_date: latestAvailableGameDate,
         candidate_count: 0,
         verified_market_candidate_count: 0,
         unmatched_candidate_count: 0,
         rejected_unmatched_market_count: 0,
         candidates_by_team: {},
         candidates_by_stat_type: {},
+        provider_unavailable_reason: providerUnavailableReason,
+        quota_exhausted: quotaExhausted,
         fallback_used: false,
         no_candidates_reason: "empty_scored_candidate_feed",
       },
@@ -774,16 +802,22 @@ async function handleMlbBuilder(args: MlbBuilderArgs): Promise<Response> {
   if (verifiedMarketCandidateCount === 0) {
     return failureResponse(
       "NO_CANDIDATES",
-      "No verified MLB live props are available for this slate yet. Try again after line snapshots refresh.",
+      quotaExhausted
+        ? `No verified MLB live props are available right now because the odds provider quota is exhausted.${latestAvailableGameDate ? ` Latest available MLB scored slate: ${latestAvailableGameDate}.` : ""} Try again after odds refresh or on the next slate.`
+        : `No verified MLB live props are available for this slate yet.${latestAvailableGameDate ? ` Latest available MLB scored slate: ${latestAvailableGameDate}.` : ""} Try again after line snapshots refresh.`,
       {
         sport: "MLB",
         game_date: gameDate,
+        requested_game_date: requestedGameDate,
+        latest_available_game_date: latestAvailableGameDate,
         candidate_count: candidateCount,
         verified_market_candidate_count: 0,
         unmatched_candidate_count: unmatchedCandidateCount,
         rejected_unmatched_market_count: unmatchedCandidateCount,
         candidates_by_team: candidateCountByTeam,
         candidates_by_stat_type: candidateCountByStatType,
+        provider_unavailable_reason: providerUnavailableReason,
+        quota_exhausted: quotaExhausted,
         fallback_used: false,
         no_candidates_reason: "no_verified_market_matches",
       },
@@ -1031,12 +1065,16 @@ Return strict JSON with shape:
       {
         sport: "MLB",
         game_date: gameDate,
+        requested_game_date: requestedGameDate,
+        latest_available_game_date: latestAvailableGameDate,
         candidate_count: candidateCount,
         verified_market_candidate_count: verifiedMarketCandidateCount,
         unmatched_candidate_count: unmatchedCandidateCount,
         rejected_unmatched_market_count: unmatchedCandidateCount,
         candidates_by_team: verifiedCandidatesByTeam,
         candidates_by_stat_type: verifiedCandidatesByStatType,
+        provider_unavailable_reason: providerUnavailableReason,
+        quota_exhausted: quotaExhausted,
         fallback_used: false,
         no_candidates_reason: "llm_returned_no_valid_verified_slips",
       },
@@ -1060,12 +1098,16 @@ Return strict JSON with shape:
       scoring_metadata: {
         sport: "MLB",
         game_date: gameDate,
+        requested_game_date: requestedGameDate,
+        latest_available_game_date: latestAvailableGameDate,
         candidate_count: candidateCount,
         verified_market_candidate_count: verifiedMarketCandidateCount,
         unmatched_candidate_count: unmatchedCandidateCount,
         rejected_unmatched_market_count: unmatchedCandidateCount,
         candidates_by_team: verifiedCandidatesByTeam,
         candidates_by_stat_type: verifiedCandidatesByStatType,
+        provider_unavailable_reason: providerUnavailableReason,
+        quota_exhausted: quotaExhausted,
         verified_prop_candidates: verifiedMarketCandidateCount,
         verified_candidates_passed_to_llm: Math.min(verifiedMarketCandidateCount, 40),
         candidates_after_diversity: verifiedMarketCandidateCount,
@@ -1086,6 +1128,8 @@ Return strict JSON with shape:
       debug: {
         sport: "MLB",
         game_date: gameDate,
+        requested_game_date: requestedGameDate,
+        latest_available_game_date: latestAvailableGameDate,
         duration_ms: Date.now() - startedAt,
         candidate_count: candidateCount,
         verified_market_candidate_count: verifiedMarketCandidateCount,
@@ -1093,6 +1137,8 @@ Return strict JSON with shape:
         rejected_unmatched_market_count: unmatchedCandidateCount,
         candidates_by_team: verifiedCandidatesByTeam,
         candidates_by_stat_type: verifiedCandidatesByStatType,
+        provider_unavailable_reason: providerUnavailableReason,
+        quota_exhausted: quotaExhausted,
       },
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -1105,7 +1151,7 @@ async function mlbDeterministicFallback(
   candidates: MlbCandidate[],
   startedAt: number,
 ): Promise<Response> {
-  const { supabase, serviceClient, userId, isPremium, gameDate, prompt, slipCount } = args;
+  const { supabase, serviceClient, userId, isPremium, gameDate, requestedGameDate, prompt, slipCount } = args;
   const targetLegs = 3;
   const slips: any[] = [];
 
@@ -1149,12 +1195,20 @@ async function mlbDeterministicFallback(
   }
 
   if (slips.length === 0) {
-    return new Response(
-      JSON.stringify({
-        error: "no_candidates",
-        message: "MLB fallback could not assemble any slips.",
-      }),
-      { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    return failureResponse(
+      "NO_CANDIDATES",
+      "MLB fallback could not assemble any verified slips.",
+      {
+        sport: "MLB",
+        game_date: gameDate,
+        requested_game_date: requestedGameDate,
+        candidate_count: candidates.length,
+        verified_market_candidate_count: candidates.length,
+        unmatched_candidate_count: 0,
+        rejected_unmatched_market_count: 0,
+        fallback_used: true,
+        no_candidates_reason: "fallback_could_not_assemble_slips",
+      },
     );
   }
 
@@ -1173,13 +1227,14 @@ async function mlbDeterministicFallback(
       scoring_metadata: {
         sport: "MLB",
         game_date: gameDate,
+        requested_game_date: requestedGameDate,
         mode: "mlb_v1_anchor_fallback",
         fallback_used: true,
         scoring_data_available: candidates.length,
         scoring_source: "today",
         market_quality: null,
       },
-      debug: { sport: "MLB", game_date: gameDate, duration_ms: Date.now() - startedAt },
+      debug: { sport: "MLB", game_date: gameDate, requested_game_date: requestedGameDate, duration_ms: Date.now() - startedAt },
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
@@ -1309,6 +1364,22 @@ serve(async (req) => {
     // already produced by score-mlb-anchors). Odds enrichment + verified
     // market validation will be added once collect-line-snapshots handles MLB.
     if (sport === "MLB") {
+      let effectiveMlbDate = todayStr;
+      try {
+        const { data: latestMlbRows } = await serviceClient
+          .from("player_prop_scores")
+          .select("game_date")
+          .eq("sport", "MLB")
+          .not("score_overall", "is", null)
+          .lte("game_date", todayStr)
+          .order("game_date", { ascending: false })
+          .limit(1);
+        const latestMlbDate = latestMlbRows?.[0]?.game_date ?? null;
+        if (latestMlbDate) effectiveMlbDate = latestMlbDate;
+      } catch (e) {
+        console.warn("[AI-Builder/MLB] latest available date lookup failed:", e);
+      }
+
       return await handleMlbBuilder({
         prompt,
         slipCount,
@@ -1316,7 +1387,8 @@ serve(async (req) => {
         serviceClient,
         userId: user.id,
         isPremium,
-        gameDate: todayStr,
+        gameDate: effectiveMlbDate,
+        requestedGameDate: todayStr,
       });
     }
 
