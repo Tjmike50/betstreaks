@@ -1,5 +1,5 @@
 // ============================================================
-// BetStreaks — MLB Anchor Scoring v1
+// BetStreaks — MLB Anchor Scoring v2
 //
 // Scores 3 anchor MLB props for the slate of the requested
 // game_date and writes results into the shared player_prop_scores
@@ -12,11 +12,10 @@
 // Design goals
 //   1. Reuse multi-sport scoring contract (player_prop_scores).
 //   2. Read only from MLB tables already created.
-//   3. Keep v1 lightweight: deterministic numeric axes, no ML.
+//   3. Keep the scorer deterministic and explainable; no black-box ML.
 //   4. Be safe when data is missing — every axis falls back to
 //      a neutral 50 so "no data" never produces a confident pick.
-//   5. Per-prop weight profiles match the spec the product team
-//      locked for v1 (see WEIGHT_PROFILES below).
+//   5. Per-prop weight profiles remain explicit and auditable.
 //
 // What this function does:
 //   - Reads line_snapshots for the date filtered by MLB markets.
@@ -29,14 +28,14 @@
 //   - Computes the 7 score axes + overall + tier + summary_json.
 //   - Upserts rows into player_prop_scores with sport='MLB'.
 //
-// What is intentionally stubbed for v1:
+// What is intentionally still conservative / stubbed in v2:
 //   - Park factor / weather adjustments are read but only used
 //     when game_context_json contains a numeric `park_factor`
 //     or `wind_out_mph` field. Otherwise they no-op.
 //   - Lineup confirmation (player_availability) is consulted only
 //     to drop OUT players, not to boost confidence.
-//   - Odds-line value scoring uses simple distance from rolling
-//     mean vs threshold; no implied probability math yet.
+//   - Odds-line value scoring is still threshold-distance-first;
+//     no full implied-probability market model yet.
 //
 // Entry point: POST /functions/v1/score-mlb-anchors
 //   Body: { game_date?: "YYYY-MM-DD" }   (defaults to today ET)
@@ -56,8 +55,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ── v1 props (anchors + 4 expansion props) ──
-// Anchors: HITS, TOTAL_BASES, STRIKEOUTS (battle-tested in anchor-v1).
+// ── Props in scope (anchors + 4 expansion props) ──
+// Anchors: HITS, TOTAL_BASES, STRIKEOUTS.
 // Expansion: HOME_RUNS, EARNED_RUNS_ALLOWED, WALKS_ALLOWED, HITS_ALLOWED
 //   — same scoring framework, prop-specific matchup + risk weights.
 const ANCHOR_KEYS: MlbStatKey[] = [
@@ -106,7 +105,7 @@ const WEIGHT_PROFILES: Record<MlbStatKey, WeightProfile> = {
     value: 0.10,
     risk_penalty: 0.12,
   },
-  // Expansion props (v1, scored alongside anchors with prop-specific weights).
+  // Expansion props, scored alongside anchors with prop-specific weights.
   // HOME_RUNS — high variance: prioritize matchup + value, heavy risk penalty.
   HOME_RUNS:           { recent_form: 0.20, matchup: 0.28, opportunity: 0.12, consistency: 0.05, value: 0.25, risk_penalty: 0.30 },
   // EARNED_RUNS_ALLOWED — prioritize matchup + recent form + workload, blow-up penalty.
@@ -735,6 +734,165 @@ function scoreValue(
   return { score, note: `gap=${round1(gapPct * 100)}%` };
 }
 
+function incrementCount(counter: Record<string, number>, key: string, by = 1): void {
+  counter[key] = (counter[key] || 0) + by;
+}
+
+function pushUniqueTag(tags: string[], tag: string): void {
+  if (!tags.includes(tag)) tags.push(tag);
+}
+
+function averageDefined(values: Array<number | null | undefined>): number | null {
+  const valid = values.filter((value): value is number => value != null && Number.isFinite(value));
+  if (valid.length === 0) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function weightedAverageScore(parts: Array<{ score: number | null | undefined; weight: number }>): number | null {
+  let total = 0;
+  let weightUsed = 0;
+  for (const part of parts) {
+    if (part.score == null || !Number.isFinite(part.score) || part.weight <= 0) continue;
+    total += part.score * part.weight;
+    weightUsed += part.weight;
+  }
+  if (weightUsed === 0) return null;
+  return clamp(total / weightUsed);
+}
+
+function scoreThresholdEdge(
+  threshold: number,
+  averages: Array<{ label: string; value: number | null; weight: number }>,
+  hitRates: Array<{ label: string; value: number | null; weight: number }>,
+): { score: number; note: string; hasContext: boolean } {
+  const notes: string[] = [];
+  const parts: Array<{ score: number; weight: number }> = [];
+
+  for (const sample of averages) {
+    if (sample.value == null || threshold <= 0) continue;
+    const ratio = sample.value / threshold;
+    const sampleScore = clamp(34 + (ratio - 0.55) * 44);
+    parts.push({ score: sampleScore, weight: sample.weight });
+    notes.push(`${sample.label}=${round1(sample.value)}`);
+  }
+
+  for (const sample of hitRates) {
+    if (sample.value == null) continue;
+    const sampleScore = clamp(28 + sample.value * 68);
+    parts.push({ score: sampleScore, weight: sample.weight });
+    notes.push(`${sample.label}=${round1(sample.value * 100)}%`);
+  }
+
+  const score = weightedAverageScore(parts);
+  if (score == null) {
+    return { score: NEUTRAL, note: "threshold edge neutral", hasContext: false };
+  }
+  return { score, note: notes.join(" "), hasContext: true };
+}
+
+function scorePitcherWorkloadTrend(
+  ipL3: number | null,
+  ipL5: number | null,
+  bfL3: number | null,
+  bfL5: number | null,
+): { score: number; note: string; hasContext: boolean } {
+  const ipAvg = averageDefined([ipL3, ipL5]);
+  const bfAvg = averageDefined([bfL3, bfL5]);
+  if (ipAvg == null && bfAvg == null) {
+    return { score: NEUTRAL, note: "pitcher workload neutral", hasContext: false };
+  }
+  const ipScore = ipAvg != null ? clamp(22 + ipAvg * 8) : null;
+  const bfScore = bfAvg != null ? clamp(18 + bfAvg * 2.15) : null;
+  const score = weightedAverageScore([
+    { score: ipScore, weight: 0.55 },
+    { score: bfScore, weight: 0.45 },
+  ]) ?? NEUTRAL;
+  const notes: string[] = [];
+  if (ipAvg != null) notes.push(`ip≈${round1(ipAvg)}`);
+  if (bfAvg != null) notes.push(`bf≈${round1(bfAvg)}`);
+  return { score, note: notes.join(" "), hasContext: true };
+}
+
+function adjustForParkWeather(
+  baseScore: number,
+  ctx: MlbGameContext | null,
+  mode: "hitter_contact" | "hitter_power" | "pitcher_contact_allowed" | "pitcher_runs_allowed" | "pitcher_strikeouts",
+): { score: number; note: string; usedPark: boolean; usedWeather: boolean } {
+  let score = baseScore;
+  const notes: string[] = [];
+  let usedPark = false;
+  let usedWeather = false;
+  const parkFactor = ctx?.game_context_json?.park_factor;
+  const windOutMph = ctx?.game_context_json?.wind_out_mph;
+
+  if (typeof parkFactor === "number" && Number.isFinite(parkFactor)) {
+    usedPark = true;
+    const delta =
+      mode === "pitcher_strikeouts"
+        ? (1 - parkFactor) * 10
+        : mode === "pitcher_contact_allowed" || mode === "pitcher_runs_allowed"
+        ? (parkFactor - 1) * 16
+        : mode === "hitter_power"
+        ? (parkFactor - 1) * 24
+        : (parkFactor - 1) * 14;
+    score = clamp(score + delta);
+    notes.push(`park=${round1(parkFactor)}`);
+  }
+
+  if (typeof windOutMph === "number" && Number.isFinite(windOutMph)) {
+    usedWeather = true;
+    const cappedWind = Math.max(-12, Math.min(12, windOutMph));
+    const delta =
+      mode === "pitcher_runs_allowed"
+        ? cappedWind * 0.6
+        : mode === "pitcher_contact_allowed"
+        ? cappedWind * 0.35
+        : mode === "hitter_power"
+        ? cappedWind * 0.75
+        : mode === "hitter_contact"
+        ? cappedWind * 0.25
+        : cappedWind * -0.15;
+    score = clamp(score + delta);
+    notes.push(`wind=${round1(cappedWind)}`);
+  }
+
+  return {
+    score,
+    note: notes.join(" "),
+    usedPark,
+    usedWeather,
+  };
+}
+
+function applyConservativeConfidenceCap(
+  statKey: MlbStatKey,
+  overall: number,
+  missingCriticalContexts: string[],
+  riskScore: number,
+  lineQualityTier?: LineQualityMetrics["line_quality_tier"] | null,
+): { score: number; capped: boolean; reason: string | null } {
+  let cap: number | null = null;
+  if (missingCriticalContexts.length >= 3) cap = 62;
+  else if (missingCriticalContexts.length >= 2) cap = 68;
+  else if (missingCriticalContexts.length === 1 && lineQualityTier === "weak") cap = 71;
+
+  if ((statKey === "HOME_RUNS" || statKey === "WALKS_ALLOWED") && riskScore >= 70) {
+    cap = cap == null ? 69 : Math.min(cap, 69);
+  }
+  if ((statKey === "EARNED_RUNS_ALLOWED" || statKey === "HITS_ALLOWED") && riskScore >= 72) {
+    cap = cap == null ? 70 : Math.min(cap, 70);
+  }
+
+  if (cap != null && overall > cap) {
+    return {
+      score: cap,
+      capped: true,
+      reason: `missing:${missingCriticalContexts.join(",")}${lineQualityTier ? ` line:${lineQualityTier}` : ""}`,
+    };
+  }
+  return { score: overall, capped: false, reason: null };
+}
+
 // ── Types for the data we read ──
 interface RollingRow {
   player_id: number;
@@ -1266,6 +1424,23 @@ serve(async (req) => {
   let lineQualityEliteCount = 0;
   let nullTeamAbbrScoreCount = 0;
   const nullTeamAbbrReasons: Record<string, number> = {};
+  const contextUsedCounts: Record<string, number> = {};
+  const contextMissingCounts: Record<string, number> = {};
+  const cappedConfidenceCounts: Record<string, number> = {};
+  const fallbackNeutralContextCounts: Record<string, number> = {};
+  const weightsAppliedByStatType = Object.fromEntries(
+    ANCHOR_KEYS.map((key) => [
+      key,
+      {
+        ...WEIGHT_PROFILES[key],
+        v2_adjustments: [
+          "threshold_edge_blend",
+          "line_quality_value_blend",
+          "conservative_missing_context_caps",
+        ],
+      },
+    ]),
+  );
 
   for (const line of lines) {
     const statKey = oddsToStatKey[line.stat_type];
@@ -1278,6 +1453,8 @@ serve(async (req) => {
     let strikeoutContext: StrikeoutsContext | null = null;
     let strikeoutOpponentOff: TeamOffenseRow | null = null;
     let pitcherSideContext: PitcherSideContext | null = null;
+    const extraReasonTags: string[] = [];
+    const missingCriticalContexts: string[] = [];
 
     // Recent form, consistency, risk, value (shared across props).
     const rf = scoreRecentForm(rolling, line.threshold);
@@ -1285,9 +1462,32 @@ serve(async (req) => {
     const rk = scoreRisk(rolling, sampleSize);
     const vl = scoreValue(rolling, line.threshold);
 
+    if (rolling) incrementCount(contextUsedCounts, "rolling_stats");
+    else {
+      incrementCount(contextMissingCounts, "rolling_stats");
+      incrementCount(fallbackNeutralContextCounts, "rolling_stats");
+      pushUniqueTag(extraReasonTags, "context_missing_neutral");
+    }
+
     // Opportunity + matchup vary by role.
     let opp: { score: number; note: string };
     let mu: { score: number; note: string };
+
+    const rawMarketKey = MLB_MARKET_MAP[statKey].oddsApiMarket;
+    const lineQualityRows = snapshotGroupsByPlayerMarket.get(`${line.player_id}|${rawMarketKey}`) ?? [];
+    let lineQuality: LineQualityMetrics | null = null;
+    if (lineQualityRows.length > 0) {
+      lineQuality = computeLineQualityMetrics(lineQualityRows, line.threshold);
+      lineQualityEnhancedCount++;
+      incrementCount(contextUsedCounts, "line_quality");
+      if (lineQuality.line_quality_tier === "weak") lineQualityWeakCount++;
+      if (lineQuality.line_quality_tier === "elite") lineQualityEliteCount++;
+    } else {
+      lineQualityMissingCount++;
+      incrementCount(contextMissingCounts, "line_quality");
+      incrementCount(fallbackNeutralContextCounts, "line_quality");
+      pushUniqueTag(extraReasonTags, "context_missing_neutral");
+    }
 
     if (isPitcherProp) {
       const logs = pitcherLogsByPlayer.get(line.player_id!) ?? [];
@@ -1316,6 +1516,25 @@ serve(async (req) => {
           strikeoutContext = buildStrikeoutsContext(logs, line.threshold, oppOff?.strikeout_rate ?? null);
           const enhancedRf = scoreRecentFormStrikeouts(strikeoutContext, rolling, line.threshold);
           const enhancedOpp = scoreOpportunityStrikeouts(strikeoutContext);
+          const thresholdEdge = scoreThresholdEdge(
+            line.threshold,
+            [
+              { label: "kL3", value: strikeoutContext.k_l3_avg, weight: 0.35 },
+              { label: "kL5", value: strikeoutContext.k_l5_avg, weight: 0.35 },
+              { label: "kL10", value: strikeoutContext.k_l10_avg, weight: 0.15 },
+              { label: "rollL10", value: rolling?.window_l10_avg ?? null, weight: 0.15 },
+            ],
+            [
+              { label: "overL5", value: strikeoutContext.over_line_l5_rate, weight: 0.65 },
+              { label: "overL10", value: strikeoutContext.over_line_l10_rate, weight: 0.35 },
+            ],
+          );
+          const workloadScore = scorePitcherWorkloadTrend(
+            strikeoutContext.ip_l3_avg,
+            strikeoutContext.ip_l5_avg,
+            strikeoutContext.bf_l3_avg,
+            strikeoutContext.bf_l5_avg,
+          );
           rf.score = enhancedRf.score;
           rf.note = enhancedRf.note;
           if (sampleSize < 5) {
@@ -1327,9 +1546,48 @@ serve(async (req) => {
               rf.note = `${rf.note} +K-stabilize(season=${round1(seasonK)})`;
             }
           }
-          opp.score = enhancedOpp.score;
-          opp.note = enhancedOpp.note;
+          rf.score = weightedAverageScore([
+            { score: rf.score, weight: 0.72 },
+            { score: thresholdEdge.score, weight: thresholdEdge.hasContext ? 0.28 : 0 },
+          ]) ?? rf.score;
+          if (thresholdEdge.hasContext) {
+            incrementCount(contextUsedCounts, "threshold_edge_strikeouts");
+            pushUniqueTag(extraReasonTags, "threshold_edge");
+            rf.note = `${rf.note} | edge=${thresholdEdge.note}`;
+          } else {
+            incrementCount(contextMissingCounts, "threshold_edge_strikeouts");
+            incrementCount(fallbackNeutralContextCounts, "threshold_edge_strikeouts");
+          }
+
+          opp.score = weightedAverageScore([
+            { score: enhancedOpp.score, weight: 0.72 },
+            { score: workloadScore.score, weight: workloadScore.hasContext ? 0.28 : 0 },
+          ]) ?? enhancedOpp.score;
+          opp.note = workloadScore.hasContext ? `${enhancedOpp.note} | workload=${workloadScore.note}` : enhancedOpp.note;
+
           mu = scoreMatchupPitcher(strikeoutContext.opponent_k_rate, pitcherCtx);
+          const parkWeatherAdjustment = adjustForParkWeather(mu.score, pitcherCtx, "pitcher_strikeouts");
+          mu.score = parkWeatherAdjustment.score;
+          if (parkWeatherAdjustment.note) mu.note = `${mu.note} ${parkWeatherAdjustment.note}`.trim();
+          if (parkWeatherAdjustment.usedPark) incrementCount(contextUsedCounts, "park_factor");
+          else incrementCount(contextMissingCounts, "park_factor");
+          if (parkWeatherAdjustment.usedWeather) incrementCount(contextUsedCounts, "weather");
+          else incrementCount(contextMissingCounts, "weather");
+
+          if (workloadScore.hasContext) {
+            incrementCount(contextUsedCounts, "pitcher_workload");
+            pushUniqueTag(extraReasonTags, "pitcher_workload");
+          } else {
+            incrementCount(contextMissingCounts, "pitcher_workload");
+            incrementCount(fallbackNeutralContextCounts, "pitcher_workload");
+            missingCriticalContexts.push("workload");
+          }
+          if (strikeoutContext.opponent_k_rate != null) incrementCount(contextUsedCounts, "opponent_offense_tendency");
+          else {
+            incrementCount(contextMissingCounts, "opponent_offense_tendency");
+            incrementCount(fallbackNeutralContextCounts, "opponent_offense_tendency");
+            missingCriticalContexts.push("opponent_tendency");
+          }
 
           const hasRecentKContext =
             strikeoutContext.k_l5_avg != null ||
@@ -1352,12 +1610,58 @@ serve(async (req) => {
           {
             const enhancedRf = scoreRecentFormPitcherSide(pitcherSideContext, rolling, line.threshold, "bb");
             const enhancedOpp = scoreOpportunityPitcherSide(pitcherSideContext);
-            rf.score = enhancedRf.score;
-            rf.note = enhancedRf.note;
-            opp.score = enhancedOpp.score;
-            opp.note = enhancedOpp.note;
+            const thresholdEdge = scoreThresholdEdge(
+              line.threshold,
+              [
+                { label: "bbL3", value: pitcherSideContext.stat_l3_avg, weight: 0.30 },
+                { label: "bbL5", value: pitcherSideContext.stat_l5_avg, weight: 0.35 },
+                { label: "bbL10", value: pitcherSideContext.stat_l10_avg, weight: 0.15 },
+                { label: "rollL10", value: rolling?.window_l10_avg ?? null, weight: 0.20 },
+              ],
+              [
+                { label: "overL5", value: pitcherSideContext.over_line_l5_rate, weight: 0.65 },
+                { label: "overL10", value: pitcherSideContext.over_line_l10_rate, weight: 0.35 },
+              ],
+            );
+            const workloadScore = scorePitcherWorkloadTrend(
+              pitcherSideContext.ip_l3_avg,
+              pitcherSideContext.ip_l5_avg,
+              pitcherSideContext.bf_l3_avg,
+              pitcherSideContext.bf_l5_avg,
+            );
+            rf.score = weightedAverageScore([
+              { score: enhancedRf.score, weight: 0.7 },
+              { score: thresholdEdge.score, weight: thresholdEdge.hasContext ? 0.3 : 0 },
+            ]) ?? enhancedRf.score;
+            rf.note = thresholdEdge.hasContext ? `${enhancedRf.note} | edge=${thresholdEdge.note}` : enhancedRf.note;
+            opp.score = weightedAverageScore([
+              { score: enhancedOpp.score, weight: 0.7 },
+              { score: workloadScore.score, weight: workloadScore.hasContext ? 0.3 : 0 },
+            ]) ?? enhancedOpp.score;
+            opp.note = workloadScore.hasContext ? `${enhancedOpp.note} | workload=${workloadScore.note}` : enhancedOpp.note;
+            if (thresholdEdge.hasContext) {
+              incrementCount(contextUsedCounts, "threshold_edge_walks_allowed");
+              pushUniqueTag(extraReasonTags, "threshold_edge");
+            } else {
+              incrementCount(contextMissingCounts, "threshold_edge_walks_allowed");
+              incrementCount(fallbackNeutralContextCounts, "threshold_edge_walks_allowed");
+            }
+            if (workloadScore.hasContext) {
+              incrementCount(contextUsedCounts, "pitcher_workload");
+              pushUniqueTag(extraReasonTags, "pitcher_workload");
+            } else {
+              incrementCount(contextMissingCounts, "pitcher_workload");
+              incrementCount(fallbackNeutralContextCounts, "pitcher_workload");
+              missingCriticalContexts.push("workload");
+            }
           }
           mu = scoreMatchupWalksAllowed(oppOff, ownPitcherMatchup);
+          if (oppOff?.walk_rate != null || ownPitcherMatchup?.walks_allowed_avg != null) incrementCount(contextUsedCounts, "opponent_offense_tendency");
+          else {
+            incrementCount(contextMissingCounts, "opponent_offense_tendency");
+            incrementCount(fallbackNeutralContextCounts, "opponent_offense_tendency");
+            missingCriticalContexts.push("opponent_tendency");
+          }
           if (
             (pitcherSideContext.stat_l5_avg != null || pitcherSideContext.stat_l10_avg != null || pitcherSideContext.over_line_l5_rate != null || pitcherSideContext.over_line_l10_rate != null) &&
             (pitcherSideContext.ip_l5_avg != null || pitcherSideContext.bf_l5_avg != null)
@@ -1369,12 +1673,58 @@ serve(async (req) => {
           {
             const enhancedRf = scoreRecentFormPitcherSide(pitcherSideContext, rolling, line.threshold, "ha");
             const enhancedOpp = scoreOpportunityPitcherSide(pitcherSideContext);
-            rf.score = enhancedRf.score;
-            rf.note = enhancedRf.note;
-            opp.score = enhancedOpp.score;
-            opp.note = enhancedOpp.note;
+            const thresholdEdge = scoreThresholdEdge(
+              line.threshold,
+              [
+                { label: "haL3", value: pitcherSideContext.stat_l3_avg, weight: 0.30 },
+                { label: "haL5", value: pitcherSideContext.stat_l5_avg, weight: 0.35 },
+                { label: "haL10", value: pitcherSideContext.stat_l10_avg, weight: 0.15 },
+                { label: "rollL10", value: rolling?.window_l10_avg ?? null, weight: 0.20 },
+              ],
+              [
+                { label: "overL5", value: pitcherSideContext.over_line_l5_rate, weight: 0.65 },
+                { label: "overL10", value: pitcherSideContext.over_line_l10_rate, weight: 0.35 },
+              ],
+            );
+            const workloadScore = scorePitcherWorkloadTrend(
+              pitcherSideContext.ip_l3_avg,
+              pitcherSideContext.ip_l5_avg,
+              pitcherSideContext.bf_l3_avg,
+              pitcherSideContext.bf_l5_avg,
+            );
+            rf.score = weightedAverageScore([
+              { score: enhancedRf.score, weight: 0.72 },
+              { score: thresholdEdge.score, weight: thresholdEdge.hasContext ? 0.28 : 0 },
+            ]) ?? enhancedRf.score;
+            rf.note = thresholdEdge.hasContext ? `${enhancedRf.note} | edge=${thresholdEdge.note}` : enhancedRf.note;
+            opp.score = weightedAverageScore([
+              { score: enhancedOpp.score, weight: 0.68 },
+              { score: workloadScore.score, weight: workloadScore.hasContext ? 0.32 : 0 },
+            ]) ?? enhancedOpp.score;
+            opp.note = workloadScore.hasContext ? `${enhancedOpp.note} | workload=${workloadScore.note}` : enhancedOpp.note;
+            if (thresholdEdge.hasContext) {
+              incrementCount(contextUsedCounts, "threshold_edge_hits_allowed");
+              pushUniqueTag(extraReasonTags, "threshold_edge");
+            } else {
+              incrementCount(contextMissingCounts, "threshold_edge_hits_allowed");
+              incrementCount(fallbackNeutralContextCounts, "threshold_edge_hits_allowed");
+            }
+            if (workloadScore.hasContext) {
+              incrementCount(contextUsedCounts, "pitcher_workload");
+              pushUniqueTag(extraReasonTags, "pitcher_workload");
+            } else {
+              incrementCount(contextMissingCounts, "pitcher_workload");
+              incrementCount(fallbackNeutralContextCounts, "pitcher_workload");
+              missingCriticalContexts.push("workload");
+            }
           }
           mu = scoreMatchupHitsAllowed(oppOff, ownPitcherMatchup);
+          if (oppOff?.hits_per_game != null || ownPitcherMatchup?.hits_allowed_avg != null) incrementCount(contextUsedCounts, "opponent_offense_tendency");
+          else {
+            incrementCount(contextMissingCounts, "opponent_offense_tendency");
+            incrementCount(fallbackNeutralContextCounts, "opponent_offense_tendency");
+            missingCriticalContexts.push("opponent_tendency");
+          }
           if (
             (pitcherSideContext.stat_l5_avg != null || pitcherSideContext.stat_l10_avg != null || pitcherSideContext.over_line_l5_rate != null || pitcherSideContext.over_line_l10_rate != null) &&
             (pitcherSideContext.ip_l5_avg != null || pitcherSideContext.bf_l5_avg != null)
@@ -1386,12 +1736,58 @@ serve(async (req) => {
           {
             const enhancedRf = scoreRecentFormPitcherSide(pitcherSideContext, rolling, line.threshold, "er");
             const enhancedOpp = scoreOpportunityPitcherSide(pitcherSideContext);
-            rf.score = enhancedRf.score;
-            rf.note = enhancedRf.note;
-            opp.score = enhancedOpp.score;
-            opp.note = enhancedOpp.note;
+            const thresholdEdge = scoreThresholdEdge(
+              line.threshold,
+              [
+                { label: "erL3", value: pitcherSideContext.stat_l3_avg, weight: 0.30 },
+                { label: "erL5", value: pitcherSideContext.stat_l5_avg, weight: 0.35 },
+                { label: "erL10", value: pitcherSideContext.stat_l10_avg, weight: 0.15 },
+                { label: "rollL10", value: rolling?.window_l10_avg ?? null, weight: 0.20 },
+              ],
+              [
+                { label: "overL5", value: pitcherSideContext.over_line_l5_rate, weight: 0.65 },
+                { label: "overL10", value: pitcherSideContext.over_line_l10_rate, weight: 0.35 },
+              ],
+            );
+            const workloadScore = scorePitcherWorkloadTrend(
+              pitcherSideContext.ip_l3_avg,
+              pitcherSideContext.ip_l5_avg,
+              pitcherSideContext.bf_l3_avg,
+              pitcherSideContext.bf_l5_avg,
+            );
+            rf.score = weightedAverageScore([
+              { score: enhancedRf.score, weight: 0.72 },
+              { score: thresholdEdge.score, weight: thresholdEdge.hasContext ? 0.28 : 0 },
+            ]) ?? enhancedRf.score;
+            rf.note = thresholdEdge.hasContext ? `${enhancedRf.note} | edge=${thresholdEdge.note}` : enhancedRf.note;
+            opp.score = weightedAverageScore([
+              { score: enhancedOpp.score, weight: 0.68 },
+              { score: workloadScore.score, weight: workloadScore.hasContext ? 0.32 : 0 },
+            ]) ?? enhancedOpp.score;
+            opp.note = workloadScore.hasContext ? `${enhancedOpp.note} | workload=${workloadScore.note}` : enhancedOpp.note;
+            if (thresholdEdge.hasContext) {
+              incrementCount(contextUsedCounts, "threshold_edge_earned_runs_allowed");
+              pushUniqueTag(extraReasonTags, "threshold_edge");
+            } else {
+              incrementCount(contextMissingCounts, "threshold_edge_earned_runs_allowed");
+              incrementCount(fallbackNeutralContextCounts, "threshold_edge_earned_runs_allowed");
+            }
+            if (workloadScore.hasContext) {
+              incrementCount(contextUsedCounts, "pitcher_workload");
+              pushUniqueTag(extraReasonTags, "pitcher_workload");
+            } else {
+              incrementCount(contextMissingCounts, "pitcher_workload");
+              incrementCount(fallbackNeutralContextCounts, "pitcher_workload");
+              missingCriticalContexts.push("workload");
+            }
           }
           mu = scoreMatchupEarnedRuns(oppOff, ownPitcherMatchup, pitcherCtx);
+          if (oppOff?.runs_per_game != null || oppOff?.ops != null || ownPitcherMatchup?.earned_runs_allowed_avg != null) incrementCount(contextUsedCounts, "opponent_offense_tendency");
+          else {
+            incrementCount(contextMissingCounts, "opponent_offense_tendency");
+            incrementCount(fallbackNeutralContextCounts, "opponent_offense_tendency");
+            missingCriticalContexts.push("opponent_tendency");
+          }
           if (
             (pitcherSideContext.stat_l5_avg != null || pitcherSideContext.stat_l10_avg != null || pitcherSideContext.over_line_l5_rate != null || pitcherSideContext.over_line_l10_rate != null) &&
             (pitcherSideContext.ip_l5_avg != null || pitcherSideContext.bf_l5_avg != null)
@@ -1411,13 +1807,17 @@ serve(async (req) => {
       const myTeamId = profile?.mlb_team_id ?? null;
       if (myTeamId != null) {
         for (const c of ctxByGameId.values()) {
-          // v1: pick whichever probable pitcher has a summary row.
-          const candidate =
-            (c.probable_home_pitcher_id && pitcherMatchupById.get(c.probable_home_pitcher_id)) ||
-            (c.probable_away_pitcher_id && pitcherMatchupById.get(c.probable_away_pitcher_id)) ||
-            null;
-          if (candidate) {
-            oppPitcherSummary = candidate;
+          const ctxJson = c.game_context_json as Record<string, unknown> | null;
+          const homeTeamId = Number(ctxJson?.home_team_id);
+          const awayTeamId = Number(ctxJson?.away_team_id);
+          if (!Number.isFinite(homeTeamId) || !Number.isFinite(awayTeamId)) continue;
+          if (myTeamId === homeTeamId && c.probable_away_pitcher_id) {
+            oppPitcherSummary = pitcherMatchupById.get(c.probable_away_pitcher_id) ?? null;
+            ctxForGame = c;
+            break;
+          }
+          if (myTeamId === awayTeamId && c.probable_home_pitcher_id) {
+            oppPitcherSummary = pitcherMatchupById.get(c.probable_home_pitcher_id) ?? null;
             ctxForGame = c;
             break;
           }
@@ -1435,6 +1835,62 @@ serve(async (req) => {
           statKey === "TOTAL_BASES" ? "TOTAL_BASES" : "HITS",
         );
       }
+      const thresholdEdge = scoreThresholdEdge(
+        line.threshold,
+        [
+          { label: "rollL5", value: rolling?.window_l5_avg ?? null, weight: 0.40 },
+          { label: "rollL10", value: rolling?.window_l10_avg ?? null, weight: 0.35 },
+          { label: "rollL15", value: rolling?.window_l15_avg ?? null, weight: 0.15 },
+          { label: "paProxy", value: logs.length > 0 ? averageDefined(logs.slice(0, 5).map((log) => (log.plate_appearances ?? log.at_bats ?? null))) : null, weight: 0.10 },
+        ],
+        [
+          { label: "hitL5", value: rolling?.window_l5_hit_rate ?? null, weight: 0.60 },
+          { label: "hitL10", value: rolling?.window_l10_hit_rate ?? null, weight: 0.40 },
+        ],
+      );
+      rf.score = weightedAverageScore([
+        { score: rf.score, weight: 0.72 },
+        { score: thresholdEdge.score, weight: thresholdEdge.hasContext ? 0.28 : 0 },
+      ]) ?? rf.score;
+      rf.note = thresholdEdge.hasContext ? `${rf.note} | edge=${thresholdEdge.note}` : rf.note;
+      if (thresholdEdge.hasContext) {
+        incrementCount(contextUsedCounts, `threshold_edge_${statKey.toLowerCase()}`);
+        pushUniqueTag(extraReasonTags, "threshold_edge");
+      } else {
+        incrementCount(contextMissingCounts, `threshold_edge_${statKey.toLowerCase()}`);
+        incrementCount(fallbackNeutralContextCounts, `threshold_edge_${statKey.toLowerCase()}`);
+      }
+      if (oppPitcherSummary) incrementCount(contextUsedCounts, "opposing_pitcher_matchup");
+      else {
+        incrementCount(contextMissingCounts, "opposing_pitcher_matchup");
+        incrementCount(fallbackNeutralContextCounts, "opposing_pitcher_matchup");
+        missingCriticalContexts.push("matchup");
+      }
+      const parkWeatherMode =
+        statKey === "TOTAL_BASES" || statKey === "HOME_RUNS" ? "hitter_power" : "hitter_contact";
+      const parkWeatherAdjustment = adjustForParkWeather(
+        mu.score,
+        ctxForGame,
+        parkWeatherMode,
+      );
+      mu.score = parkWeatherAdjustment.score;
+      if (parkWeatherAdjustment.note) mu.note = `${mu.note} ${parkWeatherAdjustment.note}`.trim();
+      if (parkWeatherAdjustment.usedPark) incrementCount(contextUsedCounts, "park_factor");
+      else incrementCount(contextMissingCounts, "park_factor");
+      if (parkWeatherAdjustment.usedWeather) incrementCount(contextUsedCounts, "weather");
+      else incrementCount(contextMissingCounts, "weather");
+      incrementCount(contextMissingCounts, "handedness_splits");
+      incrementCount(fallbackNeutralContextCounts, "handedness_splits");
+    }
+
+    if (lineQuality) {
+      const lineQualityBlend = weightedAverageScore([
+        { score: vl.score, weight: 0.7 },
+        { score: lineQuality.line_quality_score, weight: 0.3 },
+      ]);
+      if (lineQualityBlend != null) vl.score = lineQualityBlend;
+    } else {
+      missingCriticalContexts.push("line_quality");
     }
 
     const w = WEIGHT_PROFILES[statKey];
@@ -1447,23 +1903,25 @@ serve(async (req) => {
     const positiveDen = w.recent_form + w.matchup + w.opportunity + w.consistency + w.value;
     const positiveScore = positive / positiveDen; // 0..100
     let overall = clamp(positiveScore - w.risk_penalty * (rk.score - 50) / 2);
-
-    const rawMarketKey = MLB_MARKET_MAP[statKey].oddsApiMarket;
-    const lineQualityRows = snapshotGroupsByPlayerMarket.get(`${line.player_id}|${rawMarketKey}`) ?? [];
-    let lineQuality: LineQualityMetrics | null = null;
-    if (lineQualityRows.length > 0) {
-      lineQuality = computeLineQualityMetrics(lineQualityRows, line.threshold);
+    if (lineQuality) {
       overall = clamp(overall + lineQualityAdjustment(lineQuality.line_quality_tier));
-      lineQualityEnhancedCount++;
-      if (lineQuality.line_quality_tier === "weak") lineQualityWeakCount++;
-      if (lineQuality.line_quality_tier === "elite") lineQualityEliteCount++;
-    } else {
-      lineQualityMissingCount++;
+    }
+    const capped = applyConservativeConfidenceCap(
+      statKey,
+      overall,
+      [...new Set(missingCriticalContexts)],
+      rk.score,
+      lineQuality?.line_quality_tier ?? null,
+    );
+    overall = capped.score;
+    if (capped.capped && capped.reason) {
+      incrementCount(cappedConfidenceCounts, capped.reason);
+      pushUniqueTag(extraReasonTags, "context_missing_neutral");
     }
     const tier = tierFor(overall);
 
     const summary = {
-      version: "mlb-v1",
+      version: "mlb-v2",
       stat_key: statKey,
       threshold: line.threshold,
       sample_size: sampleSize,
@@ -1477,9 +1935,9 @@ serve(async (req) => {
       },
       overall: round1(overall),
       tier,
+      missing_contexts: [...new Set(missingCriticalContexts)],
+      confidence_cap_reason: capped.reason,
     } as Record<string, unknown>;
-
-    const extraReasonTags: string[] = [];
     if (statKey === "STRIKEOUTS") {
       if (!strikeoutContext) {
         const logs = pitcherLogsByPlayer.get(line.player_id!) ?? [];
@@ -1656,6 +2114,11 @@ serve(async (req) => {
       }
     }
 
+    if (rf.score >= 65) pushUniqueTag(extraReasonTags, "recent_form");
+    if (mu.score >= 64) pushUniqueTag(extraReasonTags, "matchup_boost");
+    else if (mu.score <= 42) pushUniqueTag(extraReasonTags, "matchup_neutral");
+    if (missingCriticalContexts.length > 0) pushUniqueTag(extraReasonTags, "context_missing_neutral");
+
     // Resolve team / opponent / home_away from the team-id map built earlier.
     const myTeamId = profile?.mlb_team_id ?? null;
     const teamAbbr = myTeamId != null ? teamIdToAbbr.get(myTeamId) ?? null : null;
@@ -1747,6 +2210,11 @@ serve(async (req) => {
       line_quality_elite_count: lineQualityEliteCount,
       null_team_abbr_score_count: nullTeamAbbrScoreCount,
       null_team_abbr_reasons: nullTeamAbbrReasons,
+      context_used_counts: contextUsedCounts,
+      context_missing_counts: contextMissingCounts,
+      weights_applied_by_stat_type: weightsAppliedByStatType,
+      capped_confidence_counts: cappedConfidenceCounts,
+      fallback_neutral_context_counts: fallbackNeutralContextCounts,
       write_errors: writeErrors,
       anchors: ANCHOR_KEYS,
       duration_ms: Date.now() - startedAt,
