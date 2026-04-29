@@ -33,6 +33,7 @@ serve(async (req) => {
   const stripe = new Stripe(stripeSecretKey, {
     apiVersion: "2023-10-16",
   });
+  const cryptoProvider = Stripe.createSubtleCryptoProvider();
 
   // Create Supabase admin client (use service role for writes)
   const supabaseAdmin = createClient(
@@ -45,7 +46,10 @@ serve(async (req) => {
     // Get the signature from headers
     const signature = req.headers.get("stripe-signature");
     if (!signature) {
-      console.error("No stripe-signature header");
+      console.error("No stripe-signature header", {
+        webhookSecretExists: Boolean(stripeWebhookSecret),
+        signatureHeaderExists: false,
+      });
       return new Response("No signature", { status: 400 });
     }
 
@@ -55,13 +59,20 @@ serve(async (req) => {
     // Verify the webhook signature
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(
+      event = await stripe.webhooks.constructEventAsync(
         body,
         signature,
-        stripeWebhookSecret
+        stripeWebhookSecret,
+        undefined,
+        cryptoProvider,
       );
     } catch (err) {
-      console.error("Webhook signature verification failed:", err);
+      console.error("Webhook signature verification failed", {
+        webhookSecretExists: Boolean(stripeWebhookSecret),
+        signatureHeaderExists: Boolean(signature),
+        rawBodyLength: body.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return new Response(`Webhook signature verification failed`, { status: 400 });
     }
 
