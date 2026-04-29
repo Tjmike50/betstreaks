@@ -1,0 +1,1 @@
+insert into public.user_flags (user_id, is_premium) values ('237598e6-afb1-4bed-9508-6bef426a5586', true) on conflict (user_id) do update set is_premium = true, updated_at = now();
