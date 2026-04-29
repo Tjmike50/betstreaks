@@ -656,9 +656,10 @@ interface DebugInfo {
 //   • LLM-driven slip composition with strict JSON output.
 //   • Persistence to ai_slips / ai_slip_legs and ai_usage tracking.
 //
-// What's stubbed (intentional for v1):
-//   • No live odds verification (no MLB line_snapshots yet) — leg.odds is
-//     whatever the LLM proposes, and `data_context.odds_validated` is false.
+// What's still intentionally lightweight:
+//   • Candidate sourcing starts from scored MLB rows, but only candidates with
+//     exact live line-snapshot matches are allowed into the verified builder
+//     pool.
 //   • No market_confidence / books_count / consensus enrichment.
 //   • No game-level (moneyline/spread/total) bets for MLB yet.
 //   • No team_abbr postseason scoping (MLB team registry not wired).
@@ -677,31 +678,115 @@ interface MlbBuilderArgs {
 
 const MLB_AI_GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const MLB_AI_MODEL = "google/gemini-3-flash-preview";
+type VerifiedMlbOdds = Awaited<ReturnType<typeof enrichMlbAnchorLegs>>[number];
 
 async function handleMlbBuilder(args: MlbBuilderArgs): Promise<Response> {
   const { prompt, slipCount, supabase, serviceClient, userId, isPremium, gameDate } = args;
   const startedAt = Date.now();
 
-  const candidates = await getMlbBuilderCandidates(serviceClient, {
+  const scoredCandidates = await getMlbBuilderCandidates(serviceClient, {
     gameDate,
     minOverall: 50,
     maxPerPlayer: 2,
     limit: 60,
   });
 
+  const candidateCount = scoredCandidates.length;
+  const candidateCountByTeam: Record<string, number> = {};
+  const candidateCountByStatType: Record<string, number> = {};
+  for (const candidate of scoredCandidates) {
+    const teamKey = candidate.team_abbr ?? "NULL";
+    candidateCountByTeam[teamKey] = (candidateCountByTeam[teamKey] || 0) + 1;
+    candidateCountByStatType[candidate.stat_type] = (candidateCountByStatType[candidate.stat_type] || 0) + 1;
+  }
+
   console.log(
-    `[AI-Builder/MLB] ${gameDate}: ${candidates.length} builder candidates`,
+    `[AI-Builder/MLB] ${gameDate}: ${candidateCount} scored builder candidates`,
   );
 
-  if (candidates.length === 0) {
-    return new Response(
-      JSON.stringify({
-        error: "no_candidates",
-        message:
-          "MLB candidate feed is empty for today — scoring data may not be ready yet, or no MLB games are scored.",
-        debug: { sport: "MLB", game_date: gameDate, candidates: 0 },
-      }),
-      { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  if (candidateCount === 0) {
+    return failureResponse(
+      "NO_CANDIDATES",
+      "No eligible MLB props found for today's slate yet. Refresh MLB lines/scores or try again later.",
+      {
+        sport: "MLB",
+        game_date: gameDate,
+        candidate_count: 0,
+        verified_market_candidate_count: 0,
+        unmatched_candidate_count: 0,
+        rejected_unmatched_market_count: 0,
+        candidates_by_team: {},
+        candidates_by_stat_type: {},
+        fallback_used: false,
+        no_candidates_reason: "empty_scored_candidate_feed",
+      },
+    );
+  }
+
+  const candidateOdds = await enrichMlbAnchorLegs(
+    supabase,
+    scoredCandidates.map((candidate) => ({
+      row: {
+        player_name: candidate.player_name,
+        stat_type: candidate.stat_type,
+        threshold: Number(candidate.threshold),
+      },
+      side: inferMlbSide(candidate),
+    })),
+    gameDate,
+  );
+
+  const verifiedCandidates: MlbCandidate[] = [];
+  const verifiedOddsByCandidateKey = new Map<string, { odds: VerifiedMlbOdds; side: "Over" | "Under" }>();
+  const unmatchedCandidates: MlbCandidate[] = [];
+  const candidateKey = (player: string, stat: string, threshold: number) =>
+    `${player.toLowerCase()}|${stat.toUpperCase()}|${threshold}`;
+
+  scoredCandidates.forEach((candidate, idx) => {
+    const odds = candidateOdds[idx];
+    const key = candidateKey(candidate.player_name, candidate.stat_type, Number(candidate.threshold));
+    if (odds?.matched && odds.odds != null) {
+      verifiedCandidates.push(candidate);
+      verifiedOddsByCandidateKey.set(key, {
+        odds,
+        side: inferMlbSide(candidate),
+      });
+    } else {
+      unmatchedCandidates.push(candidate);
+    }
+  });
+
+  const verifiedMarketCandidateCount = verifiedCandidates.length;
+  const unmatchedCandidateCount = unmatchedCandidates.length;
+  const verifiedCandidatesByTeam: Record<string, number> = {};
+  const verifiedCandidatesByStatType: Record<string, number> = {};
+  for (const candidate of verifiedCandidates) {
+    const teamKey = candidate.team_abbr ?? "NULL";
+    verifiedCandidatesByTeam[teamKey] = (verifiedCandidatesByTeam[teamKey] || 0) + 1;
+    verifiedCandidatesByStatType[candidate.stat_type] =
+      (verifiedCandidatesByStatType[candidate.stat_type] || 0) + 1;
+  }
+
+  console.log(
+    `[AI-Builder/MLB] ${gameDate}: verified market candidates ${verifiedMarketCandidateCount}/${candidateCount}`,
+  );
+
+  if (verifiedMarketCandidateCount === 0) {
+    return failureResponse(
+      "NO_CANDIDATES",
+      "No verified MLB live props are available for this slate yet. Try again after line snapshots refresh.",
+      {
+        sport: "MLB",
+        game_date: gameDate,
+        candidate_count: candidateCount,
+        verified_market_candidate_count: 0,
+        unmatched_candidate_count: unmatchedCandidateCount,
+        rejected_unmatched_market_count: unmatchedCandidateCount,
+        candidates_by_team: candidateCountByTeam,
+        candidates_by_stat_type: candidateCountByStatType,
+        fallback_used: false,
+        no_candidates_reason: "no_verified_market_matches",
+      },
     );
   }
 
@@ -714,10 +799,11 @@ async function handleMlbBuilder(args: MlbBuilderArgs): Promise<Response> {
   }
 
   // Compact LLM-facing summary — keep payload small.
-  const candidateLines = candidates.slice(0, 40).map((c, i) => {
+  const candidateLines = verifiedCandidates.slice(0, 40).map((c, i) => {
     const recent = c.last10_avg ?? c.season_avg ?? 0;
     const side = inferMlbSide(c);
-    return `${i + 1}. ${c.player_name} (${c.team_abbr ?? "?"} vs ${c.opponent_abbr ?? "?"}) — ${mlbStatLabel(c.stat_type)} ${c.threshold} | suggest ${side} | overall ${Math.round(c.score_overall ?? 0)}, tier ${c.confidence_tier ?? "n/a"}, recent ${recent.toFixed(1)}`;
+    const verified = verifiedOddsByCandidateKey.get(candidateKey(c.player_name, c.stat_type, Number(c.threshold)));
+    return `${i + 1}. ${c.player_name} (${c.team_abbr ?? "?"} vs ${c.opponent_abbr ?? "?"}) — ${mlbStatLabel(c.stat_type)} ${c.threshold} | suggest ${side} | odds ${verified?.odds?.odds ?? "n/a"} @ ${verified?.odds?.sportsbook ?? "n/a"} | overall ${Math.round(c.score_overall ?? 0)}, tier ${c.confidence_tier ?? "n/a"}, recent ${recent.toFixed(1)}`;
   }).join("\n");
 
   const systemPrompt = `You are a sports analyst building MLB player-prop parlays for BetStreaks. Rules:
@@ -814,7 +900,7 @@ Return strict JSON with shape:
     llmContent = aiData?.choices?.[0]?.message?.content ?? "";
   } catch (err) {
     console.error("[AI-Builder/MLB] LLM call failed:", err);
-    return await mlbDeterministicFallback(args, candidates, startedAt);
+    return await mlbDeterministicFallback(args, verifiedCandidates, startedAt);
   }
 
   let parsed: { slips?: any[] };
@@ -822,14 +908,12 @@ Return strict JSON with shape:
     parsed = JSON.parse(llmContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
   } catch {
     console.warn("[AI-Builder/MLB] LLM returned invalid JSON, falling back");
-    return await mlbDeterministicFallback(args, candidates, startedAt);
+    return await mlbDeterministicFallback(args, verifiedCandidates, startedAt);
   }
 
   // Validate legs against the candidate pool — exact (player, stat, threshold).
-  const candKey = (player: string, stat: string, threshold: number) =>
-    `${player.toLowerCase()}|${stat.toUpperCase()}|${threshold}`;
   const candIndex = new Map<string, MlbCandidate>();
-  for (const c of candidates) candIndex.set(candKey(c.player_name, c.stat_type, c.threshold), c);
+  for (const c of verifiedCandidates) candIndex.set(candidateKey(c.player_name, c.stat_type, c.threshold), c);
 
   // Pass 1 — collect raw validated leg specs (no odds yet).
   type RawLegSpec = {
@@ -849,7 +933,7 @@ Return strict JSON with shape:
       const lineMatch = String(leg.line ?? "").match(/([\d.]+)/);
       const threshold = lineMatch ? parseFloat(lineMatch[1]) : null;
       if (threshold == null) continue;
-      const key = candKey(String(leg.player_name ?? ""), String(leg.stat_type ?? ""), threshold);
+      const key = candidateKey(String(leg.player_name ?? ""), String(leg.stat_type ?? ""), threshold);
       const cand = candIndex.get(key);
       if (!cand) {
         console.log(`[AI-Builder/MLB] reject leg (no candidate): ${leg.player_name} ${leg.stat_type} ${threshold}`);
@@ -869,19 +953,20 @@ Return strict JSON with shape:
 
   // Pass 2 — batch enrich all legs across all slips with one DB round-trip.
   const flatLegs = rawSlips.flatMap((rs) => rs.legs);
-  const enriched = await enrichMlbAnchorLegs(
-    supabase,
-    flatLegs.map((l) => ({
-      row: {
-        player_name: l.cand.player_name,
-        stat_type: l.cand.stat_type,
-        threshold: Number(l.cand.threshold),
-      },
+  const enriched = flatLegs.map((l) => {
+    const key = candidateKey(l.cand.player_name, l.cand.stat_type, Number(l.cand.threshold));
+    const verified = verifiedOddsByCandidateKey.get(key);
+    return verified?.odds ?? {
+      over_odds: null,
+      under_odds: null,
+      sportsbook: null,
+      snapshot_at: null,
       side: l.side,
-    })),
-    gameDate,
-  );
-  const oddsHitTotal = enriched.filter((o) => o.matched).length;
+      odds: null,
+      matched: false,
+    };
+  });
+  const oddsHitTotal = enriched.filter((o) => o?.matched).length;
   console.log(
     `[AI-Builder/MLB] Odds enrichment: ${oddsHitTotal}/${enriched.length} legs matched`,
   );
@@ -940,8 +1025,22 @@ Return strict JSON with shape:
   }
 
   if (validatedSlips.length === 0) {
-    console.warn("[AI-Builder/MLB] LLM produced 0 valid slips, falling back");
-    return await mlbDeterministicFallback(args, candidates, startedAt);
+    return failureResponse(
+      "NO_CANDIDATES",
+      "No verified MLB slip could be assembled from the current live-market candidates.",
+      {
+        sport: "MLB",
+        game_date: gameDate,
+        candidate_count: candidateCount,
+        verified_market_candidate_count: verifiedMarketCandidateCount,
+        unmatched_candidate_count: unmatchedCandidateCount,
+        rejected_unmatched_market_count: unmatchedCandidateCount,
+        candidates_by_team: verifiedCandidatesByTeam,
+        candidates_by_stat_type: verifiedCandidatesByStatType,
+        fallback_used: false,
+        no_candidates_reason: "llm_returned_no_valid_verified_slips",
+      },
+    );
   }
 
   // Persist
@@ -961,10 +1060,16 @@ Return strict JSON with shape:
       scoring_metadata: {
         sport: "MLB",
         game_date: gameDate,
-        verified_prop_candidates: candidates.length,
-        verified_candidates_passed_to_llm: Math.min(candidates.length, 40),
-        candidates_after_diversity: candidates.length,
-        unique_players: new Set(candidates.map((c) => c.player_id)).size,
+        candidate_count: candidateCount,
+        verified_market_candidate_count: verifiedMarketCandidateCount,
+        unmatched_candidate_count: unmatchedCandidateCount,
+        rejected_unmatched_market_count: unmatchedCandidateCount,
+        candidates_by_team: verifiedCandidatesByTeam,
+        candidates_by_stat_type: verifiedCandidatesByStatType,
+        verified_prop_candidates: verifiedMarketCandidateCount,
+        verified_candidates_passed_to_llm: Math.min(verifiedMarketCandidateCount, 40),
+        candidates_after_diversity: verifiedMarketCandidateCount,
+        unique_players: new Set(verifiedCandidates.map((c) => c.player_id)).size,
         legs_validated: saved.reduce((s, sl) => s + (sl.legs?.length ?? 0), 0),
         legs_rejected: 0,
         final_legs_accepted: saved.reduce((s, sl) => s + (sl.legs?.length ?? 0), 0),
@@ -974,11 +1079,21 @@ Return strict JSON with shape:
         game_level_candidates: 0,
         mode: "mlb_v1_anchor",
         fallback_used: false,
-        scoring_data_available: candidates.length,
+        scoring_data_available: verifiedMarketCandidateCount,
         scoring_source: "today",
         market_quality: null,
       },
-      debug: { sport: "MLB", game_date: gameDate, duration_ms: Date.now() - startedAt },
+      debug: {
+        sport: "MLB",
+        game_date: gameDate,
+        duration_ms: Date.now() - startedAt,
+        candidate_count: candidateCount,
+        verified_market_candidate_count: verifiedMarketCandidateCount,
+        unmatched_market_candidate_count: unmatchedCandidateCount,
+        rejected_unmatched_market_count: unmatchedCandidateCount,
+        candidates_by_team: verifiedCandidatesByTeam,
+        candidates_by_stat_type: verifiedCandidatesByStatType,
+      },
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );

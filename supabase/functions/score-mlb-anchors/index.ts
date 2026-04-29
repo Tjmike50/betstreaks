@@ -1093,6 +1093,7 @@ serve(async (req) => {
     { data: pitcherLogs },
     { data: gamesToday },
     { data: ctxRows },
+    { data: teamMapRows },
   ] = await Promise.all([
     supabase
       .from("mlb_player_profiles")
@@ -1128,6 +1129,9 @@ serve(async (req) => {
     supabase
       .from("mlb_game_context")
       .select("game_id,probable_home_pitcher_id,probable_away_pitcher_id,game_context_json"),
+    supabase
+      .from("mlb_team_id_map")
+      .select("team_id,team_abbr"),
   ]);
 
   // Index helpers.
@@ -1165,6 +1169,9 @@ serve(async (req) => {
   // Build teamId → abbr map and per-team game info from today's games + context.
   // This lets us populate team_abbr / opponent_abbr / home_away on every scored row.
   const teamIdToAbbr = new Map<number, string>();
+  for (const row of (teamMapRows ?? []) as Array<{ team_id: number; team_abbr: string }>) {
+    if (row.team_id && row.team_abbr) teamIdToAbbr.set(Number(row.team_id), row.team_abbr);
+  }
   // teamId → { gameId, homeId, awayId, homeAbbr, awayAbbr }
   const teamGameInfo = new Map<number, { homeId: number; awayId: number; homeAbbr: string; awayAbbr: string }>();
   const gamesByIdMap = new Map<string, { home_team_abbr: string | null; away_team_abbr: string | null }>();
@@ -1257,6 +1264,8 @@ serve(async (req) => {
   let lineQualityMissingCount = 0;
   let lineQualityWeakCount = 0;
   let lineQualityEliteCount = 0;
+  let nullTeamAbbrScoreCount = 0;
+  const nullTeamAbbrReasons: Record<string, number> = {};
 
   for (const line of lines) {
     const statKey = oddsToStatKey[line.stat_type];
@@ -1658,6 +1667,17 @@ serve(async (req) => {
       ? (myTeamId === gameInfo.homeId ? "home" : "away")
       : null;
 
+    if (!teamAbbr) {
+      nullTeamAbbrScoreCount++;
+      const reason =
+        myTeamId == null
+          ? "missing_profile_team_id"
+          : teamIdToAbbr.has(myTeamId)
+          ? "missing_game_context_for_team"
+          : "missing_team_map_for_profile_team_id";
+      nullTeamAbbrReasons[reason] = (nullTeamAbbrReasons[reason] || 0) + 1;
+    }
+
     rowsToUpsert.push({
       sport: "MLB",
       game_date: gameDate,
@@ -1725,6 +1745,8 @@ serve(async (req) => {
       line_quality_missing_count: lineQualityMissingCount,
       line_quality_weak_count: lineQualityWeakCount,
       line_quality_elite_count: lineQualityEliteCount,
+      null_team_abbr_score_count: nullTeamAbbrScoreCount,
+      null_team_abbr_reasons: nullTeamAbbrReasons,
       write_errors: writeErrors,
       anchors: ANCHOR_KEYS,
       duration_ms: Date.now() - startedAt,

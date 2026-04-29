@@ -32,6 +32,102 @@ const WNBA_TEAM_ABBRS: Record<string, string> = {
   "Washington Mystics": "WAS",
 };
 
+const MLB_TEAM_ABBRS: Record<string, string> = {
+  "ARIZONA DIAMONDBACKS": "ARI",
+  "DIAMONDBACKS": "ARI",
+  "D-BACKS": "ARI",
+  "DBACKS": "ARI",
+  "ARIZONA": "ARI",
+  "ATLANTA BRAVES": "ATL",
+  "BRAVES": "ATL",
+  "ATLANTA": "ATL",
+  "BALTIMORE ORIOLES": "BAL",
+  "ORIOLES": "BAL",
+  "BALTIMORE": "BAL",
+  "BOSTON RED SOX": "BOS",
+  "RED SOX": "BOS",
+  "BOSTON": "BOS",
+  "CHICAGO CUBS": "CHC",
+  "CUBS": "CHC",
+  "CHICAGO WHITE SOX": "CWS",
+  "WHITE SOX": "CWS",
+  "SOX": "CWS",
+  "CINCINNATI REDS": "CIN",
+  "REDS": "CIN",
+  "CINCINNATI": "CIN",
+  "CLEVELAND GUARDIANS": "CLE",
+  "GUARDIANS": "CLE",
+  "CLEVELAND": "CLE",
+  "COLORADO ROCKIES": "COL",
+  "ROCKIES": "COL",
+  "COLORADO": "COL",
+  "DETROIT TIGERS": "DET",
+  "TIGERS": "DET",
+  "DETROIT": "DET",
+  "HOUSTON ASTROS": "HOU",
+  "ASTROS": "HOU",
+  "HOUSTON": "HOU",
+  "KANSAS CITY ROYALS": "KC",
+  "ROYALS": "KC",
+  "KANSAS CITY": "KC",
+  "LOS ANGELES ANGELS": "LAA",
+  "LA ANGELS": "LAA",
+  "ANGELS": "LAA",
+  "LOS ANGELES DODGERS": "LAD",
+  "LA DODGERS": "LAD",
+  "DODGERS": "LAD",
+  "MIAMI MARLINS": "MIA",
+  "MARLINS": "MIA",
+  "MIAMI": "MIA",
+  "MILWAUKEE BREWERS": "MIL",
+  "BREWERS": "MIL",
+  "MILWAUKEE": "MIL",
+  "MINNESOTA TWINS": "MIN",
+  "TWINS": "MIN",
+  "MINNESOTA": "MIN",
+  "NEW YORK METS": "NYM",
+  "METS": "NYM",
+  "NEW YORK YANKEES": "NYY",
+  "YANKEES": "NYY",
+  "ATHLETICS": "ATH",
+  "OAKLAND ATHLETICS": "ATH",
+  "SACRAMENTO ATHLETICS": "ATH",
+  "A'S": "ATH",
+  "AS": "ATH",
+  "PHILADELPHIA PHILLIES": "PHI",
+  "PHILLIES": "PHI",
+  "PHILADELPHIA": "PHI",
+  "PITTSBURGH PIRATES": "PIT",
+  "PIRATES": "PIT",
+  "PITTSBURGH": "PIT",
+  "SAN DIEGO PADRES": "SD",
+  "PADRES": "SD",
+  "SAN DIEGO": "SD",
+  "SAN FRANCISCO GIANTS": "SF",
+  "GIANTS": "SF",
+  "SAN FRANCISCO": "SF",
+  "SEATTLE MARINERS": "SEA",
+  "MARINERS": "SEA",
+  "SEATTLE": "SEA",
+  "ST. LOUIS CARDINALS": "STL",
+  "ST LOUIS CARDINALS": "STL",
+  "CARDINALS": "STL",
+  "ST. LOUIS": "STL",
+  "ST LOUIS": "STL",
+  "TAMPA BAY RAYS": "TB",
+  "RAYS": "TB",
+  "TAMPA BAY": "TB",
+  "TEXAS RANGERS": "TEX",
+  "RANGERS": "TEX",
+  "TEXAS": "TEX",
+  "TORONTO BLUE JAYS": "TOR",
+  "BLUE JAYS": "TOR",
+  "TORONTO": "TOR",
+  "WASHINGTON NATIONALS": "WSH",
+  "NATIONALS": "WSH",
+  "WASHINGTON": "WSH",
+};
+
 const MLB_PRIMARY_ROLE_BY_MARKET: Record<string, "pitcher" | "batter"> = {
   pitcher_strikeouts: "pitcher",
   pitcher_earned_runs: "pitcher",
@@ -85,7 +181,7 @@ const SPORT_CONFIG: Record<SportKey, SportConfig> = {
   },
   MLB: {
     oddsApiSport: MLB_ODDS_API_SPORT,
-    teamMap: {},
+    teamMap: MLB_TEAM_ABBRS,
     refreshStatusId: 23,
     refreshStatusLabel: "MLB_LINES",
     seasonState: "regular",
@@ -194,6 +290,34 @@ function resolveBasketballTeamAbbr(raw: string | null | undefined, teamMap: Reco
     SUNS: "PHX", BLAZERS: "POR", KINGS: "SAC", SPURS: "SAS", RAPTORS: "TOR", JAZZ: "UTA", WIZARDS: "WAS",
   };
   return nicknameMap[lastWord] || null;
+}
+
+function normalizeMlbTeamKey(raw: string | null | undefined): string {
+  return String(raw ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[.'’]/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function resolveMlbTeamAbbr(raw: string | null | undefined, teamMap: Record<string, string>): string | null {
+  const normalized = normalizeMlbTeamKey(raw);
+  if (!normalized) return null;
+  if (teamMap[normalized]) return teamMap[normalized];
+  const lastWord = normalized.split(" ").pop() || normalized;
+  if (teamMap[lastWord]) return teamMap[lastWord];
+  if (normalized.includes("WHITE SOX")) return "CWS";
+  if (normalized.includes("RED SOX")) return "BOS";
+  if (normalized.includes("DIAMONDBACK")) return "ARI";
+  if (normalized.includes("D BACK")) return "ARI";
+  if (normalized.includes("ATHLETIC")) return "ATH";
+  if (normalized.includes("YANKEE")) return "NYY";
+  if (normalized.includes("DODGER")) return "LAD";
+  if (normalized.includes("ANGEL")) return "LAA";
+  if (normalized.includes("CUB")) return "CHC";
+  if (normalized.includes("MET")) return "NYM";
+  return null;
 }
 
 function chooseOddsGameForSlateDate(
@@ -554,6 +678,7 @@ serve(async (req) => {
     let activeGamesCount = 0;
     const skippedGames: Array<{ reason: string; game?: string | null; raw_home_team?: string | null; raw_away_team?: string | null }> = [];
     const canonicalKeys: string[] = [];
+    const mlbTeamMappingMissingNames = new Set<string>();
     let espnGamesFetchedCount = 0;
     const espnCanonicalKeys: string[] = [];
     const oddsCanonicalKeys: string[] = [];
@@ -601,10 +726,10 @@ serve(async (req) => {
     for (const game of gamesData) {
       const homeAbbr = sport === "NBA" || sport === "WNBA"
         ? resolveBasketballTeamAbbr(game.home_team, cfg.teamMap)
-        : cfg.teamMap[game.home_team] || null;
+        : resolveMlbTeamAbbr(game.home_team, cfg.teamMap);
       const awayAbbr = sport === "NBA" || sport === "WNBA"
         ? resolveBasketballTeamAbbr(game.away_team, cfg.teamMap)
-        : cfg.teamMap[game.away_team] || null;
+        : resolveMlbTeamAbbr(game.away_team, cfg.teamMap);
       const pairKey = teamPairKey(awayAbbr, homeAbbr);
       if (pairKey) {
         if (!oddsByTeamPair.has(pairKey)) oddsByTeamPair.set(pairKey, []);
@@ -721,10 +846,14 @@ serve(async (req) => {
         const gameDate = isManualGame ? todayStr : commence?.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
         const homeAbbr = isManualGame
           ? String(game.home_team ?? "").trim().toUpperCase() || null
-          : cfg.teamMap[game.home_team] || null;
+          : sport === "NBA" || sport === "WNBA"
+          ? resolveBasketballTeamAbbr(game.home_team, cfg.teamMap)
+          : resolveMlbTeamAbbr(game.home_team, cfg.teamMap);
         const awayAbbr = isManualGame
           ? String(game.away_team ?? "").trim().toUpperCase() || null
-          : cfg.teamMap[game.away_team] || null;
+          : sport === "NBA" || sport === "WNBA"
+          ? resolveBasketballTeamAbbr(game.away_team, cfg.teamMap)
+          : resolveMlbTeamAbbr(game.away_team, cfg.teamMap);
         const gameTime = isManualGame
           ? (String(game.manual_game_time ?? "").trim() || null)
           : commence?.toLocaleTimeString("en-US", {
@@ -752,6 +881,10 @@ serve(async (req) => {
         }
 
         if (!homeAbbr || !awayAbbr) {
+          if (sport === "MLB") {
+            if (!homeAbbr && game.home_team) mlbTeamMappingMissingNames.add(String(game.home_team));
+            if (!awayAbbr && game.away_team) mlbTeamMappingMissingNames.add(String(game.away_team));
+          }
           skippedGames.push({
             reason: "missing_team_abbreviation_mapping",
             game: game.id,
@@ -1323,6 +1456,8 @@ serve(async (req) => {
       provider_unavailable_reason: providerUnavailableReason,
       mlb_resolved_players: mlbResolvedPlayers,
       mlb_unresolved_players: mlbUnresolvedPlayers,
+      mlb_team_mapping_missing_names: [...mlbTeamMappingMissingNames].sort(),
+      games_today_mismatch_count: verificationSummary.by_status.mismatch,
       odds_provider: oddsProvider,
       odds_fallback: oddsFallback,
       odds_stale: oddsStale,
