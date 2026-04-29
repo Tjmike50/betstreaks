@@ -49,9 +49,10 @@ const MLB_TEAM_ABBRS: Record<string, string> = {
   "BOSTON": "BOS",
   "CHICAGO CUBS": "CHC",
   "CUBS": "CHC",
-  "CHICAGO WHITE SOX": "CWS",
-  "WHITE SOX": "CWS",
-  "SOX": "CWS",
+  "CHICAGO WHITE SOX": "CHW",
+  "WHITE SOX": "CHW",
+  "CHW": "CHW",
+  "CWS": "CHW",
   "CINCINNATI REDS": "CIN",
   "REDS": "CIN",
   "CINCINNATI": "CIN",
@@ -307,7 +308,7 @@ function resolveMlbTeamAbbr(raw: string | null | undefined, teamMap: Record<stri
   if (teamMap[normalized]) return teamMap[normalized];
   const lastWord = normalized.split(" ").pop() || normalized;
   if (teamMap[lastWord]) return teamMap[lastWord];
-  if (normalized.includes("WHITE SOX")) return "CWS";
+  if (normalized.includes("WHITE SOX")) return "CHW";
   if (normalized.includes("RED SOX")) return "BOS";
   if (normalized.includes("DIAMONDBACK")) return "ARI";
   if (normalized.includes("D BACK")) return "ARI";
@@ -318,6 +319,30 @@ function resolveMlbTeamAbbr(raw: string | null | undefined, teamMap: Record<stri
   if (normalized.includes("CUB")) return "CHC";
   if (normalized.includes("MET")) return "NYM";
   return null;
+}
+
+function isInvalidMlbSlateRow(row: {
+  canonical_game_key?: string | null;
+  away_team_abbr?: string | null;
+  home_team_abbr?: string | null;
+  verification_status?: string | null;
+}): boolean {
+  return (
+    !row.canonical_game_key ||
+    !row.away_team_abbr ||
+    !row.home_team_abbr ||
+    (
+      (row.verification_status === "mismatch" || row.verification_status === "unverified") &&
+      !row.canonical_game_key
+    )
+  );
+}
+
+function normalizeMlbCanonicalKeyForCleanup(
+  canonicalKey: string | null | undefined,
+): string | null {
+  if (!canonicalKey) return null;
+  return canonicalKey.replace(/_CWS$/, "_CHW").replace(/_CWS_/, "_CHW_");
 }
 
 function chooseOddsGameForSlateDate(
@@ -685,6 +710,9 @@ serve(async (req) => {
     const matchedKeys: string[] = [];
     const missingFromOddsKeys: string[] = [];
     const staleDeactivatedKeys: string[] = [];
+    let staleGamesDeactivatedCount = 0;
+    let staleInvalidRowsDeactivatedCount = 0;
+    let duplicateCanonicalRowsDeactivatedCount = 0;
     let scheduleSourceUsed = "odds_provider";
     try {
       const res = await fetch(`${fnBase}/get-odds`, {
@@ -1074,7 +1102,110 @@ serve(async (req) => {
       }
     }
 
+    if (sport === "MLB") {
+      const validCanonicalKeys = new Set(
+        gamesTodayRows
+          .map((row) => normalizeMlbCanonicalKeyForCleanup(row.canonical_game_key))
+          .filter(Boolean) as string[],
+      );
+
+      const { data: existingMlbRows } = await supabase
+        .from("games_today")
+        .select(
+          "id, canonical_game_key, away_team_abbr, home_team_abbr, verification_status, source_primary, is_active",
+        )
+        .eq("sport", sport)
+        .eq("game_date", requestedGameDate)
+        .eq("is_active", true);
+
+      const rowsToDeactivate = new Map<string, { canonical_game_key: string | null; reason: "invalid" | "stale" | "duplicate" }>();
+
+      for (const row of existingMlbRows ?? []) {
+        const normalizedKey = normalizeMlbCanonicalKeyForCleanup(row.canonical_game_key);
+        const invalidRow = isInvalidMlbSlateRow(row);
+
+        if (invalidRow) {
+          rowsToDeactivate.set(row.id, {
+            canonical_game_key: row.canonical_game_key,
+            reason: "invalid",
+          });
+          continue;
+        }
+
+        if (!normalizedKey) continue;
+
+        const equivalentWhiteSoxDuplicate =
+          normalizedKey !== row.canonical_game_key &&
+          validCanonicalKeys.has(normalizedKey);
+        if (equivalentWhiteSoxDuplicate) {
+          rowsToDeactivate.set(row.id, {
+            canonical_game_key: row.canonical_game_key,
+            reason: "duplicate",
+          });
+          continue;
+        }
+
+        const trustedPrimary =
+          row.source_primary === "espn_scoreboard" ||
+          row.source_primary === "manual_emergency";
+        if (!trustedPrimary && validCanonicalKeys.size > 0 && !validCanonicalKeys.has(normalizedKey)) {
+          rowsToDeactivate.set(row.id, {
+            canonical_game_key: row.canonical_game_key,
+            reason: "stale",
+          });
+        }
+      }
+
+      const rowsToDeactivateList = [...rowsToDeactivate.entries()].map(([id, meta]) => ({
+        id,
+        canonical_game_key: meta.canonical_game_key,
+        reason: meta.reason,
+      }));
+
+      for (const row of rowsToDeactivateList) {
+        if (row.canonical_game_key) staleDeactivatedKeys.push(row.canonical_game_key);
+        staleGamesDeactivatedCount++;
+        if (row.reason === "invalid") staleInvalidRowsDeactivatedCount++;
+        if (row.reason === "duplicate") duplicateCanonicalRowsDeactivatedCount++;
+      }
+
+      for (let i = 0; i < rowsToDeactivateList.length; i += 100) {
+        const slice = rowsToDeactivateList.slice(i, i + 100);
+        if (slice.length === 0) continue;
+        const { error } = await supabase
+          .from("games_today")
+          .update({
+            is_active: false,
+            is_postponed: false,
+            status: "Deactivated",
+            updated_at: now,
+          })
+          .in("id", slice.map((row) => row.id));
+        if (error) console.error(`[${sport}] stale/invalid MLB slate deactivation error:`, error);
+      }
+    }
+
     activeGamesCount = gamesTodayRows.filter((r) => r.is_active).length;
+
+    let activeNullCanonicalRowsAfterCleanup = 0;
+    if (sport === "MLB") {
+      const { count: activeCountAfterCleanup } = await supabase
+        .from("games_today")
+        .select("id", { count: "exact", head: true })
+        .eq("sport", sport)
+        .eq("game_date", requestedGameDate)
+        .eq("is_active", true);
+      activeGamesCount = activeCountAfterCleanup ?? activeGamesCount;
+
+      const { count } = await supabase
+        .from("games_today")
+        .select("id", { count: "exact", head: true })
+        .eq("sport", sport)
+        .eq("game_date", requestedGameDate)
+        .eq("is_active", true)
+        .is("canonical_game_key", null);
+      activeNullCanonicalRowsAfterCleanup = count ?? 0;
+    }
 
     console.log(`Game dates: ${[...allGameDates].sort().join(", ")}`);
 
@@ -1458,6 +1589,12 @@ serve(async (req) => {
       mlb_unresolved_players: mlbUnresolvedPlayers,
       mlb_team_mapping_missing_names: [...mlbTeamMappingMissingNames].sort(),
       games_today_mismatch_count: verificationSummary.by_status.mismatch,
+      stale_games_deactivated_count: staleGamesDeactivatedCount,
+      stale_invalid_rows_deactivated_count: staleInvalidRowsDeactivatedCount,
+      duplicate_canonical_rows_deactivated_count: duplicateCanonicalRowsDeactivatedCount,
+      white_sox_abbr_used: "CHW",
+      valid_canonical_keys_count: new Set(gamesTodayRows.map((row) => row.canonical_game_key).filter(Boolean)).size,
+      active_null_canonical_rows_after_cleanup: activeNullCanonicalRowsAfterCleanup,
       odds_provider: oddsProvider,
       odds_fallback: oddsFallback,
       odds_stale: oddsStale,
