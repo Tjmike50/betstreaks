@@ -104,11 +104,9 @@ export default function BestBetsCheatsheetPage() {
             <p className="text-xs text-muted-foreground">
               {data?.emptyReason ?? `Try lowering the confidence threshold, or check back once tonight's ${config.name} slate is scored.`}
             </p>
-            {data?.effectiveDate && (
-              <p className="text-[11px] text-muted-foreground mt-2">
-                Slate: {data.effectiveDate}
-              </p>
-            )}
+            <p className="text-[11px] text-muted-foreground mt-2">
+              {config.shortName} · Requested {data?.requestedDate ?? "today"} · Using {data?.effectiveDate ?? "latest available"} · {data?.rowsScanned ?? data?.rawRowCount ?? 0} rows scanned · {data?.rowsMatched ?? data?.filteredRowCount ?? 0} matched.
+            </p>
           </div>
         )}
 

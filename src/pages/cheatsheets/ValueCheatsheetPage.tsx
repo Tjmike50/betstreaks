@@ -107,11 +107,9 @@ export default function ValueCheatsheetPage() {
             <p className="text-xs text-muted-foreground">
               {data?.emptyReason ?? `${config.name} doesn't have verified value plays for this slate yet. Check back once tonight's lines are scored.`}
             </p>
-            {data?.effectiveDate && (
-              <p className="text-[11px] text-muted-foreground mt-2">
-                Slate: {data.effectiveDate}
-              </p>
-            )}
+            <p className="text-[11px] text-muted-foreground mt-2">
+              {config.shortName} · Requested {data?.requestedDate ?? "today"} · Using {data?.effectiveDate ?? "latest available"} · {data?.rowsScanned ?? data?.rawRowCount ?? 0} rows scanned · {data?.rowsMatched ?? data?.filteredRowCount ?? 0} matched.
+            </p>
           </div>
         )}
 

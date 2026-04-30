@@ -46,10 +46,15 @@ export interface CheatsheetResult {
   requestedDate: string;
   effectiveDate: string | null;
   usingLatestFallback: boolean;
+  isLatestFallback: boolean;
   activeTeams: string[];
   emptyReason: string | null;
+  rowsScanned: number;
+  rowsMatched: number;
   rawRowCount: number;
   filteredRowCount: number;
+  providerUnavailableReason: string | null;
+  quotaExhausted: boolean;
 }
 
 export interface UseCheatsheetOptions {
@@ -245,7 +250,7 @@ export function useCheatsheet({
   const usableScoreFilter = "score_overall.not.is.null,confidence_score.not.is.null";
 
   return useQuery({
-    queryKey: ["cheatsheet", category, sport, limit, minValueScore, minConfidence, requestedDate],
+    queryKey: ["cheatsheet", sport, category, requestedDate, limit, minValueScore, minConfidence],
     queryFn: async (): Promise<CheatsheetResult> => {
       let effectiveDate = requestedDate;
 
@@ -273,6 +278,7 @@ export function useCheatsheet({
       }
 
       const usingLatestFallback = effectiveDate !== requestedDate;
+      const shouldApplyActiveTeamFilter = effectiveDate === requestedDate;
 
       const { data: activeGames, error: activeGamesError } = await supabase
         .from("games_today")
@@ -303,19 +309,25 @@ export function useCheatsheet({
       const { data, error } = await query.limit(Math.max(limit * 4, 200));
       if (error) throw error;
 
-      const rows = ((data ?? []) as unknown as CheatsheetRow[])
-        .filter((row) => passesScope(sport, row.team_abbr ?? null))
-        .filter((row) => activeTeams.length === 0 || !row.team_abbr || activeTeams.includes(row.team_abbr));
+      const fetchedRows = (data ?? []) as unknown as CheatsheetRow[];
+      const rowsScanned = fetchedRows.length;
 
-      const rawRowCount = rows.length;
-      const filteredRows = filterRowsForCategory(rows, category, sport, minValueScore, minConfidence).slice(0, limit);
-      const filteredRowCount = filteredRows.length;
+      const scopedRows = fetchedRows
+        .filter((row) => passesScope(sport, row.team_abbr ?? null))
+        .filter((row) => !shouldApplyActiveTeamFilter || activeTeams.length === 0 || !row.team_abbr || activeTeams.includes(row.team_abbr));
+
+      const filteredRows = filterRowsForCategory(scopedRows, category, sport, minValueScore, minConfidence).slice(0, limit);
+      const rowsMatched = filteredRows.length;
 
       let emptyReason: string | null = null;
-      if (rows.length === 0) {
-        emptyReason = "No scored props found for the selected slate.";
+      if (rowsScanned === 0) {
+        emptyReason = "No scored props exist for this sport yet. Run the scoring pipeline for the current slate.";
+      } else if (scopedRows.length === 0) {
+        emptyReason = shouldApplyActiveTeamFilter
+          ? "Scored rows exist, but none matched the active teams on the requested slate."
+          : "Scored rows exist for the fallback slate, but none matched the current scope filters.";
       } else if (filteredRows.length === 0) {
-        emptyReason = "No verified plays found for this category yet.";
+        emptyReason = "Rows exist, but none matched this category/filter.";
       }
 
       return {
@@ -323,12 +335,20 @@ export function useCheatsheet({
         requestedDate,
         effectiveDate,
         usingLatestFallback,
+        isLatestFallback: usingLatestFallback,
         activeTeams,
         emptyReason,
-        rawRowCount,
-        filteredRowCount,
+        rowsScanned,
+        rowsMatched,
+        rawRowCount: rowsScanned,
+        filteredRowCount: rowsMatched,
+        providerUnavailableReason: null,
+        quotaExhausted: false,
       };
     },
-    staleTime: 60_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }

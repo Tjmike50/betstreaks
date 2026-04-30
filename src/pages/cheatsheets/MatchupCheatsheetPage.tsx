@@ -132,11 +132,9 @@ export default function MatchupCheatsheetPage() {
                 ? data?.emptyReason ?? "MLB matchup history is still being filled in. No verified matchup data is available for this slate yet."
                 : data?.emptyReason ?? "Try lowering the minimum vs-opponent hit rate. Matchup edges require at least 2 prior games vs tonight's opponent."}
             </p>
-            {data?.effectiveDate && (
-              <p className="text-[11px] text-muted-foreground mt-2">
-                Slate: {data.effectiveDate}
-              </p>
-            )}
+            <p className="text-[11px] text-muted-foreground mt-2">
+              {config.shortName} · Requested {data?.requestedDate ?? "today"} · Using {data?.effectiveDate ?? "latest available"} · {data?.rowsScanned ?? data?.rawRowCount ?? 0} rows scanned · {data?.rowsMatched ?? data?.filteredRowCount ?? 0} matched.
+            </p>
           </div>
         )}
 
