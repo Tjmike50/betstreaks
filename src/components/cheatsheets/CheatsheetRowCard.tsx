@@ -5,16 +5,12 @@ import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { CheatsheetRow } from "@/hooks/useCheatsheet";
+import { formatHitRate, normalizeHitRatePercent } from "@/lib/formatHitRate";
 
 interface Props {
   row: CheatsheetRow;
   /** Which numeric metric to highlight on the right (defaults to value). */
   highlight?: "value" | "confidence" | "last10" | "vs_opp";
-}
-
-function fmtPct(v: number | null | undefined): string {
-  if (v == null) return "—";
-  return `${Math.round(v)}%`;
 }
 
 function fmtScore(v: number | null | undefined): string {
@@ -31,10 +27,11 @@ function normalizeTags(value: unknown): string[] {
 }
 
 function scoreColor(v: number | null | undefined): string {
-  if (v == null) return "text-muted-foreground";
-  if (v >= 75) return "text-emerald-400";
-  if (v >= 60) return "text-primary";
-  if (v >= 45) return "text-amber-400";
+  const normalized = normalizeHitRatePercent(v);
+  if (normalized == null) return "text-muted-foreground";
+  if (normalized >= 75) return "text-emerald-400";
+  if (normalized >= 60) return "text-primary";
+  if (normalized >= 45) return "text-amber-400";
   return "text-muted-foreground";
 }
 
@@ -64,8 +61,8 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
       : highlight === "confidence"
         ? { label: "Conf.", val: fmtScore(row.confidence_score), color: scoreColor(row.confidence_score) }
         : highlight === "last10"
-          ? { label: "L10", val: fmtPct(row.last10_hit_rate), color: scoreColor(row.last10_hit_rate) }
-          : { label: "vs Opp", val: fmtPct(row.vs_opponent_hit_rate), color: scoreColor(row.vs_opponent_hit_rate) };
+          ? { label: "L10", val: formatHitRate(row.last10_hit_rate), color: scoreColor(row.last10_hit_rate) }
+          : { label: "vs Opp", val: formatHitRate(row.vs_opponent_hit_rate), color: scoreColor(row.vs_opponent_hit_rate) };
 
   const matchup = buildMatchup(row);
   const subtitle = matchup ? `Over ${row.threshold} · ${matchup}` : `Over ${row.threshold}`;
@@ -91,8 +88,8 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
             {subtitle}
           </p>
           <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
-            <span>L5: <span className="text-foreground font-medium">{fmtPct(row.last5_hit_rate)}</span></span>
-            <span>L10: <span className="text-foreground font-medium">{fmtPct(row.last10_hit_rate)}</span></span>
+            <span>L5: <span className="text-foreground font-medium">{formatHitRate(row.last5_hit_rate)}</span></span>
+            <span>L10: <span className="text-foreground font-medium">{formatHitRate(row.last10_hit_rate)}</span></span>
             <span>Avg: <span className="text-foreground font-medium">{row.last10_avg?.toFixed(1) ?? "—"}</span></span>
           </div>
           {tags.length > 0 && (

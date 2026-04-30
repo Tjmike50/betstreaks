@@ -12,6 +12,7 @@ import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { useRefreshStatus } from "@/hooks/useRefreshStatus";
 import { useToast } from "@/hooks/use-toast";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
+import { formatHitRate, normalizeHitRatePercent } from "@/lib/formatHitRate";
 
 interface StreakCardProps {
   streak: Streak;
@@ -45,7 +46,9 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
   // Check if qualifies as "Best Bet" - deterministic and defensible criteria
   // Must have: streak >= 3, season >= 55% OR L10 >= 60%, and last game within 2 days
   // Disable if data is stale (>3h old) to avoid misleading users
-  const l10Pct = streak.last10_hit_pct ?? (streak.last10_games > 0 ? (streak.last10_hits / streak.last10_games) * 100 : 0);
+  const l10Pct = normalizeHitRatePercent(
+    streak.last10_hit_pct ?? (streak.last10_games > 0 ? (streak.last10_hits / streak.last10_games) * 100 : 0),
+  ) ?? 0;
   const meetsBestBetCriteria = !isLocked && 
     streak.streak_len >= 3 && 
     (streak.season_win_pct >= 55 || l10Pct >= 60) &&
@@ -326,7 +329,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
               <span>
                 Hit in {streak.last10_hits} of last {streak.last10_games}{" "}
                 <span className="text-muted-foreground">
-                  ({streak.last10_hit_pct != null ? Math.round(streak.last10_hit_pct) : Math.round((streak.last10_hits / streak.last10_games) * 100)}%)
+                  ({formatHitRate(streak.last10_hit_pct != null ? streak.last10_hit_pct : (streak.last10_hits / streak.last10_games) * 100)})
                 </span>
               </span>
             </div>
@@ -338,7 +341,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
               <span>
                 L5: {streak.last5_hits}/{streak.last5_games}{" "}
                 <span className="text-muted-foreground">
-                  ({streak.last5_hit_pct != null ? Math.round(streak.last5_hit_pct) : Math.round((streak.last5_hits / streak.last5_games) * 100)}%)
+                  ({formatHitRate(streak.last5_hit_pct != null ? streak.last5_hit_pct : (streak.last5_hits / streak.last5_games) * 100)})
                 </span>
               </span>
             </div>
@@ -347,7 +350,7 @@ export function StreakCard({ streak, isStarred, onToggleStar, showStarButton = t
           <div className="flex items-center gap-2 text-muted-foreground">
             <Calendar className="h-4 w-4" />
             <span>
-              Season: {streak.season_wins}/{streak.season_games} ({Math.round(streak.season_win_pct)}%) · Last game {formatDate(streak.last_game)}
+              Season: {streak.season_wins}/{streak.season_games} ({formatHitRate(streak.season_win_pct)}) · Last game {formatDate(streak.last_game)}
             </span>
           </div>
         </div>

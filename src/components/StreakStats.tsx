@@ -5,6 +5,7 @@ import type { Streak } from "@/types/streak";
 import { formatDistanceToNow } from "date-fns";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
+import { formatHitRate, normalizeHitRatePercent } from "@/lib/formatHitRate";
 
 interface StreakStatsProps {
   streak: Streak;
@@ -49,7 +50,7 @@ export function StreakStats({ streak, lastUpdated }: StreakStatsProps) {
 
   // Calculate hit rates
   const getL5Pct = () => {
-    if (streak.last5_hit_pct != null) return Math.round(streak.last5_hit_pct);
+    if (streak.last5_hit_pct != null) return Math.round(normalizeHitRatePercent(streak.last5_hit_pct) ?? 0);
     if (streak.last5_games && streak.last5_games > 0) {
       return Math.round(((streak.last5_hits ?? 0) / streak.last5_games) * 100);
     }
@@ -57,7 +58,7 @@ export function StreakStats({ streak, lastUpdated }: StreakStatsProps) {
   };
 
   const getL10Pct = () => {
-    if (streak.last10_hit_pct != null) return Math.round(streak.last10_hit_pct);
+    if (streak.last10_hit_pct != null) return Math.round(normalizeHitRatePercent(streak.last10_hit_pct) ?? 0);
     if (streak.last10_games && streak.last10_games > 0) {
       return Math.round(((streak.last10_hits ?? 0) / streak.last10_games) * 100);
     }
@@ -108,7 +109,7 @@ export function StreakStats({ streak, lastUpdated }: StreakStatsProps) {
             <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/30">
               <span className="text-sm text-muted-foreground">Season</span>
               <span className="text-sm font-semibold text-streak-blue">
-                {streak.season_wins}/{streak.season_games} ({Math.round(streak.season_win_pct)}%)
+                {streak.season_wins}/{streak.season_games} ({formatHitRate(streak.season_win_pct)})
               </span>
             </div>
 

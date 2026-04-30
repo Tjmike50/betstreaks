@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ResearchPlayerRow } from "@/hooks/useResearchPlayers";
 import { compactStatLabel } from "@/lib/mlbStatLabels";
+import { formatHitRate, normalizeHitRatePercent } from "@/lib/formatHitRate";
 
 type SortKey = "name" | "team" | "streak" | "season" | "last10";
 type SortDir = "asc" | "desc";
@@ -27,15 +28,12 @@ function getTeamLogoUrl(sport: string, abbr: string | null) {
 }
 
 function fmtPct(n: number | null | undefined): string {
-  if (n == null || Number.isNaN(n)) return "—";
-  // Stored values are 0–1 in some places, 0–100 in others. Normalize.
-  const pct = n <= 1 ? n * 100 : n;
-  return `${Math.round(pct)}%`;
+  return formatHitRate(n);
 }
 
 function pctValue(n: number | null | undefined): number {
-  if (n == null || Number.isNaN(n)) return -1;
-  return n <= 1 ? n * 100 : n;
+  const pct = normalizeHitRatePercent(n);
+  return pct == null ? -1 : pct;
 }
 
 export function PlayerSearchTable({ rows, sport }: Props) {

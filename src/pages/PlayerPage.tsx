@@ -10,6 +10,7 @@ import { usePlayerStreaks } from "@/hooks/useStreaks";
 import { useFavorites } from "@/hooks/useFavorites";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { PremiumLockModal } from "@/components/PremiumLockModal";
+import { formatHitRate } from "@/lib/formatHitRate";
 import { cn } from "@/lib/utils";
 
 const PlayerPage = () => {
@@ -123,7 +124,7 @@ const PlayerPage = () => {
                     <div className="flex items-center gap-2 text-streak-blue">
                       <TrendingUp className="h-4 w-4" />
                       <span>
-                        Season hit rate: {Math.round(streak.season_win_pct)}%{" "}
+                        Season hit rate: {formatHitRate(streak.season_win_pct)}{" "}
                         <span className="text-muted-foreground">
                           ({streak.season_wins}/{streak.season_games})
                         </span>

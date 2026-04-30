@@ -11,6 +11,7 @@ import { useSport } from "@/contexts/SportContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { compactStatLabel } from "@/lib/mlbStatLabels";
+import { formatHitRate } from "@/lib/formatHitRate";
 
 function rowHref(row: CheatsheetRow): string {
   return `/research/player/${row.player_id}`;
@@ -117,7 +118,7 @@ export function BestPlaysPreview() {
                     {compactStatLabel(row.stat_type)} O{row.threshold} ·{" "}
                     {row.opponent_abbr
                       ? `${row.team_abbr ?? ""} ${row.home_away === "away" ? "@" : "vs"} ${row.opponent_abbr}`
-                      : `${Math.round(row.last10_hit_rate ?? 0)}% L10`}
+                      : `${formatHitRate(row.last10_hit_rate)} L10`}
                   </p>
                 </div>
                 <Badge
