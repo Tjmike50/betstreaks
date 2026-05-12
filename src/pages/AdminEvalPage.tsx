@@ -920,7 +920,7 @@ export default function AdminEvalPage() {
         <DataQualityCard />
 
         {/* Line Snapshot Status */}
-        {!snapLoading && snapStatus && (
+        {!snapLoading && snapStatus?.nba && snapStatus?.mlb && (
           <Card>
             <CardContent className="pt-4 space-y-2">
               <div className="flex items-center justify-between">
