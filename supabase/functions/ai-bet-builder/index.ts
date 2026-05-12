@@ -1153,7 +1153,7 @@ Return strict JSON with shape:
   }
 
   // Persist
-  const saved = await persistMlbSlips(supabase, validatedSlips, prompt, userId);
+  const saved = await persistMlbSlips(serviceClient, validatedSlips, prompt, userId);
   const responseSlips = saved.length === validatedSlips.length
     ? validatedSlips.map((slip, index) => buildResponseSlip(slip, saved[index] ?? null, index))
     : validatedSlips.map((slip, index) => buildResponseSlip(slip, null, index));
@@ -1294,7 +1294,7 @@ async function mlbDeterministicFallback(
     );
   }
 
-  const saved = await persistMlbSlips(supabase, slips, prompt, userId);
+  const saved = await persistMlbSlips(serviceClient, slips, prompt, userId);
   const responseSlips = saved.length === slips.length
     ? slips.map((slip, index) => buildResponseSlip(slip, saved[index] ?? null, index))
     : slips.map((slip, index) => buildResponseSlip(slip, null, index));
@@ -1337,10 +1337,10 @@ async function mlbDeterministicFallback(
 }
 
 // deno-lint-ignore no-explicit-any
-async function persistMlbSlips(supabase: any, slips: any[], prompt: string, userId: string | null): Promise<any[]> {
+async function persistMlbSlips(serviceClient: any, slips: any[], prompt: string, userId: string | null): Promise<any[]> {
   const out: any[] = [];
   for (const slip of slips) {
-    const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
+    const { data: slipRow, error: slipErr } = await serviceClient.from("ai_slips").insert({
       user_id: userId,
       prompt,
       slip_name: slip.slip_name,
@@ -1364,7 +1364,7 @@ async function persistMlbSlips(supabase: any, slips: any[], prompt: string, user
       reasoning: leg.reasoning,
       leg_order: idx,
     }));
-    const { data: insertedLegs, error: legErr } = await supabase.from("ai_slip_legs").insert(legRows).select();
+    const { data: insertedLegs, error: legErr } = await serviceClient.from("ai_slip_legs").insert(legRows).select();
     if (legErr) console.error("[AI-Builder/MLB] insert legs failed:", legErr);
     const legsWithCtx = (insertedLegs ?? legRows).map((lr: any, idx: number) => ({
       ...lr,
@@ -2652,7 +2652,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
         let fallbackSaveFailures = 0;
         for (const [slipIndex, slip] of fallbackSlips.entries()) {
           let persistedSlip: any | null = null;
-          const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
+          const { data: slipRow, error: slipErr } = await serviceClient.from("ai_slips").insert({
             user_id: user?.id || null, prompt, slip_name: slip.slip_name, sport,
             risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
           }).select().single();
@@ -2665,7 +2665,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
               stat_type: leg.stat_type, line: leg.line, pick: leg.pick,
               odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
             }));
-            const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
+            const { data: legRows, error: legErr } = await serviceClient.from("ai_slip_legs").insert(legs).select();
             if (legErr) console.error("[AI-Builder] Error saving fallback legs:", legErr);
 
             const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
@@ -2989,7 +2989,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
     let saveFailures = 0;
     for (const [slipIndex, slip] of parsed.slips.entries()) {
       let persistedSlip: any | null = null;
-      const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
+      const { data: slipRow, error: slipErr } = await serviceClient.from("ai_slips").insert({
         user_id: user?.id || null, prompt, slip_name: slip.slip_name, sport,
         risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
       }).select().single();
@@ -3004,7 +3004,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
           odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
         }));
 
-        const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
+        const { data: legRows, error: legErr } = await serviceClient.from("ai_slip_legs").insert(legs).select();
         if (legErr) console.error("[AI-Builder] Error saving legs:", legErr);
 
         const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
