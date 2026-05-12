@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { requireAdmin } from "../_shared/adminAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,6 +27,14 @@ function fineGrainBucket(score: number | null): string {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const __auth = await requireAdmin(req);
+  if (!__auth.ok) {
+    return new Response(JSON.stringify({ error: __auth.error }), {
+      status: __auth.status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;

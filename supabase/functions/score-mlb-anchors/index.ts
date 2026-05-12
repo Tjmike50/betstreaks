@@ -44,6 +44,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
 import {
+import { requireAdmin } from "../_shared/adminAuth.ts";
   MLB_MARKET_MAP,
   MLB_STAT_KEYS,
   type MlbStatKey,
@@ -1091,6 +1092,14 @@ function computeLineQualityMetrics(
 // ── Main handler ──
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const __auth = await requireAdmin(req);
+  if (!__auth.ok) {
+    return new Response(JSON.stringify({ error: __auth.error }), {
+      status: __auth.status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   const startedAt = Date.now();
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
