@@ -646,6 +646,61 @@ interface DebugInfo {
   latest_available_game_date?: string | null;
   provider_unavailable_reason?: string | null;
   quota_exhausted?: boolean | null;
+  response_slips_count?: number;
+  response_legs_count?: number;
+  slip_build_error?: string | null;
+}
+
+function parseThresholdFromLine(line: unknown): number | null {
+  if (typeof line !== "string") return null;
+  const match = line.match(/([\d.]+)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildResponseLeg(sourceLeg: any, originalLeg: any, fallbackId: string) {
+  const line = sourceLeg?.line ?? originalLeg?.line ?? null;
+  const threshold = sourceLeg?.threshold ?? originalLeg?.threshold ?? parseThresholdFromLine(line);
+  const confidenceScore =
+    sourceLeg?.confidence_score ??
+    originalLeg?.confidence_score ??
+    sourceLeg?.data_context?.confidence_score ??
+    originalLeg?.data_context?.confidence_score ??
+    null;
+
+  return {
+    ...sourceLeg,
+    line,
+    threshold,
+    pick: sourceLeg?.pick ?? originalLeg?.pick ?? null,
+    pick_side: sourceLeg?.pick_side ?? sourceLeg?.pick ?? originalLeg?.pick_side ?? originalLeg?.pick ?? null,
+    odds: sourceLeg?.odds ?? originalLeg?.odds ?? null,
+    confidence_score: confidenceScore,
+    id: sourceLeg?.id ?? fallbackId,
+  };
+}
+
+function buildResponseSlip(originalSlip: any, persistedSlip: any | null, slipIndex: number) {
+  const originalLegs = Array.isArray(originalSlip?.legs) ? originalSlip.legs : [];
+  const sourceLegs = Array.isArray(persistedSlip?.legs) ? persistedSlip.legs : originalLegs;
+  const legOdds = sourceLegs.map((leg: any, idx: number) => leg?.odds ?? originalLegs[idx]?.odds ?? null);
+  const estimatedOdds =
+    persistedSlip?.estimated_odds ??
+    originalSlip?.estimated_odds ??
+    parlayAmerican(legOdds) ??
+    null;
+
+  return {
+    id: persistedSlip?.id ?? `generated-${crypto.randomUUID()}`,
+    slip_name: persistedSlip?.slip_name ?? originalSlip?.slip_name ?? `AI Slip ${slipIndex + 1}`,
+    risk_label: persistedSlip?.risk_label ?? originalSlip?.risk_label ?? "balanced",
+    estimated_odds: estimatedOdds,
+    reasoning: persistedSlip?.reasoning ?? originalSlip?.reasoning ?? null,
+    persisted: Boolean(persistedSlip?.id),
+    legs: sourceLegs.map((leg: any, legIndex: number) =>
+      buildResponseLeg(leg, originalLegs[legIndex], `${persistedSlip?.id ?? `generated-${slipIndex + 1}`}-leg-${legIndex + 1}`)),
+  };
 }
 
 async function readQuotaAlertState(
@@ -1099,6 +1154,10 @@ Return strict JSON with shape:
 
   // Persist
   const saved = await persistMlbSlips(supabase, validatedSlips, prompt, userId);
+  const responseSlips = saved.length === validatedSlips.length
+    ? validatedSlips.map((slip, index) => buildResponseSlip(slip, saved[index] ?? null, index))
+    : validatedSlips.map((slip, index) => buildResponseSlip(slip, null, index));
+  const responseLegsCount = responseSlips.reduce((sum, slip) => sum + (slip.legs?.length ?? 0), 0);
 
   if (!isPremium) {
     serviceClient.from("ai_usage").upsert(
@@ -1109,7 +1168,8 @@ Return strict JSON with shape:
 
   return new Response(
     JSON.stringify({
-      slips: saved,
+      ok: true,
+      slips: responseSlips,
       fallback: false,
       scoring_metadata: {
         sport: "MLB",
@@ -1128,9 +1188,9 @@ Return strict JSON with shape:
         verified_candidates_passed_to_llm: Math.min(verifiedMarketCandidateCount, 40),
         candidates_after_diversity: verifiedMarketCandidateCount,
         unique_players: new Set(verifiedCandidates.map((c) => c.player_id)).size,
-        legs_validated: saved.reduce((s, sl) => s + (sl.legs?.length ?? 0), 0),
+        legs_validated: responseLegsCount,
         legs_rejected: 0,
-        final_legs_accepted: saved.reduce((s, sl) => s + (sl.legs?.length ?? 0), 0),
+        final_legs_accepted: responseLegsCount,
         final_legs_rejected_no_match: 0,
         games_today: 0,
         live_props_found: 0,
@@ -1140,6 +1200,9 @@ Return strict JSON with shape:
         scoring_data_available: verifiedMarketCandidateCount,
         scoring_source: "today",
         market_quality: null,
+        response_slips_count: responseSlips.length,
+        response_legs_count: responseLegsCount,
+        slip_build_error: saved.length === validatedSlips.length ? null : "one_or_more_mlb_slips_failed_to_persist",
       },
       debug: {
         sport: "MLB",
@@ -1155,6 +1218,9 @@ Return strict JSON with shape:
         candidates_by_stat_type: verifiedCandidatesByStatType,
         provider_unavailable_reason: providerUnavailableReason,
         quota_exhausted: quotaExhausted,
+        response_slips_count: responseSlips.length,
+        response_legs_count: responseLegsCount,
+        slip_build_error: saved.length === validatedSlips.length ? null : "one_or_more_mlb_slips_failed_to_persist",
       },
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -1229,6 +1295,9 @@ async function mlbDeterministicFallback(
   }
 
   const saved = await persistMlbSlips(supabase, slips, prompt, userId);
+  const responseSlips = saved.length === slips.length
+    ? slips.map((slip, index) => buildResponseSlip(slip, saved[index] ?? null, index))
+    : slips.map((slip, index) => buildResponseSlip(slip, null, index));
   if (!isPremium) {
     serviceClient.from("ai_usage").upsert(
       { user_id: userId, usage_date: gameDate, request_count: 1 },
@@ -1238,7 +1307,8 @@ async function mlbDeterministicFallback(
 
   return new Response(
     JSON.stringify({
-      slips: saved,
+      ok: true,
+      slips: responseSlips,
       fallback: true,
       scoring_metadata: {
         sport: "MLB",
@@ -1249,8 +1319,18 @@ async function mlbDeterministicFallback(
         scoring_data_available: candidates.length,
         scoring_source: "today",
         market_quality: null,
+        response_slips_count: responseSlips.length,
+        response_legs_count: responseSlips.reduce((sum, slip) => sum + (slip.legs?.length ?? 0), 0),
       },
-      debug: { sport: "MLB", game_date: gameDate, requested_game_date: requestedGameDate, duration_ms: Date.now() - startedAt },
+      debug: {
+        sport: "MLB",
+        game_date: gameDate,
+        requested_game_date: requestedGameDate,
+        duration_ms: Date.now() - startedAt,
+        response_slips_count: responseSlips.length,
+        response_legs_count: responseSlips.reduce((sum, slip) => sum + (slip.legs?.length ?? 0), 0),
+        slip_build_error: saved.length === slips.length ? null : "one_or_more_mlb_fallback_slips_failed_to_persist",
+      },
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
@@ -2568,26 +2648,35 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
 
         // Save fallback slips to DB (same as LLM path)
         const savedFallbackSlips = [];
-        for (const slip of fallbackSlips) {
+        const responseFallbackSlips = [];
+        let fallbackSaveFailures = 0;
+        for (const [slipIndex, slip] of fallbackSlips.entries()) {
+          let persistedSlip: any | null = null;
           const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
             user_id: user?.id || null, prompt, slip_name: slip.slip_name, sport,
             risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
           }).select().single();
-          if (slipErr) { console.error("[AI-Builder] Error saving fallback slip:", slipErr); continue; }
+          if (slipErr) {
+            fallbackSaveFailures++;
+            console.error("[AI-Builder] Error saving fallback slip:", slipErr);
+          } else {
+            const legs = slip.legs.map((leg: any, idx: number) => ({
+              slip_id: slipRow.id, player_name: leg.player_name, team_abbr: leg.team_abbr,
+              stat_type: leg.stat_type, line: leg.line, pick: leg.pick,
+              odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
+            }));
+            const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
+            if (legErr) console.error("[AI-Builder] Error saving fallback legs:", legErr);
 
-          const legs = slip.legs.map((leg: any, idx: number) => ({
-            slip_id: slipRow.id, player_name: leg.player_name, team_abbr: leg.team_abbr,
-            stat_type: leg.stat_type, line: leg.line, pick: leg.pick,
-            odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
-          }));
-          const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
-          if (legErr) console.error("[AI-Builder] Error saving fallback legs:", legErr);
+            const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
+              ...lr, data_context: slip.legs[idx]?.data_context || null,
+              bet_type: slip.legs[idx]?.bet_type || "player_prop",
+            }));
+            persistedSlip = { ...slipRow, legs: legsWithContext };
+            savedFallbackSlips.push(persistedSlip);
+          }
 
-          const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
-            ...lr, data_context: slip.legs[idx]?.data_context || null,
-            bet_type: slip.legs[idx]?.bet_type || "player_prop",
-          }));
-          savedFallbackSlips.push({ ...slipRow, legs: legsWithContext });
+          responseFallbackSlips.push(buildResponseSlip(slip, persistedSlip, slipIndex));
         }
 
         // Track usage
@@ -2598,16 +2687,22 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
 
         console.log(`[AI-Builder] Fallback: built ${savedFallbackSlips.length} slips from scored candidates`);
 
+        debug.response_slips_count = responseFallbackSlips.length;
+        debug.response_legs_count = responseFallbackSlips.reduce((s, sl) => s + (sl.legs?.length ?? 0), 0);
+        debug.slip_build_error = fallbackSaveFailures > 0
+          ? `${fallbackSaveFailures} fallback slip(s) failed to persist`
+          : null;
+
         return jsonResponse({
           ok: true,
-          slips: savedFallbackSlips, fallback: true, debug,
+          slips: responseFallbackSlips, fallback: true, debug,
           scoring_metadata: {
             verified_prop_candidates: debug.verified_prop_candidates,
             verified_candidates_passed_to_llm: debug.verified_candidates_passed_to_llm,
             candidates_after_diversity: debug.candidates_after_diversity,
             unique_players: debug.unique_players_in_pool,
-            legs_validated: savedFallbackSlips.reduce((s, sl) => s + sl.legs.length, 0),
-            legs_rejected: 0, final_legs_accepted: savedFallbackSlips.reduce((s, sl) => s + sl.legs.length, 0),
+            legs_validated: responseFallbackSlips.reduce((s, sl) => s + sl.legs.length, 0),
+            legs_rejected: 0, final_legs_accepted: responseFallbackSlips.reduce((s, sl) => s + sl.legs.length, 0),
             final_legs_rejected_no_match: 0,
             games_today: gamesData.length, live_props_found: livePropsCount,
             game_level_candidates: debug.game_level_candidates,
@@ -2890,29 +2985,52 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
 
     // ===== PHASE 6: Save to database =====
     const savedSlips = [];
-    for (const slip of parsed.slips) {
+    const responseSlips = [];
+    let saveFailures = 0;
+    for (const [slipIndex, slip] of parsed.slips.entries()) {
+      let persistedSlip: any | null = null;
       const { data: slipRow, error: slipErr } = await supabase.from("ai_slips").insert({
         user_id: user?.id || null, prompt, slip_name: slip.slip_name, sport,
         risk_label: slip.risk_label, estimated_odds: slip.estimated_odds, reasoning: slip.reasoning,
       }).select().single();
 
-      if (slipErr) { console.error("[AI-Builder] Error saving slip:", slipErr); continue; }
+      if (slipErr) {
+        saveFailures++;
+        console.error("[AI-Builder] Error saving slip:", slipErr);
+      } else {
+        const legs = (slip.legs || []).map((leg: any, idx: number) => ({
+          slip_id: slipRow.id, player_name: leg.player_name, team_abbr: leg.team_abbr,
+          stat_type: leg.stat_type, line: leg.line, pick: leg.pick,
+          odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
+        }));
 
-      const legs = (slip.legs || []).map((leg: any, idx: number) => ({
-        slip_id: slipRow.id, player_name: leg.player_name, team_abbr: leg.team_abbr,
-        stat_type: leg.stat_type, line: leg.line, pick: leg.pick,
-        odds: leg.odds, reasoning: leg.reasoning, leg_order: idx,
-      }));
+        const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
+        if (legErr) console.error("[AI-Builder] Error saving legs:", legErr);
 
-      const { data: legRows, error: legErr } = await supabase.from("ai_slip_legs").insert(legs).select();
-      if (legErr) console.error("[AI-Builder] Error saving legs:", legErr);
+        const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
+          ...lr, data_context: slip.legs?.[idx]?.data_context || null,
+          bet_type: slip.legs?.[idx]?.bet_type || "player_prop",
+        }));
 
-      const legsWithContext = (legRows || legs).map((lr: any, idx: number) => ({
-        ...lr, data_context: slip.legs?.[idx]?.data_context || null,
-        bet_type: slip.legs?.[idx]?.bet_type || "player_prop",
-      }));
+        persistedSlip = { ...slipRow, legs: legsWithContext };
+        savedSlips.push(persistedSlip);
+      }
 
-      savedSlips.push({ ...slipRow, legs: legsWithContext });
+      responseSlips.push(buildResponseSlip(slip, persistedSlip, slipIndex));
+    }
+
+    debug.response_slips_count = responseSlips.length;
+    debug.response_legs_count = responseSlips.reduce((sum: number, slip: any) => sum + (Array.isArray(slip.legs) ? slip.legs.length : 0), 0);
+    debug.slip_build_error = saveFailures > 0 ? `${saveFailures} slip(s) failed to persist` : null;
+
+    if (debug.final_legs_accepted > 0 && responseSlips.length === 0) {
+      debug.no_slip_reason = "response_assembly_failed_after_validation";
+      return failureResponse(
+        "NO_SLIP_BUILT",
+        "A slip was validated, but the final response could not be assembled.",
+        debug,
+        { available_games: availableGames },
+      );
     }
 
     // Track usage
@@ -2923,7 +3041,7 @@ Use ONLY players/stats/thresholds from the verified market entries. Each slip sh
 
     return jsonResponse({
       ok: true,
-      slips: savedSlips,
+      slips: responseSlips,
       debug,
       scoring_metadata: {
         verified_prop_candidates: debug.verified_prop_candidates,
