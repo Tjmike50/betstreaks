@@ -1,6 +1,7 @@
 import {
   Flame, Calendar, Brain, TrendingUp, Bookmark,
   Bell, Heart, Star, User, Crown, Shield, BookOpen, Search,
+  Activity,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -125,8 +126,25 @@ export function DesktopSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
-                    isActive={isActive("/admin")}
-                    tooltip="Admin"
+                    isActive={isActive("/admin/health")}
+                    tooltip="System Health"
+                  >
+                    <NavLink
+                      to="/admin/health"
+                      className="flex items-center gap-3"
+                      activeClassName="bg-primary/10 text-primary font-medium"
+                      onClick={handleNavClick}
+                    >
+                      <Activity className="h-4 w-4 shrink-0" />
+                      {!collapsed && <span>System Health</span>}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive("/admin/eval")}
+                    tooltip="Eval Admin"
                   >
                     <NavLink
                       to="/admin/eval"
@@ -135,7 +153,7 @@ export function DesktopSidebar() {
                       onClick={handleNavClick}
                     >
                       <Shield className="h-4 w-4 shrink-0" />
-                      {!collapsed && <span>Admin</span>}
+                      {!collapsed && <span>Eval Admin</span>}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

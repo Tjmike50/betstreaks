@@ -27,6 +27,7 @@ import AIBetBuilderPage from "./pages/AIBetBuilderPage";
 import BetAnalyzerPage from "./pages/BetAnalyzerPage";
 import SavedSlipsPage from "./pages/SavedSlipsPage";
 import AdminEvalPage from "./pages/AdminEvalPage";
+import AdminHealthPage from "./pages/AdminHealthPage";
 import CheatsheetsHubPage from "./pages/CheatsheetsHubPage";
 import ResearchHubPage from "./pages/ResearchHubPage";
 import ResearchGamesPage from "./pages/research/ResearchGamesPage";
@@ -83,6 +84,7 @@ const App = () => (
                     <Route path="/research/players" element={<ResearchPlayersPage />} />
                     <Route path="/research/player/:playerId" element={<PlayerPage />} />
                     <Route path="/player/:playerId" element={<PlayerPage />} />
+                    <Route path="/admin/health" element={<AdminHealthPage />} />
                     <Route path="/admin/eval" element={<AdminEvalPage />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
