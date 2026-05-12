@@ -73,6 +73,20 @@ function ageHours(value: string | null | undefined) {
   return (Date.now() - parsed.getTime()) / 36e5;
 }
 
+function asDate(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function latestTimestamp(...values: Array<string | null | undefined>) {
+  const valid = values
+    .map(asDate)
+    .filter((value): value is Date => value instanceof Date)
+    .sort((a, b) => b.getTime() - a.getTime());
+  return valid[0] ?? null;
+}
+
 function statusClasses(status: HealthStatus) {
   if (status === "green") return "border-emerald-500/30 bg-emerald-500/5 text-emerald-500";
   if (status === "yellow") return "border-amber-500/30 bg-amber-500/5 text-amber-500";
@@ -310,22 +324,48 @@ export default function AdminHealthPage() {
   const latestQuota = data?.quotaAlerts.data?.[0] as any;
   const unresolvedQuota = (data?.quotaAlerts.data ?? []).some((alert: any) => alert.resolved !== true);
   const latestProviderWarning = (data?.providerWarnings.data ?? []).find((alert: any) => alert.alert_type !== "odds_api_quota_exhausted") as any;
-  const providerStatus: HealthStatus = unresolvedQuota ? "red" : latestProviderWarning ? "yellow" : "green";
   const latestMlbHealth = data?.mlbHealthRows.data?.[0] as any;
   const latestPipeline = data?.pipelineRows.data?.[0] as any;
   const latestMlbScoreRun = (data?.pipelineRows.data ?? []).find((row: any) => row.scoring_source === "score-mlb-anchors" || row.scoring_scored_count != null) as any;
+  const nbaLatestDataAt = latestTimestamp(
+    data?.nbaGames.data?.updatedAt,
+    data?.nbaLines.data?.snapshotAt,
+    data?.nbaScores.data?.scoredAt,
+  );
+  const mlbLatestDataAt = latestTimestamp(
+    data?.mlbGames.data?.updatedAt,
+    data?.mlbLines.data?.snapshotAt,
+    data?.mlbScores.data?.scoredAt,
+    latestMlbHealth?.finished_at ?? latestMlbHealth?.started_at,
+  );
+  const latestQuotaCreatedAt = asDate(latestQuota?.created_at);
+  const quotaRecoveredAfterLatestAlert =
+    unresolvedQuota && latestQuotaCreatedAt
+      ? (
+          (latestQuota?.sport === "NBA" && nbaLatestDataAt && nbaLatestDataAt > latestQuotaCreatedAt) ||
+          (latestQuota?.sport === "MLB" && mlbLatestDataAt && mlbLatestDataAt > latestQuotaCreatedAt)
+        )
+      : false;
+  const providerStatus: HealthStatus =
+    unresolvedQuota
+      ? (quotaRecoveredAfterLatestAlert ? "yellow" : "red")
+      : latestProviderWarning
+      ? "yellow"
+      : "green";
 
   const nbaStatus: HealthStatus =
     data?.nbaGames.error || data?.nbaLines.error || data?.nbaScores.error ? "yellow"
-    : unresolvedQuota && latestQuota?.sport === "NBA" ? "red"
-    : (data?.nbaGames.data?.activeCount ?? 0) === 0 || (data?.nbaLines.data?.count ?? 0) === 0 || (data?.nbaScores.data?.count ?? 0) === 0 ? "yellow"
+    : unresolvedQuota && latestQuota?.sport === "NBA" && !quotaRecoveredAfterLatestAlert ? "red"
+    : (data?.nbaScores.data?.count ?? 0) === 0 ? "yellow"
+    : (data?.nbaLines.data?.count ?? 0) === 0 ? "yellow"
     : "green";
 
   const mlbStatus: HealthStatus =
     data?.mlbGames.error || data?.mlbLines.error || data?.mlbScores.error ? "yellow"
     : latestMlbHealth?.status === "failed" ? "red"
-    : unresolvedQuota && latestQuota?.sport === "MLB" ? "red"
-    : (data?.mlbGames.data?.activeCount ?? 0) === 0 || (data?.mlbLines.data?.count ?? 0) === 0 || (data?.mlbScores.data?.count ?? 0) === 0 ? "yellow"
+    : unresolvedQuota && latestQuota?.sport === "MLB" && !quotaRecoveredAfterLatestAlert ? "red"
+    : (data?.mlbScores.data?.count ?? 0) === 0 ? "yellow"
+    : (data?.nullMlbTeams.data ?? 0) > 0 || (data?.nullMlbCanonical.data ?? 0) > 0 ? "yellow"
     : "green";
 
   const aiStatus: HealthStatus =
@@ -374,8 +414,9 @@ export default function AdminHealthPage() {
                   { label: "Active games", value: data.nbaGames.data?.activeCount ?? "Not available" },
                   { label: "Latest line_snapshots", value: `${data.nbaLines.data?.latestDate ?? "Not available"} / ${data.nbaLines.data?.count ?? "Not available"}` },
                   { label: "Latest player_prop_scores", value: `${data.nbaScores.data?.latestDate ?? "Not available"} / ${data.nbaScores.data?.count ?? "Not available"}` },
+                  { label: "Status note", value: (data.nbaScores.data?.count ?? 0) > 0 && (data.nbaLines.data?.count ?? 0) === 0 ? "Scored rows exist, live line snapshots missing" : "Latest slate paths aligned" },
                   { label: "Collect diagnostics", value: (data.collectAlerts.data?.[0] as any)?.created_at ? formatDate((data.collectAlerts.data?.[0] as any).created_at) : "Not available" },
-                  { label: "Provider quota exhausted", value: unresolvedQuota && latestQuota?.sport === "NBA" ? "Yes" : "No unresolved NBA quota alert" },
+                  { label: "Provider quota exhausted", value: unresolvedQuota && latestQuota?.sport === "NBA" ? (quotaRecoveredAfterLatestAlert ? "Old unresolved alert; later data exists" : "Yes") : "No unresolved NBA quota alert" },
                   { label: "Verified live candidates proxy", value: data.nbaScores.data?.candidates ?? "Not available" },
                 ]}
               />
@@ -389,8 +430,10 @@ export default function AdminHealthPage() {
                 rows={[
                   { label: "Latest games_today date", value: data.mlbGames.data?.latestDate ?? "Not available" },
                   { label: "Active games", value: data.mlbGames.data?.activeCount ?? "Not available" },
+                  { label: "Latest line_snapshots", value: `${data.mlbLines.data?.latestDate ?? "Not available"} / ${data.mlbLines.data?.count ?? "Not available"}` },
                   { label: "Line snapshots by type", value: Object.entries(data.mlbLines.data?.byStat ?? {}).map(([k, v]) => `${k}: ${v}`).join(", ") || "Not available" },
                   { label: "Latest player_prop_scores", value: `${data.mlbScores.data?.latestDate ?? "Not available"} / ${data.mlbScores.data?.count ?? "Not available"}` },
+                  { label: "Status note", value: (data.mlbGames.data?.activeCount ?? 0) === 0 && (data.mlbScores.data?.count ?? 0) > 0 ? `No MLB games today; latest scored slate: ${data.mlbScores.data?.latestDate ?? "unknown"}` : "Latest MLB slate available" },
                   { label: "Null team_abbr games", value: data.nullMlbTeams.data ?? "Not available" },
                   { label: "Active null canonical games", value: data.nullMlbCanonical.data ?? "Not available" },
                   { label: "Unresolved players", value: data.unresolvedPlayers.data ?? "Not available" },
@@ -410,6 +453,7 @@ export default function AdminHealthPage() {
                   { label: "Resolved", value: latestQuota ? (latestQuota.resolved ? "Yes" : "No") : "Not applicable" },
                   { label: "Sport", value: latestQuota?.sport ?? "Not available" },
                   { label: "Created", value: formatDate(latestQuota?.created_at) },
+                  { label: "Later successful data", value: unresolvedQuota ? (quotaRecoveredAfterLatestAlert ? "Yes, data arrived after alert" : "No later success detected") : "Not applicable" },
                   { label: "Skipped after stop", value: metadataValue(latestQuota?.metadata, "provider_calls_skipped_after_quota_stop") ?? "Not available" },
                 ]}
               />
@@ -500,6 +544,8 @@ export default function AdminHealthPage() {
                   {`curl -X POST "$SUPABASE_URL/functions/v1/collect-line-snapshots" -H "Authorization: Bearer $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{"sport":"NBA"}'`}
                   <br />
                   {`curl -X POST "$SUPABASE_URL/functions/v1/mlb-health-check" -H "Authorization: Bearer $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{"game_date":"${today}"}'`}
+                  <br />
+                  {`update public.backend_alerts set resolved = true where alert_type = 'odds_api_quota_exhausted' and sport = 'NBA' and resolved is distinct from true;`}
                 </div>
               </CardContent>
             </Card>

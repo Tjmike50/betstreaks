@@ -53,6 +53,21 @@ interface DailySnapshot {
   risk_label_buckets: any;
 }
 
+const NBA_LINE_STATS = [
+  "player_points", "player_rebounds", "player_assists", "player_threes", "player_blocks", "player_steals",
+  "PTS", "REB", "AST", "3PM", "FG3M", "BLK", "STL", "pts", "reb", "ast", "fg3m", "blk", "stl",
+];
+
+const MLB_LINE_STATS = [
+  "batter_hits",
+  "batter_total_bases",
+  "batter_home_runs",
+  "pitcher_strikeouts",
+  "pitcher_earned_runs",
+  "pitcher_walks",
+  "pitcher_hits_allowed",
+];
+
 function bucketLabel(score: number | null): string {
   if (score == null) return "N/A";
   if (score >= 70) return "70-100";
@@ -281,7 +296,9 @@ export default function AdminEvalPage() {
         statusBreakdown,
         lastRefresh,
         hoursSince,
-        isFresh: hoursSince !== null && hoursSince <= 6,
+        isFresh: (avail?.length || 0) > 0 && hoursSince !== null && hoursSince <= 6,
+        isExpectedEmpty: (avail?.length || 0) === 0 && teamsPlaying.size === 0,
+        isMissingData: (avail?.length || 0) === 0 && teamsPlaying.size > 0,
       };
     },
     enabled: isAdmin,
@@ -291,17 +308,47 @@ export default function AdminEvalPage() {
   const { data: snapStatus, isLoading: snapLoading, refetch: refetchSnap } = useQuery({
     queryKey: ["snap-status", todayStr],
     queryFn: async () => {
-      const { count: totalToday } = await supabase
-        .from("line_snapshots")
-        .select("id", { count: "exact", head: true })
-        .eq("game_date", todayStr);
+      const latestBySport = async (sport: "NBA" | "MLB", stats: string[]) => {
+        const { data: latestRow } = await supabase
+          .from("line_snapshots")
+          .select("game_date, snapshot_at")
+          .in("stat_type", stats)
+          .order("game_date", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      const { data: uniqueProps } = await supabase
-        .from("line_snapshots")
-        .select("player_name, stat_type")
-        .eq("game_date", todayStr);
+        const latestDate = latestRow?.game_date ?? null;
+        if (!latestDate) {
+          return { latestDate: null, count: 0, uniqueProps: 0, snapshotAt: null, sport };
+        }
 
-      const uniqueKeys = new Set((uniqueProps || []).map(p => `${p.player_name}|${p.stat_type}`));
+        const [{ count }, { data: uniqueProps }] = await Promise.all([
+          supabase
+            .from("line_snapshots")
+            .select("id", { count: "exact", head: true })
+            .eq("game_date", latestDate)
+            .in("stat_type", stats),
+          supabase
+            .from("line_snapshots")
+            .select("player_name, stat_type")
+            .eq("game_date", latestDate)
+            .in("stat_type", stats),
+        ]);
+
+        const uniqueKeys = new Set((uniqueProps || []).map((p) => `${p.player_name}|${p.stat_type}`));
+        return {
+          latestDate,
+          count: count || 0,
+          uniqueProps: uniqueKeys.size,
+          snapshotAt: latestRow?.snapshot_at ?? null,
+          sport,
+        };
+      };
+
+      const [nba, mlb] = await Promise.all([
+        latestBySport("NBA", NBA_LINE_STATS),
+        latestBySport("MLB", MLB_LINE_STATS),
+      ]);
 
       const { data: refreshRow } = await supabase
         .from("refresh_status")
@@ -313,8 +360,8 @@ export default function AdminEvalPage() {
       const hoursSince = lastRefresh ? (Date.now() - lastRefresh.getTime()) / (1000 * 60 * 60) : null;
 
       return {
-        totalToday: totalToday || 0,
-        uniqueProps: uniqueKeys.size,
+        nba,
+        mlb,
         lastRefresh,
         hoursSince,
       };
@@ -574,6 +621,18 @@ export default function AdminEvalPage() {
     }));
 
   const sortedSnapshots = [...snapshots].sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date));
+  const calibrationData = computeCalibrationData(propOutcomes);
+  const calibrationRows = calibrationData.filter((d) => d.actual != null);
+  const averageCalibrationGap = calibrationRows.length > 0
+    ? Math.round(calibrationRows.reduce((sum, row) => sum + ((row.actual ?? 0) - row.target), 0) / calibrationRows.length)
+    : null;
+  const calibrationInsight = averageCalibrationGap == null
+    ? null
+    : averageCalibrationGap >= 8
+    ? "Monitoring insight: confidence buckets are running hot versus realized hit rates."
+    : averageCalibrationGap <= -8
+    ? "Monitoring insight: confidence buckets are underperforming realized hit rates."
+    : "Monitoring insight: confidence buckets are roughly in line with realized hit rates.";
 
   // Derive pipeline alert state from history
   const latestRun = pipelineHistory.length > 0 ? pipelineHistory[0] : null;
@@ -814,8 +873,10 @@ export default function AdminEvalPage() {
                   <div className="text-lg font-bold flex items-center justify-center gap-1">
                     {availStatus.isFresh ? (
                       <><CheckCircle className="h-4 w-4 text-success" /><span className="text-success">Fresh</span></>
+                    ) : availStatus.isExpectedEmpty ? (
+                      <><Clock className="h-4 w-4 text-muted-foreground" /><span className="text-muted-foreground">No games</span></>
                     ) : (
-                      <><AlertTriangle className="h-4 w-4 text-warning" /><span className="text-warning">Stale</span></>
+                      <><AlertTriangle className="h-4 w-4 text-warning" /><span className="text-warning">{availStatus.isMissingData ? "Empty" : "Stale"}</span></>
                     )}
                   </div>
                   <div className="text-[10px] text-muted-foreground">
@@ -836,6 +897,16 @@ export default function AdminEvalPage() {
               {availStatus.teamsMissing.length > 0 && (
                 <p className="text-[10px] text-warning">
                   Missing: {availStatus.teamsMissing.join(", ")}
+                </p>
+              )}
+              {availStatus.isExpectedEmpty && (
+                <p className="text-[10px] text-muted-foreground">
+                  No NBA games are on the board today, so 0 availability records is expected.
+                </p>
+              )}
+              {availStatus.isMissingData && (
+                <p className="text-[10px] text-warning">
+                  NBA games exist today, but player_availability is empty. Refresh availability before trusting this panel.
                 </p>
               )}
             </CardContent>
@@ -862,23 +933,21 @@ export default function AdminEvalPage() {
                   Collect
                 </Button>
               </div>
-              <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="grid grid-cols-2 gap-2 text-center">
                 <div>
-                  <div className="text-lg font-bold text-primary">{snapStatus.totalToday}</div>
-                  <div className="text-[10px] text-muted-foreground">Snapshots</div>
+                  <div className="text-lg font-bold text-primary">{snapStatus.nba.count}</div>
+                  <div className="text-[10px] text-muted-foreground">NBA ({snapStatus.nba.latestDate ?? "none"})</div>
                 </div>
                 <div>
-                  <div className="text-lg font-bold text-primary">{snapStatus.uniqueProps}</div>
-                  <div className="text-[10px] text-muted-foreground">Props Tracked</div>
+                  <div className="text-lg font-bold text-primary">{snapStatus.mlb.count}</div>
+                  <div className="text-[10px] text-muted-foreground">MLB ({snapStatus.mlb.latestDate ?? "none"})</div>
                 </div>
-                <div>
-                  <div className="text-[10px] text-muted-foreground mt-1">
-                    {snapStatus.lastRefresh
-                      ? `${snapStatus.hoursSince!.toFixed(1)}h ago`
-                      : "Never"}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">Last Run</div>
-                </div>
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                Unique props: NBA {snapStatus.nba.uniqueProps} · MLB {snapStatus.mlb.uniqueProps}
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                Last refresh run: {snapStatus.lastRefresh ? `${snapStatus.hoursSince!.toFixed(1)}h ago` : "Never"}
               </div>
             </CardContent>
           </Card>
@@ -997,7 +1066,7 @@ export default function AdminEvalPage() {
 
             {/* Calibration Chart: Predicted vs Actual */}
             {(() => {
-              const calibData = computeCalibrationData(propOutcomes);
+              const calibData = calibrationData;
               const hasData = calibData.some(d => d.actual != null);
               if (!hasData) return null;
               return (
@@ -1010,6 +1079,9 @@ export default function AdminEvalPage() {
                     <p className="text-[10px] text-muted-foreground">
                       Predicted confidence vs actual hit rate — closer to diagonal = better calibrated
                     </p>
+                    {calibrationInsight && (
+                      <p className="text-[10px] text-muted-foreground">{calibrationInsight}</p>
+                    )}
                     <div className="h-56">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={calibData} barGap={0}>

@@ -8,6 +8,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, CheckCircle, Clock, Database } from "lucide-react";
 
+const MLB_LINE_STATS = [
+  "batter_hits",
+  "batter_total_bases",
+  "batter_home_runs",
+  "pitcher_strikeouts",
+  "pitcher_earned_runs",
+  "pitcher_walks",
+  "pitcher_hits_allowed",
+];
+
 function hoursAgo(d: Date | null): string {
   if (!d) return "never";
   const h = (Date.now() - d.getTime()) / (1000 * 60 * 60);
@@ -21,13 +31,23 @@ export function MlbHealthCard() {
   const { data, isLoading } = useQuery({
     queryKey: ["mlb-health", todayStr],
     queryFn: async () => {
-      // 1) Last MLB refresh (refresh_status id=5 if exists, else check scored_at)
-      const { data: scores } = await supabase
+      const { data: latestScoreRow } = await supabase
         .from("player_prop_scores")
-        .select("id, scored_at, stat_type, score_overall, confidence_tier, team_abbr, opponent_abbr")
+        .select("game_date")
         .eq("sport", "MLB")
-        .eq("game_date", todayStr)
-        .limit(1000);
+        .order("game_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const latestScoreDate = latestScoreRow?.game_date ?? null;
+      const { data: scores } = latestScoreDate
+        ? await supabase
+            .from("player_prop_scores")
+            .select("id, scored_at, stat_type, score_overall, confidence_tier, team_abbr, opponent_abbr")
+            .eq("sport", "MLB")
+            .eq("game_date", latestScoreDate)
+            .limit(2000)
+        : { data: [] as any[] };
 
       const rows = scores ?? [];
       const totalScored = rows.length;
@@ -48,20 +68,44 @@ export function MlbHealthCard() {
         statCounts[s] = (statCounts[s] || 0) + 1;
       }
 
-      // 2) Today's MLB games
-      const { data: games } = await supabase
+      const { data: latestGamesRow } = await supabase
         .from("games_today")
-        .select("id")
+        .select("game_date")
         .eq("sport", "MLB")
-        .eq("game_date", todayStr);
+        .order("game_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const latestGamesDate = latestGamesRow?.game_date ?? null;
+      const { data: games } = latestGamesDate
+        ? await supabase
+            .from("games_today")
+            .select("id")
+            .eq("sport", "MLB")
+            .eq("game_date", latestGamesDate)
+        : { data: [] as any[] };
 
-      // 3) Today's line snapshots for MLB
-      const { count: lineCount } = await supabase
+      const { data: latestLinesRow } = await supabase
         .from("line_snapshots")
-        .select("id", { count: "exact", head: true })
-        .eq("game_date", todayStr);
-      // We can't easily filter line_snapshots by sport, but MLB lines use stat_types
-      // like HITS, TOTAL_BASES, STRIKEOUTS etc.
+        .select("game_date, snapshot_at")
+        .in("stat_type", MLB_LINE_STATS)
+        .order("game_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const latestLineDate = latestLinesRow?.game_date ?? null;
+      const { count: lineCount } = latestLineDate
+        ? await supabase
+            .from("line_snapshots")
+            .select("id", { count: "exact", head: true })
+            .eq("game_date", latestLineDate)
+            .in("stat_type", MLB_LINE_STATS)
+        : { count: 0 };
+
+      const { data: latestHealthRow } = await supabase
+        .from("mlb_refresh_health")
+        .select("status, started_at, finished_at, summary")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       // 4) Daily pick for today
       const { data: dailyPick } = await supabase
@@ -72,6 +116,7 @@ export function MlbHealthCard() {
         .limit(1);
 
       return {
+        latestScoreDate,
         totalScored,
         nonPass,
         withTeam,
@@ -79,9 +124,13 @@ export function MlbHealthCard() {
         eliteStrong,
         latestScoredAt,
         statCounts,
+        latestGamesDate,
         gamesCount: games?.length ?? 0,
+        latestLineDate,
+        latestLineSnapshotAt: latestLinesRow?.snapshot_at ?? null,
         lineSnapshots: lineCount ?? 0,
         hasDailyPick: (dailyPick?.length ?? 0) > 0,
+        latestHealthRow: latestHealthRow ?? null,
       };
     },
     staleTime: 60_000,
@@ -90,8 +139,8 @@ export function MlbHealthCard() {
   if (isLoading || !data) return null;
 
   const warnings: string[] = [];
-  if (data.totalScored === 0) warnings.push("No MLB scored rows today");
-  if (data.gamesCount === 0) warnings.push("No MLB games in games_today");
+  if (data.totalScored === 0) warnings.push("No MLB scored rows on the latest available slate");
+  if (data.gamesCount === 0 && data.totalScored > 0) warnings.push(`No MLB games today; latest scored slate is ${data.latestScoreDate}`);
   if (data.withTeam === 0 && data.totalScored > 0) warnings.push("No team_abbr on scored rows");
   if (data.eliteStrong === 0 && data.totalScored > 5) warnings.push("No elite/strong candidates");
   if (!data.hasDailyPick && data.totalScored > 0) warnings.push("No MLB Daily Pick generated");
@@ -128,13 +177,16 @@ export function MlbHealthCard() {
         </div>
 
         {/* Timing */}
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Clock className="h-3 w-3" />
           <span>Last scored: {hoursAgo(data.latestScoredAt)}</span>
           <span>·</span>
-          <span>{data.gamesCount} games</span>
+          <span>{data.gamesCount} games on {data.latestGamesDate ?? "n/a"}</span>
           <span>·</span>
           <span>Daily Pick: {data.hasDailyPick ? "✓" : "✗"}</span>
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          Latest scored slate: {data.latestScoreDate ?? "n/a"} · Latest line snapshots: {data.latestLineDate ?? "n/a"} ({data.lineSnapshots}) · Latest MLB health: {data.latestHealthRow?.status ?? "n/a"}
         </div>
 
         {/* Per-stat breakdown */}
