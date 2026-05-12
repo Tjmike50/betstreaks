@@ -11,17 +11,24 @@ export interface AdminAuthResult {
 }
 
 export async function requireAdmin(req: Request): Promise<AdminAuthResult> {
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const REFRESH_SECRET = Deno.env.get("REFRESH_SECRET") ?? "";
+
+  // Allow internal cron / server-to-server calls bearing the shared secret
+  const cronSecret = req.headers.get("x-admin-secret") ?? "";
+  if (REFRESH_SECRET && cronSecret && cronSecret === REFRESH_SECRET) {
+    return { ok: true, status: 200, isServiceRole: true };
+  }
+
   const authHeader = req.headers.get("Authorization") ?? "";
   if (!authHeader.startsWith("Bearer ")) {
     return { ok: false, status: 401, error: "Unauthorized — missing bearer token" };
   }
   const token = authHeader.slice("Bearer ".length).trim();
 
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-
-  // Allow service-role calls (used by internal cron / other functions)
+  // Allow service-role calls (used by internal server-to-server invocations)
   if (token === SERVICE_KEY) {
     return { ok: true, status: 200, isServiceRole: true };
   }
