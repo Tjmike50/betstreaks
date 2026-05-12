@@ -102,7 +102,7 @@ export function MlbHealthCard() {
 
       const { data: latestHealthRow } = await supabase
         .from("mlb_refresh_health")
-        .select("status, started_at, finished_at, summary")
+        .select("status, started_at, finished_at, metadata")
         .order("started_at", { ascending: false })
         .limit(1)
         .maybeSingle();
