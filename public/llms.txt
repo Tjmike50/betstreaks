@@ -1,0 +1,24 @@
+# BetStreaks
+
+> BetStreaks is a research tool for tracking NBA, WNBA, and MLB player stat streaks, hit rates, recent performance splits, and daily game slates. It is not a sportsbook and does not accept wagers.
+
+## Pages
+
+- [Home](/): Daily command center with hot streaks, today's slate, and best plays.
+- [Today's Slate](/today): All games scheduled for today across active sports.
+- [Streaks](/streaks): Active player stat streaks for the current slate.
+- [Best Bets](/best-bets): Top scored player props for the day.
+- [Cheatsheets Hub](/cheatsheets): Curated cheatsheets for value, streaks, matchups, and best bets.
+- [Value Cheatsheet](/cheatsheets/value): Player props with the strongest market-implied edge.
+- [Hot Streaks Cheatsheet](/cheatsheets/hot-streaks): Players on active over/under streaks.
+- [Matchup Cheatsheet](/cheatsheets/matchups): Favorable opponent matchups by stat.
+- [AI Bet Builder](/ai-builder): Generates research-grade slip ideas validated against live sportsbook lines.
+- [Bet Analyzer](/analyzer): Analyzes a user-supplied slip leg-by-leg.
+- [Research Hub](/research): Player and game research pages.
+- [Premium](/premium): Plans, pricing, and Playoff Pass.
+
+## Optional
+
+- [Terms of Service](/terms)
+- [Privacy Policy](/privacy)
+- [Responsible Gambling](/responsible-gambling)
