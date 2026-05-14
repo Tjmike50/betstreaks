@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_cron_backup_20260512: {
+        Row: {
+          active: boolean | null
+          captured_at: string
+          command: string | null
+          jobid: number | null
+          jobname: string | null
+          schedule: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          captured_at?: string
+          command?: string | null
+          jobid?: number | null
+          jobname?: string | null
+          schedule?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          captured_at?: string
+          command?: string | null
+          jobid?: number | null
+          jobname?: string | null
+          schedule?: string | null
+        }
+        Relationships: []
+      }
       ai_daily_pick_legs: {
         Row: {
           daily_pick_id: string
