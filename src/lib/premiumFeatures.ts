@@ -11,7 +11,6 @@ import {
 
 // Single source of truth for the Premium feature list.
 // Used by PremiumPage, PremiumLockModal, and PremiumLockedScreen.
-// Reflects the actual current BetStreaks product surfaces.
 export const PREMIUM_FEATURES = [
   "AI Slip Builder — unlimited slips per day",
   "Bet Analyzer — score any slip you're considering",
@@ -37,15 +36,43 @@ export const PREMIUM_FEATURES_WITH_ICONS: PremiumFeatureWithIcon[] = [
   { icon: Zap, text: "Early-access to new features" },
 ];
 
+// Plan keys are the contract between frontend and the create-checkout-session
+// edge function. The function maps each key to its Stripe price env var.
+export type PlanKey = "monthly" | "yearly" | "lifetime" | "all_apps_lifetime";
+
 export const PREMIUM_PRICING = {
   monthly: {
-    amount: 10,
-    display: "$10",
+    key: "monthly" as const,
+    amount: 17.5,
+    display: "$17.50",
     period: "month",
+    mode: "subscription" as const,
   },
   yearly: {
-    amount: 60,
-    display: "$60",
+    key: "yearly" as const,
+    amount: 180,
+    display: "$180",
     period: "year",
+    mode: "subscription" as const,
+  },
+  lifetime: {
+    key: "lifetime" as const,
+    amount: 480,
+    display: "$480",
+    period: "one-time",
+    mode: "payment" as const,
+  },
+  all_apps_lifetime: {
+    key: "all_apps_lifetime" as const,
+    amount: 3000,
+    display: "$3,000",
+    period: "one-time",
+    mode: "payment" as const,
   },
 } as const;
+
+export const LIFETIME_DISCLAIMER =
+  "Lifetime access means access for the lifetime of the supported product/platform. Access is non-transferable and subject to our terms, acceptable use rules, and platform availability.";
+
+export const BETTING_DISCLAIMER =
+  "BetStreaks is for informational and entertainment purposes only. No picks, slips, streaks, or AI outputs are guaranteed. Past performance does not guarantee future results.";
