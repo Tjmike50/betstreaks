@@ -163,7 +163,7 @@ export function DesktopSidebar() {
         )}
       </SidebarContent>
 
-      {!isPremium && sportConfig.key === "NBA" && (
+      {!isPremium && (
         <SidebarFooter className="p-3">
           {!collapsed ? (
             <button
@@ -172,10 +172,10 @@ export function DesktopSidebar() {
             >
               <div className="flex items-center gap-2 mb-1">
                 <Crown className="h-4 w-4 text-amber-400" />
-                <span className="text-sm font-semibold text-foreground">Playoff Pass</span>
+                <span className="text-sm font-semibold text-foreground">Go Premium</span>
               </div>
-              <p className="text-xs text-muted-foreground">$25 through the Finals</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Promo codes accepted at checkout</p>
+              <p className="text-xs text-muted-foreground">From $17.50/mo · Lifetime $480</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Monthly, yearly, or lifetime</p>
             </button>
           ) : (
             <button
