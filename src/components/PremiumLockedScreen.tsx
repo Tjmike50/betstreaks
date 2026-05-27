@@ -63,8 +63,11 @@ export function PremiumLockedScreen({
           <p className="text-lg font-semibold">
             {PREMIUM_PRICING.yearly.display} <span className="text-sm font-normal text-muted-foreground">/ {PREMIUM_PRICING.yearly.period}</span>
             <Badge variant="secondary" className="ml-2 bg-success/20 text-success border-success/30">
-              save 50%
+              save $30
             </Badge>
+          </p>
+          <p className="text-xs text-muted-foreground pt-1">
+            Lifetime from {PREMIUM_PRICING.lifetime.display} one-time
           </p>
         </div>
 

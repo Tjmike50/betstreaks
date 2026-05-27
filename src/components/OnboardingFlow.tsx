@@ -23,8 +23,8 @@ const slides = [
     bgColor: "bg-primary/20",
   },
   {
-    title: "Get the Playoff Pass",
-    body: "Full NBA Playoff access through the Finals — $25. Promo codes accepted at checkout.",
+    title: "Go Premium when you're ready",
+    body: "From $17.50/mo, $180/year, or $480 one-time lifetime. Cancel subscriptions anytime.",
     icon: Crown,
     color: "text-amber-400",
     bgColor: "bg-amber-400/20",

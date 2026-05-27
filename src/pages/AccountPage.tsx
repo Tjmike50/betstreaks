@@ -104,7 +104,7 @@ export default function AccountPage() {
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">Go Premium</h3>
-                <p className="text-xs text-muted-foreground">$10/mo or $60/yr</p>
+                <p className="text-xs text-muted-foreground">From $17.50/mo · Lifetime from $480</p>
               </div>
             </div>
             <Button variant="outline" size="sm" className="border-premium/30 text-premium hover:bg-premium/10">
@@ -173,7 +173,7 @@ export default function AccountPage() {
             </div>
             <div>
               <h3 className="font-semibold text-foreground">Go Premium</h3>
-              <p className="text-xs text-muted-foreground">$10/mo or $60/yr</p>
+              <p className="text-xs text-muted-foreground">From $17.50/mo · Lifetime from $480</p>
             </div>
           </div>
           <Button variant="outline" size="sm" className="border-premium/30 text-premium hover:bg-premium/10">
