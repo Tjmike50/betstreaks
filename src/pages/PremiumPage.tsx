@@ -8,39 +8,86 @@ import { ArrowLeft, Crown, Check, Loader2, ExternalLink, Sparkles } from "lucide
 import { useToast } from "@/hooks/use-toast";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { Badge } from "@/components/ui/badge";
-import { PREMIUM_FEATURES, PREMIUM_PRICING } from "@/lib/premiumFeatures";
+import {
+  PREMIUM_FEATURES,
+  PREMIUM_PRICING,
+  LIFETIME_DISCLAIMER,
+  BETTING_DISCLAIMER,
+  type PlanKey,
+} from "@/lib/premiumFeatures";
 import { analytics } from "@/lib/analytics";
-import { useSport } from "@/contexts/SportContext";
 
-const PRICE_IDS = {
-  monthly: "price_1SyJVfF2kOU6awRkLbvUGeLl",
-  yearly: "price_1SyJcpF2kOU6awRk2uaH9xum",
-  playoff: "price_1TLqRuF2kOU6awRkIPRlo3NI",
-};
-
-const MAX_CONFIRM_RETRIES = 3;
+const MAX_CONFIRM_RETRIES = 5;
 const CONFIRM_RETRY_DELAY = 2000;
+
+interface PlanCard {
+  key: PlanKey;
+  title: string;
+  price: string;
+  period: string;
+  description: string;
+  badge?: string;
+  buttonLabel: string;
+  highlight?: boolean;
+}
+
+const PLAN_CARDS: PlanCard[] = [
+  {
+    key: "monthly",
+    title: "Premium Monthly",
+    price: PREMIUM_PRICING.monthly.display,
+    period: "/mo",
+    description: "Best for trying BetStreaks and getting daily access.",
+    buttonLabel: "Start Monthly",
+  },
+  {
+    key: "yearly",
+    title: "Premium Yearly",
+    price: PREMIUM_PRICING.yearly.display,
+    period: "/year",
+    description: "Best value for serious users. Save $30 compared to monthly.",
+    badge: "Best Value",
+    buttonLabel: "Go Yearly",
+    highlight: true,
+  },
+  {
+    key: "lifetime",
+    title: "BetStreaks Lifetime",
+    price: PREMIUM_PRICING.lifetime.display,
+    period: "one-time",
+    description: "Pay once and keep BetStreaks Premium access.",
+    badge: "Lifetime Deal",
+    buttonLabel: "Get Lifetime",
+  },
+  {
+    key: "all_apps_lifetime",
+    title: "All Apps Lifetime Pass",
+    price: PREMIUM_PRICING.all_apps_lifetime.display,
+    period: "one-time",
+    description:
+      "Lifetime access to BetStreaks plus all included Carter Apps products released under the all-apps pass.",
+    badge: "Founder Pass",
+    buttonLabel: "Get All Apps Lifetime",
+  },
+];
 
 export default function PremiumPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
   const { isPremium, isLoading: isPremiumLoading, refetch } = usePremiumStatus();
-  const { sport } = useSport();
-  
+
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [isCheckoutLoading, setIsCheckoutLoading] = useState<"monthly" | "yearly" | "playoff" | null>(null);
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState<PlanKey | null>(null);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmFailed, setConfirmFailed] = useState(false);
 
-  // Track page view
   useEffect(() => {
     analytics.viewPremiumPage();
   }, []);
 
-  // Post-checkout confirmation with polling
   const confirmPremiumStatus = useCallback(async () => {
     setIsConfirming(true);
     setConfirmFailed(false);
@@ -60,7 +107,7 @@ export default function PremiumPage() {
               setIsConfirming(false);
               toast({
                 title: "Welcome to Premium! 🎉",
-                description: "Your subscription is now active. Enjoy all premium features!",
+                description: "Your access is now active. Enjoy all premium features!",
               });
               analytics.checkoutSuccess();
               return;
@@ -74,7 +121,6 @@ export default function PremiumPage() {
         }
       }
     } finally {
-      // Always exit confirming state
       setIsConfirming(false);
     }
 
@@ -82,7 +128,6 @@ export default function PremiumPage() {
     await refetch().catch(() => {});
   }, [refetch, toast]);
 
-  // Check for success/canceled query params
   useEffect(() => {
     const success = searchParams.get("success");
     const canceled = searchParams.get("canceled");
@@ -94,14 +139,13 @@ export default function PremiumPage() {
       toast({
         variant: "destructive",
         title: "Checkout canceled",
-        description: "Your subscription was not completed.",
+        description: "Your purchase was not completed.",
       });
       analytics.checkoutCancel();
       window.history.replaceState({}, "", "/premium");
     }
   }, [searchParams, toast, confirmPremiumStatus]);
 
-  // Check auth status
   useEffect(() => {
     async function checkAuth() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -117,24 +161,20 @@ export default function PremiumPage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleCheckout = async (plan: "monthly" | "yearly" | "playoff") => {
+  const handleCheckout = async (plan: PlanKey) => {
     if (!user) {
       navigate("/auth");
       return;
     }
 
-    // Track click event
-    if (plan === "monthly") {
-      analytics.clickSubscribeMonthly();
-    } else {
-      analytics.clickSubscribeYearly();
-    }
+    if (plan === "monthly") analytics.clickSubscribeMonthly();
+    if (plan === "yearly") analytics.clickSubscribeYearly();
 
     setIsCheckoutLoading(plan);
 
     try {
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
-        body: { priceId: PRICE_IDS[plan], allowPromoCodes: plan === "playoff" },
+        body: { plan },
       });
 
       if (error) throw error;
@@ -158,12 +198,9 @@ export default function PremiumPage() {
 
   const handleManageBilling = async () => {
     setIsPortalLoading(true);
-
     try {
       const { data, error } = await supabase.functions.invoke("create-portal-session");
-
       if (error) throw error;
-
       if (data?.url) {
         window.location.href = data.url;
       } else {
@@ -193,12 +230,10 @@ export default function PremiumPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Crown className="h-6 w-6 text-premium" />
-              Premium
-            </h1>
-          </div>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <Crown className="h-6 w-6 text-premium" />
+            Premium
+          </h1>
         </div>
       </header>
 
@@ -220,9 +255,7 @@ export default function PremiumPage() {
                 <div className="w-16 h-16 mx-auto rounded-full bg-primary/20 flex items-center justify-center">
                   <Check className="h-8 w-8 text-primary" />
                 </div>
-                <h2 className="text-xl font-bold text-foreground">
-                  Payment received!
-                </h2>
+                <h2 className="text-xl font-bold text-foreground">Payment received!</h2>
                 <p className="text-sm text-muted-foreground">
                   Your payment went through, but your Premium access may take a few more seconds to activate. Please refresh in a moment.
                 </p>
@@ -233,19 +266,14 @@ export default function PremiumPage() {
             </CardContent>
           </Card>
         ) : isPremium ? (
-          // Premium User View
           <Card className="bg-card border-border">
             <CardContent className="p-6 space-y-6">
               <div className="text-center space-y-3">
                 <div className="w-16 h-16 mx-auto rounded-full bg-premium/20 flex items-center justify-center">
                   <Sparkles className="h-8 w-8 text-premium" />
                 </div>
-                <h2 className="text-xl font-bold text-foreground">
-                  You're a Premium Member!
-                </h2>
-                <p className="text-muted-foreground">
-                  Enjoy unlimited access to all premium features.
-                </p>
+                <h2 className="text-xl font-bold text-foreground">You're a Premium Member!</h2>
+                <p className="text-muted-foreground">Enjoy unlimited access to all premium features.</p>
               </div>
 
               <div className="space-y-3">
@@ -278,19 +306,17 @@ export default function PremiumPage() {
                   </>
                 )}
               </Button>
+              <p className="text-[11px] text-muted-foreground text-center">
+                Lifetime customers do not have recurring billing to manage.
+              </p>
             </CardContent>
           </Card>
         ) : !user ? (
-          // Logged Out View
           <Card className="bg-card border-border">
             <CardContent className="p-6 space-y-6">
               <div className="text-center space-y-2">
-                <h2 className="text-xl font-bold text-foreground">
-                  BetStreaks Premium
-                </h2>
-                <p className="text-muted-foreground">
-                  Log in to upgrade your account
-                </p>
+                <h2 className="text-xl font-bold text-foreground">BetStreaks Premium</h2>
+                <p className="text-muted-foreground">Log in to upgrade your account</p>
               </div>
 
               <div className="space-y-3">
@@ -310,154 +336,98 @@ export default function PremiumPage() {
             </CardContent>
           </Card>
         ) : (
-          // Non-Premium User View - Subscription Options
           <div className="space-y-6">
-            {/* Playoff Pass — NBA-Playoffs only */}
-            {sport === "NBA" && (
-            <Card className="border-2 border-primary relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
-              <CardContent className="p-6 space-y-5">
-                <div className="flex justify-center">
-                  <Badge className="bg-primary text-primary-foreground text-xs px-3 py-1">
-                    Most Popular
-                  </Badge>
-                </div>
-                <div className="text-center space-y-2">
-                  <h2 className="text-xl font-bold text-foreground">
-                    🔥 NBA Playoffs Pass
-                  </h2>
-                  <p className="text-3xl font-extrabold text-foreground">$25</p>
-                  <p className="text-sm text-muted-foreground">
-                    Full access through the Finals
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Renews monthly after playoffs • Cancel anytime
-                  </p>
-                </div>
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-bold text-foreground">Choose your plan</h2>
+              <p className="text-sm text-muted-foreground">
+                Subscriptions or one-time lifetime — your choice.
+              </p>
+            </div>
 
-                <div className="space-y-2.5">
-                  {[
-                    "Unlimited AI-generated slips",
-                    "High hit-rate player trends",
-                    "Playoff matchup analysis",
-                    "Live streak alerts",
-                    "Advanced stats & splits",
-                  ].map((feature, i) => (
-                    <div key={i} className="flex items-center gap-3">
-                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                        <Check className="h-3 w-3 text-primary" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {PLAN_CARDS.map((card) => {
+                const isHighlight = !!card.highlight;
+                return (
+                  <Card
+                    key={card.key}
+                    className={
+                      isHighlight
+                        ? "border-2 border-primary relative overflow-hidden"
+                        : "bg-card border-border relative overflow-hidden"
+                    }
+                  >
+                    {card.badge && (
+                      <div className="absolute top-3 right-3">
+                        <Badge
+                          className={
+                            isHighlight
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-premium/20 text-premium border-premium/30"
+                          }
+                        >
+                          {card.badge}
+                        </Badge>
                       </div>
-                      <span className="text-sm text-foreground">{feature}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <p className="text-xs font-medium text-center text-primary">
-                  Limited-time playoff pricing — ends after Finals
-                </p>
-
-                <Button
-                  onClick={() => handleCheckout("playoff")}
-                  className="w-full"
-                  size="lg"
-                  disabled={isCheckoutLoading !== null}
-                >
-                  {isCheckoutLoading === "playoff" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Unlock Playoff Access"
-                  )}
-                </Button>
-
-                <p className="text-xs text-center text-muted-foreground">
-                  Takes 10 seconds • Instant access
-                </p>
-                <p className="text-xs text-center text-muted-foreground">
-                  Promo codes accepted at checkout
-                </p>
-              </CardContent>
-            </Card>
-            )}
-
-            {/* Standard Plans */}
-            <Card className="bg-card border-border">
-              <CardContent className="p-6 space-y-6">
-                <div className="text-center space-y-2">
-                  <h2 className="text-xl font-bold text-foreground">
-                    BetStreaks Premium
-                  </h2>
-                  <p className="text-muted-foreground">
-                    Unlock all features and catch streaks early
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  {PREMIUM_FEATURES.map((feature, index) => (
-                    <div key={index} className="flex items-center gap-3">
-                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                        <Check className="h-3 w-3 text-primary" />
+                    )}
+                    <CardContent className="p-5 space-y-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-foreground">
+                          {card.title}
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-1 leading-snug">
+                          {card.description}
+                        </p>
                       </div>
-                      <span className="text-sm text-foreground">{feature}</span>
-                    </div>
-                  ))}
-                </div>
 
-                {/* Pricing Cards */}
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  {/* Monthly */}
-                  <div className="border border-border rounded-lg p-4 space-y-3">
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-muted-foreground">Monthly</p>
-                      <p className="text-2xl font-bold text-foreground">$10</p>
-                      <p className="text-xs text-muted-foreground">per month</p>
-                    </div>
-                    <Button
-                      onClick={() => handleCheckout("monthly")}
-                      className="w-full"
-                      size="sm"
-                      disabled={isCheckoutLoading !== null}
-                    >
-                      {isCheckoutLoading === "monthly" ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "Subscribe"
-                      )}
-                    </Button>
-                  </div>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl font-extrabold text-foreground">
+                          {card.price}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {card.period}
+                        </span>
+                      </div>
 
-                  {/* Yearly */}
-                  <div className="border-2 border-primary rounded-lg p-4 space-y-3 relative">
-                    <Badge className="absolute -top-2 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs">
-                      Best Value
-                    </Badge>
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-muted-foreground">Yearly</p>
-                      <p className="text-2xl font-bold text-foreground">$60</p>
-                      <p className="text-xs text-muted-foreground">per year</p>
-                    </div>
-                    <Button
-                      onClick={() => handleCheckout("yearly")}
-                      className="w-full"
-                      size="sm"
-                      disabled={isCheckoutLoading !== null}
-                    >
-                      {isCheckoutLoading === "yearly" ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "Subscribe"
-                      )}
-                    </Button>
-                  </div>
-                </div>
+                      <Button
+                        onClick={() => handleCheckout(card.key)}
+                        className="w-full"
+                        size="lg"
+                        disabled={isCheckoutLoading !== null}
+                        variant={isHighlight ? "default" : "outline"}
+                      >
+                        {isCheckoutLoading === card.key ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          card.buttonLabel
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
 
-                <div className="text-center space-y-1">
-                  <p className="text-xs font-medium text-primary">
-                    Early access pricing — may increase soon
+            <Card className="bg-muted/30 border-border">
+              <CardContent className="p-4 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-foreground mb-1">
+                    About lifetime access
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    Cancel anytime. Secure payment via Stripe.
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    {LIFETIME_DISCLAIMER}
                   </p>
                 </div>
+                <div>
+                  <p className="text-xs font-semibold text-foreground mb-1">
+                    Important
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    {BETTING_DISCLAIMER}
+                  </p>
+                </div>
+                <p className="text-[11px] text-muted-foreground text-center pt-1">
+                  Secure payment via Stripe • Cancel subscriptions anytime
+                </p>
               </CardContent>
             </Card>
           </div>
