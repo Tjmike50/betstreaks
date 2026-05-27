@@ -190,16 +190,15 @@ serve(async (req) => {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        console.log("Checkout session completed:", session.id);
+        console.log("Checkout session completed:", session.id, "mode:", session.mode);
 
-        // Get user_id from session metadata
         const userId = session.metadata?.user_id;
         if (!userId) {
           console.error("No user_id in checkout session metadata");
           break;
         }
 
-        // Store customer mapping if not already present
+        // Store customer mapping
         if (session.customer) {
           const customerId =
             typeof session.customer === "string"
@@ -207,15 +206,22 @@ serve(async (req) => {
               : session.customer.id;
 
           await supabaseAdmin.from("stripe_customers").upsert(
-            {
-              user_id: userId,
-              stripe_customer_id: customerId,
-            },
+            { user_id: userId, stripe_customer_id: customerId },
             { onConflict: "user_id" }
           );
         }
 
-        // If subscription was created, it will be handled by subscription.created event
+        // One-time lifetime purchases: grant permanent premium immediately.
+        // Subscription purchases are handled by customer.subscription.* events.
+        if (session.mode === "payment" && session.payment_status === "paid") {
+          const plan = session.metadata?.plan ?? "lifetime";
+          const product = session.metadata?.product ?? "betstreaks";
+          console.log(
+            `Lifetime purchase: user=${userId} plan=${plan} product=${product}`
+          );
+          await updatePremiumStatus(userId, true);
+        }
+
         console.log("Checkout completed for user:", userId);
         break;
       }
