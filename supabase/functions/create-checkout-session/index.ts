@@ -8,21 +8,54 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type PlanKey = "monthly" | "yearly" | "lifetime" | "all_apps_lifetime";
+
+interface PlanConfig {
+  envVar: string;
+  mode: "subscription" | "payment";
+  product: "betstreaks" | "all_apps";
+  label: string;
+}
+
+const PLAN_CONFIG: Record<PlanKey, PlanConfig> = {
+  monthly: {
+    envVar: "STRIPE_PRICE_BETSTREAKS_MONTHLY_1750",
+    mode: "subscription",
+    product: "betstreaks",
+    label: "Premium Monthly",
+  },
+  yearly: {
+    envVar: "STRIPE_PRICE_BETSTREAKS_YEARLY_180",
+    mode: "subscription",
+    product: "betstreaks",
+    label: "Premium Yearly",
+  },
+  lifetime: {
+    envVar: "STRIPE_PRICE_BETSTREAKS_LIFETIME_480",
+    mode: "payment",
+    product: "betstreaks",
+    label: "BetStreaks Lifetime",
+  },
+  all_apps_lifetime: {
+    envVar: "STRIPE_PRICE_ALL_APPS_LIFETIME_2750",
+    mode: "payment",
+    product: "all_apps",
+    label: "All Apps Lifetime Pass",
+  },
+};
+
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    // Create Supabase client with service role for DB operations
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
       { auth: { persistSession: false } }
     );
 
-    // Create Supabase client with user's auth token
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       throw new Error("No authorization header");
@@ -37,7 +70,6 @@ serve(async (req) => {
       }
     );
 
-    // Get authenticated user
     const {
       data: { user },
       error: userError,
@@ -48,24 +80,30 @@ serve(async (req) => {
       throw new Error("User not authenticated");
     }
 
-    console.log("Authenticated user:", user.id);
+    const body = await req.json().catch(() => ({}));
+    const plan = body?.plan as PlanKey | undefined;
+    const allowPromoCodes = body?.allowPromoCodes === true;
 
-    // Get request body
-    const { priceId, allowPromoCodes } = await req.json();
-    if (!priceId || typeof priceId !== "string") {
-      throw new Error("priceId is required and must be a string");
-    }
-    if (!priceId.startsWith("price_")) {
-      throw new Error("Invalid price ID format");
+    if (!plan || !(plan in PLAN_CONFIG)) {
+      throw new Error(
+        `Invalid or missing plan. Expected one of: ${Object.keys(PLAN_CONFIG).join(", ")}`
+      );
     }
 
-    console.log("Creating checkout session for price:", priceId);
+    const config = PLAN_CONFIG[plan];
+    const priceId = Deno.env.get(config.envVar) ?? "";
+    if (!priceId || !priceId.startsWith("price_")) {
+      console.error(`Missing or invalid Stripe price env var: ${config.envVar}`);
+      throw new Error(`Pricing configuration missing for plan: ${plan}`);
+    }
+
+    console.log(`Creating ${config.mode} checkout for plan=${plan} user=${user.id}`);
 
     const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
       apiVersion: "2023-10-16",
     });
 
-    // Check if customer already exists in stripe_customers table
+    // Look up / create Stripe customer
     const { data: existingCustomer } = await supabaseAdmin
       .from("stripe_customers")
       .select("stripe_customer_id")
@@ -74,81 +112,84 @@ serve(async (req) => {
 
     let stripeCustomerId = existingCustomer?.stripe_customer_id;
 
-    // If no customer record, check if customer exists in Stripe by email
     if (!stripeCustomerId && user.email) {
       const existingStripeCustomers = await stripe.customers.list({
         email: user.email,
         limit: 1,
       });
-
       if (existingStripeCustomers.data.length > 0) {
         stripeCustomerId = existingStripeCustomers.data[0].id;
-        // Store the mapping
         await supabaseAdmin.from("stripe_customers").upsert(
-          {
-            user_id: user.id,
-            stripe_customer_id: stripeCustomerId,
-          },
+          { user_id: user.id, stripe_customer_id: stripeCustomerId },
           { onConflict: "user_id" }
         );
-        console.log("Found existing Stripe customer:", stripeCustomerId);
       }
     }
 
-    // Create new Stripe customer if none exists
     if (!stripeCustomerId) {
       const newCustomer = await stripe.customers.create({
         email: user.email,
         metadata: { user_id: user.id },
       });
       stripeCustomerId = newCustomer.id;
-
-      // Store the mapping
       await supabaseAdmin.from("stripe_customers").upsert(
-        {
-          user_id: user.id,
-          stripe_customer_id: stripeCustomerId,
-        },
+        { user_id: user.id, stripe_customer_id: stripeCustomerId },
         { onConflict: "user_id" }
       );
-      console.log("Created new Stripe customer:", stripeCustomerId);
     }
 
-    // Check if user already has an active subscription
-    const subscriptions = await stripe.subscriptions.list({
-      customer: stripeCustomerId,
-      status: "active",
-      limit: 1,
-    });
-
-    if (subscriptions.data.length > 0) {
-      throw new Error("User already has an active subscription");
+    // For subscription plans, block double-subscribing
+    if (config.mode === "subscription") {
+      const subscriptions = await stripe.subscriptions.list({
+        customer: stripeCustomerId,
+        status: "active",
+        limit: 1,
+      });
+      if (subscriptions.data.length > 0) {
+        throw new Error("User already has an active subscription");
+      }
     }
 
-    // Get the origin for redirect URLs
     const origin = req.headers.get("origin") || "https://betstreaks.lovable.app";
 
-    // Create Stripe Checkout session
     const sessionParams: Record<string, unknown> = {
       customer: stripeCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
-      mode: "subscription",
+      mode: config.mode,
       success_url: `${origin}/premium?success=1`,
       cancel_url: `${origin}/premium?canceled=1`,
-      metadata: { user_id: user.id },
-      subscription_data: {
-        metadata: { user_id: user.id },
+      metadata: {
+        user_id: user.id,
+        plan,
+        product: config.product,
       },
     };
 
-    // Enable promotion codes when requested (e.g. Playoff Pass)
+    if (config.mode === "subscription") {
+      sessionParams.subscription_data = {
+        metadata: {
+          user_id: user.id,
+          plan,
+          product: config.product,
+        },
+      };
+    } else {
+      // One-time payment (lifetime). Capture user_id + plan on the PaymentIntent too,
+      // so the webhook can grant entitlement from either object.
+      sessionParams.payment_intent_data = {
+        metadata: {
+          user_id: user.id,
+          plan,
+          product: config.product,
+        },
+      };
+    }
+
     if (allowPromoCodes) {
       sessionParams.allow_promotion_codes = true;
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
-
-    console.log("Created checkout session:", session.id);
 
     return new Response(JSON.stringify({ url: session.url }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
