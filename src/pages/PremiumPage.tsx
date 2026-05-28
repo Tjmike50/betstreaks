@@ -16,6 +16,7 @@ import {
   type PlanKey,
 } from "@/lib/premiumFeatures";
 import { analytics } from "@/lib/analytics";
+import { useBillingStatus } from "@/hooks/useBillingStatus";
 
 const MAX_CONFIRM_RETRIES = 5;
 const CONFIRM_RETRY_DELAY = 2000;
@@ -76,6 +77,7 @@ export default function PremiumPage() {
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
   const { isPremium, isLoading: isPremiumLoading, refetch } = usePremiumStatus();
+  const billing = useBillingStatus(isPremium, isPremiumLoading);
 
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -203,9 +205,17 @@ export default function PremiumPage() {
       if (error) throw error;
       if (data?.url) {
         window.location.href = data.url;
-      } else {
-        throw new Error("No portal URL returned");
+        return;
       }
+      if (data?.error) {
+        toast({
+          variant: "destructive",
+          title: "Billing portal unavailable",
+          description: data.error,
+        });
+        return;
+      }
+      throw new Error("No portal URL returned");
     } catch (error) {
       console.error("Portal error:", error);
       toast({
@@ -287,28 +297,49 @@ export default function PremiumPage() {
                 ))}
               </div>
 
-              <Button
-                onClick={handleManageBilling}
-                variant="outline"
-                className="w-full"
-                size="lg"
-                disabled={isPortalLoading}
-              >
-                {isPortalLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Opening...
-                  </>
-                ) : (
-                  <>
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    Manage Billing
-                  </>
-                )}
-              </Button>
-              <p className="text-[11px] text-muted-foreground text-center">
-                Lifetime customers do not have recurring billing to manage.
-              </p>
+              {billing.state === "active_subscription" ? (
+                <Button
+                  onClick={handleManageBilling}
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                  disabled={isPortalLoading}
+                >
+                  {isPortalLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Opening...
+                    </>
+                  ) : (
+                    <>
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Manage Billing
+                    </>
+                  )}
+                </Button>
+              ) : billing.state === "lifetime" ? (
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-center">
+                  <p className="text-sm font-medium text-foreground">
+                    Lifetime access active.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    No subscription to manage.
+                  </p>
+                </div>
+              ) : billing.state === "premium_no_billing" ? (
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-center">
+                  <p className="text-sm font-medium text-foreground">
+                    Premium access is active.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    There is no subscription to manage.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : !user ? (

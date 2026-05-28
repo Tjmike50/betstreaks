@@ -7,6 +7,7 @@ import { Footer } from "@/components/Footer";
 import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield, AlertTriangle, MessageSquare, Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { useBillingStatus } from "@/hooks/useBillingStatus";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function AccountPage() {
@@ -17,6 +18,7 @@ export default function AccountPage() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
   const { isPremium, isLoading: isPremiumLoading } = usePremiumStatus();
+  const billing = useBillingStatus(isPremium, isPremiumLoading);
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -66,9 +68,17 @@ export default function AccountPage() {
 
       if (data?.url) {
         window.location.href = data.url;
-      } else {
-        throw new Error("No portal URL returned");
+        return;
       }
+      if (data?.error) {
+        toast({
+          variant: "destructive",
+          title: "Billing portal unavailable",
+          description: data.error,
+        });
+        return;
+      }
+      throw new Error("No portal URL returned");
     } catch (error) {
       console.error("Portal error:", error);
       toast({
@@ -126,7 +136,16 @@ export default function AccountPage() {
     }
 
     if (isPremium) {
-      // Premium user - show status and manage button
+      const showManage = billing.state === "active_subscription";
+      const statusLine =
+        billing.state === "active_subscription"
+          ? "All features unlocked"
+          : billing.state === "lifetime"
+            ? "Lifetime access active. No subscription to manage."
+            : billing.state === "premium_no_billing"
+              ? "Premium access is active. No subscription to manage."
+              : "All features unlocked";
+
       return (
         <Card className="bg-gradient-to-r from-success/10 to-success/5 border-success/20">
           <CardContent className="p-4 flex items-center justify-between">
@@ -136,25 +155,27 @@ export default function AccountPage() {
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">You are Premium</h3>
-                <p className="text-xs text-muted-foreground">All features unlocked</p>
+                <p className="text-xs text-muted-foreground">{statusLine}</p>
               </div>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="border-success/30 text-success hover:bg-success/10"
-              onClick={handleManageBilling}
-              disabled={isPortalLoading}
-            >
-              {isPortalLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <ExternalLink className="h-3 w-3 mr-1" />
-                  Manage
-                </>
-              )}
-            </Button>
+            {showManage && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-success/30 text-success hover:bg-success/10"
+                onClick={handleManageBilling}
+                disabled={isPortalLoading}
+              >
+                {isPortalLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <ExternalLink className="h-3 w-3 mr-1" />
+                    Manage
+                  </>
+                )}
+              </Button>
+            )}
           </CardContent>
         </Card>
       );
