@@ -7,6 +7,7 @@ import { Footer } from "@/components/Footer";
 import { User, LogIn, Star, RefreshCw, Infinity, LogOut, Loader2, Crown, FileText, Shield, AlertTriangle, MessageSquare, Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { useBillingStatus } from "@/hooks/useBillingStatus";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function AccountPage() {
@@ -17,6 +18,7 @@ export default function AccountPage() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
   const { isPremium, isLoading: isPremiumLoading } = usePremiumStatus();
+  const billing = useBillingStatus(isPremium, isPremiumLoading);
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -66,9 +68,17 @@ export default function AccountPage() {
 
       if (data?.url) {
         window.location.href = data.url;
-      } else {
-        throw new Error("No portal URL returned");
+        return;
       }
+      if (data?.error) {
+        toast({
+          variant: "destructive",
+          title: "Billing portal unavailable",
+          description: data.error,
+        });
+        return;
+      }
+      throw new Error("No portal URL returned");
     } catch (error) {
       console.error("Portal error:", error);
       toast({
