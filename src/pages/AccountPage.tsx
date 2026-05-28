@@ -136,7 +136,16 @@ export default function AccountPage() {
     }
 
     if (isPremium) {
-      // Premium user - show status and manage button
+      const showManage = billing.state === "active_subscription";
+      const statusLine =
+        billing.state === "active_subscription"
+          ? "All features unlocked"
+          : billing.state === "lifetime"
+            ? "Lifetime access active. No subscription to manage."
+            : billing.state === "premium_no_billing"
+              ? "Premium access is active. No subscription to manage."
+              : "All features unlocked";
+
       return (
         <Card className="bg-gradient-to-r from-success/10 to-success/5 border-success/20">
           <CardContent className="p-4 flex items-center justify-between">
@@ -146,25 +155,27 @@ export default function AccountPage() {
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">You are Premium</h3>
-                <p className="text-xs text-muted-foreground">All features unlocked</p>
+                <p className="text-xs text-muted-foreground">{statusLine}</p>
               </div>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="border-success/30 text-success hover:bg-success/10"
-              onClick={handleManageBilling}
-              disabled={isPortalLoading}
-            >
-              {isPortalLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <ExternalLink className="h-3 w-3 mr-1" />
-                  Manage
-                </>
-              )}
-            </Button>
+            {showManage && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-success/30 text-success hover:bg-success/10"
+                onClick={handleManageBilling}
+                disabled={isPortalLoading}
+              >
+                {isPortalLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <ExternalLink className="h-3 w-3 mr-1" />
+                    Manage
+                  </>
+                )}
+              </Button>
+            )}
           </CardContent>
         </Card>
       );
