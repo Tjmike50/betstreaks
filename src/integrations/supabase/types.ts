@@ -2564,6 +2564,75 @@ export type Database = {
         }
         Relationships: []
       }
+      stripe_account_customers: {
+        Row: {
+          created_at: string
+          id: string
+          stripe_account: string
+          stripe_customer_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          stripe_account: string
+          stripe_customer_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          stripe_account?: string
+          stripe_customer_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      stripe_account_subscriptions: {
+        Row: {
+          created_at: string
+          current_period_end: string | null
+          id: string
+          last_event_created_at: string | null
+          last_event_id: string | null
+          price_id: string | null
+          status: string | null
+          stripe_account: string
+          stripe_subscription_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_period_end?: string | null
+          id?: string
+          last_event_created_at?: string | null
+          last_event_id?: string | null
+          price_id?: string | null
+          status?: string | null
+          stripe_account: string
+          stripe_subscription_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          current_period_end?: string | null
+          id?: string
+          last_event_created_at?: string | null
+          last_event_id?: string | null
+          price_id?: string | null
+          status?: string | null
+          stripe_account?: string
+          stripe_subscription_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       stripe_customers: {
         Row: {
           created_at: string
@@ -2587,6 +2656,8 @@ export type Database = {
           created_at: string
           current_period_end: string | null
           id: string
+          last_event_created_at: string | null
+          last_event_id: string | null
           price_id: string | null
           status: string | null
           stripe_subscription_id: string | null
@@ -2597,6 +2668,8 @@ export type Database = {
           created_at?: string
           current_period_end?: string | null
           id?: string
+          last_event_created_at?: string | null
+          last_event_id?: string | null
           price_id?: string | null
           status?: string | null
           stripe_subscription_id?: string | null
@@ -2607,6 +2680,8 @@ export type Database = {
           created_at?: string
           current_period_end?: string | null
           id?: string
+          last_event_created_at?: string | null
+          last_event_id?: string | null
           price_id?: string | null
           status?: string | null
           stripe_subscription_id?: string | null
@@ -2736,21 +2811,30 @@ export type Database = {
         Row: {
           created_at: string
           is_admin: boolean
+          is_lifetime: boolean
           is_premium: boolean
+          manual_premium: boolean
+          premium_protected_at: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
           is_admin?: boolean
+          is_lifetime?: boolean
           is_premium?: boolean
+          manual_premium?: boolean
+          premium_protected_at?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
           is_admin?: boolean
+          is_lifetime?: boolean
           is_premium?: boolean
+          manual_premium?: boolean
+          premium_protected_at?: string | null
           updated_at?: string
           user_id?: string
         }
