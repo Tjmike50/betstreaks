@@ -1,6 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  loadBetstreaksAccount,
+  loadLegacyAccount,
+  selectPortalAccount,
+  type StripeAccountId,
+} from "../_shared/stripeAccounts.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,19 +28,32 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-  const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const env = (key: string) => Deno.env.get(key);
+
+  const supabaseUrl = env("SUPABASE_URL") ?? "";
+  const supabaseAnonKey = env("SUPABASE_ANON_KEY") ?? "";
+  const supabaseServiceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+  const legacyAccount = loadLegacyAccount(env);
+  const betstreaksAccount = loadBetstreaksAccount(env);
 
   console.log("[create-portal-session] env check", {
-    hasStripeSecretKey: Boolean(stripeSecretKey),
+    hasLegacyAccount: Boolean(legacyAccount),
+    hasBetstreaksAccount: Boolean(betstreaksAccount),
     hasSupabaseUrl: Boolean(supabaseUrl),
     hasServiceRoleKey: Boolean(supabaseServiceRoleKey),
   });
 
-  if (!stripeSecretKey || !supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
-    console.error("[create-portal-session] Missing required env vars");
+  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
+    console.error("[create-portal-session] Missing required Supabase env vars");
+    return jsonOk({
+      error: "Billing portal is not configured. Please contact support.",
+      code: "config_missing",
+    });
+  }
+
+  if (!legacyAccount && !betstreaksAccount) {
+    console.error("[create-portal-session] No Stripe account configured");
     return jsonOk({
       error: "Billing portal is not configured. Please contact support.",
       code: "config_missing",
@@ -54,7 +73,7 @@ serve(async (req) => {
 
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
-      console.error("[create-portal-session] auth error", userError);
+      console.error("[create-portal-session] auth error", userError?.message);
       return jsonOk({ error: "Not authenticated.", code: "no_auth" });
     }
 
@@ -62,16 +81,74 @@ serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    const { data: customerData } = await supabaseAdmin
-      .from("stripe_customers")
-      .select("stripe_customer_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // ── Gather subscription evidence from both accounts ──
+    const [legacySubs, newSubs] = await Promise.all([
+      supabaseAdmin
+        .from("stripe_subscriptions")
+        .select("status")
+        .eq("user_id", user.id),
+      supabaseAdmin
+        .from("stripe_account_subscriptions")
+        .select("status, stripe_account")
+        .eq("user_id", user.id),
+    ]);
 
-    const stripeCustomerId = customerData?.stripe_customer_id ?? null;
+    const rows: Array<{ account: StripeAccountId; status: string | null }> = [
+      ...(legacySubs.data ?? []).map((r) => ({
+        account: "legacy" as StripeAccountId,
+        status: r.status as string | null,
+      })),
+      ...(newSubs.data ?? []).map((r) => ({
+        account: (r.stripe_account as StripeAccountId) ?? "betstreaks",
+        status: r.status as string | null,
+      })),
+    ];
+
+    const targetAccountId = selectPortalAccount(rows);
+
+    if (!targetAccountId) {
+      console.log("[create-portal-session] no subscription rows for user", {
+        userId: user.id,
+      });
+      return jsonOk({
+        error: "Lifetime access active. No subscription to manage.",
+        code: "no_subscription",
+      });
+    }
+
+    const account = targetAccountId === "legacy" ? legacyAccount : betstreaksAccount;
+    if (!account) {
+      console.error("[create-portal-session] account not configured", {
+        targetAccountId,
+      });
+      return jsonOk({
+        error: "Billing portal is not configured. Please contact support.",
+        code: "config_missing",
+      });
+    }
+
+    // ── Customer id for that account ──
+    let stripeCustomerId: string | null = null;
+    if (targetAccountId === "legacy") {
+      const { data } = await supabaseAdmin
+        .from("stripe_customers")
+        .select("stripe_customer_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      stripeCustomerId = data?.stripe_customer_id ?? null;
+    } else {
+      const { data } = await supabaseAdmin
+        .from("stripe_account_customers")
+        .select("stripe_customer_id")
+        .eq("user_id", user.id)
+        .eq("stripe_account", targetAccountId)
+        .maybeSingle();
+      stripeCustomerId = data?.stripe_customer_id ?? null;
+    }
 
     console.log("[create-portal-session] user lookup", {
       userId: user.id,
+      account: targetAccountId,
       hasStripeCustomerId: Boolean(stripeCustomerId),
     });
 
@@ -82,19 +159,31 @@ serve(async (req) => {
       });
     }
 
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
+    const stripe = new Stripe(account.secretKey, { apiVersion: "2023-10-16" });
 
-    // Confirm the customer has at least one subscription (active or canceled);
-    // pure lifetime customers have none and shouldn't be sent to the portal.
-    const subs = await stripe.subscriptions.list({
-      customer: stripeCustomerId,
-      status: "all",
-      limit: 1,
-    });
+    // Confirm the customer really exists in THIS account; a cross-account id
+    // would otherwise surface as a raw Stripe error.
+    const subs = await stripe.subscriptions
+      .list({ customer: stripeCustomerId, status: "all", limit: 1 })
+      .catch((err) => {
+        console.error("[create-portal-session] subscription lookup failed", {
+          account: targetAccountId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      });
+
+    if (!subs) {
+      return jsonOk({
+        error: "Could not reach your billing account. Please try again later.",
+        code: "account_mismatch",
+      });
+    }
 
     if (subs.data.length === 0) {
       console.log("[create-portal-session] customer has no subscriptions", {
         userId: user.id,
+        account: targetAccountId,
       });
       return jsonOk({
         error: "Lifetime access active. No subscription to manage.",
@@ -111,6 +200,7 @@ serve(async (req) => {
 
     console.log("[create-portal-session] portal session created", {
       userId: user.id,
+      account: targetAccountId,
       sessionId: portalSession.id,
     });
 

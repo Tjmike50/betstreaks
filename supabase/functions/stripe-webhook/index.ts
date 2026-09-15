@@ -1,6 +1,14 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import {
+  loadBetstreaksAccount,
+  loadLegacyAccount,
+  shouldRevokePremium,
+  tablesForAccount,
+  type AccountConfig,
+  type StripeAccountId,
+} from "../_shared/stripeAccounts.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,38 +17,36 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
-  const stripeWebhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const missingEnv = [
-    !stripeSecretKey ? "STRIPE_SECRET_KEY" : null,
-    !stripeWebhookSecret ? "STRIPE_WEBHOOK_SECRET" : null,
-    !supabaseUrl ? "SUPABASE_URL" : null,
-    !supabaseServiceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY" : null,
-  ].filter(Boolean);
+  const env = (key: string) => Deno.env.get(key);
 
-  if (missingEnv.length > 0) {
-    console.error("Missing required webhook env vars:", missingEnv.join(", "));
+  const supabaseUrl = env("SUPABASE_URL") ?? "";
+  const supabaseServiceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+  const legacyAccount = loadLegacyAccount(env);
+  const betstreaksAccount = loadBetstreaksAccount(env);
+
+  // Accounts we can verify signatures for, newest first so a new-account event
+  // is matched on the first attempt once the second endpoint secret exists.
+  const verifiable: AccountConfig[] = [betstreaksAccount, legacyAccount].filter(
+    (a): a is AccountConfig => Boolean(a && a.webhookSecret),
+  );
+
+  if (!supabaseUrl || !supabaseServiceRoleKey || verifiable.length === 0) {
+    console.error("Webhook configuration error", {
+      hasSupabaseUrl: Boolean(supabaseUrl),
+      hasServiceRoleKey: Boolean(supabaseServiceRoleKey),
+      verifiableAccounts: verifiable.map((a) => a.id),
+    });
     return new Response("Webhook configuration error", { status: 500 });
   }
 
-  const stripe = new Stripe(stripeSecretKey, {
-    apiVersion: "2023-10-16",
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { persistSession: false },
   });
-  const cryptoProvider = Stripe.createSubtleCryptoProvider();
-
-  // Create Supabase admin client (use service role for writes)
-  const supabaseAdmin = createClient(
-    supabaseUrl,
-    supabaseServiceRoleKey,
-    { auth: { persistSession: false } }
-  );
 
   function unixSecondsToIso(
     value: unknown,
@@ -55,77 +61,145 @@ serve(async (req) => {
       });
       return null;
     }
-
     const seconds = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) {
       console.warn("Stripe webhook timestamp invalid", {
         eventType: context.eventType,
         subscriptionId: context.subscriptionId ?? null,
         fieldName,
-        receivedType: typeof value,
       });
       return null;
     }
-
     const date = new Date(seconds * 1000);
-    if (Number.isNaN(date.getTime())) {
-      console.warn("Stripe webhook timestamp produced invalid date", {
-        eventType: context.eventType,
-        subscriptionId: context.subscriptionId ?? null,
-        fieldName,
-      });
-      return null;
-    }
-
-    return date.toISOString();
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
   }
 
   try {
-    // Get the signature from headers
     const signature = req.headers.get("stripe-signature");
     if (!signature) {
-      console.error("No stripe-signature header", {
-        webhookSecretExists: Boolean(stripeWebhookSecret),
-        signatureHeaderExists: false,
-      });
+      console.error("No stripe-signature header");
       return new Response("No signature", { status: 400 });
     }
 
-    // Get raw body for signature verification
     const body = await req.text();
 
-    // Verify the webhook signature
-    let event: Stripe.Event;
-    try {
-      event = await stripe.webhooks.constructEventAsync(
-        body,
-        signature,
-        stripeWebhookSecret,
-        undefined,
-        cryptoProvider,
-      );
-    } catch (err) {
-      console.error("Webhook signature verification failed", {
-        webhookSecretExists: Boolean(stripeWebhookSecret),
-        signatureHeaderExists: Boolean(signature),
-        rawBodyLength: body.length,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return new Response(`Webhook signature verification failed`, { status: 400 });
+    // ── Verify against each configured account's signing secret ──
+    let event: Stripe.Event | null = null;
+    let accountId: StripeAccountId | null = null;
+    let stripe: Stripe | null = null;
+    const attempted: StripeAccountId[] = [];
+
+    for (const candidate of verifiable) {
+      attempted.push(candidate.id);
+      const client = new Stripe(candidate.secretKey, { apiVersion: "2023-10-16" });
+      const cryptoProvider = Stripe.createSubtleCryptoProvider();
+      try {
+        event = await client.webhooks.constructEventAsync(
+          body,
+          signature,
+          candidate.webhookSecret!,
+          undefined,
+          cryptoProvider,
+        );
+        accountId = candidate.id;
+        stripe = client;
+        break;
+      } catch (_err) {
+        // Try the next account's secret.
+      }
     }
 
-    console.log("Received webhook event:", event.type, event.id);
+    if (!event || !accountId || !stripe) {
+      console.error("Webhook signature verification failed for all accounts", {
+        attemptedAccounts: attempted,
+        rawBodyLength: body.length,
+      });
+      return new Response("Webhook signature verification failed", { status: 400 });
+    }
 
-    // Helper function to update premium status
-    async function updatePremiumStatus(userId: string, isPremium: boolean) {
-      console.log(`Updating premium status for user ${userId} to ${isPremium}`);
+    const { customersTable, subscriptionsTable } = tablesForAccount(accountId);
+    const isLegacy = accountId === "legacy";
+
+    console.log("Received webhook event:", event.type, event.id, "account:", accountId);
+
+    // ── Replay protection ──
+    // Every handler below is an idempotent upsert keyed by a Stripe id, so a
+    // replayed event re-writes identical state rather than duplicating it.
+
+    async function getFlags(userId: string) {
+      const { data } = await supabaseAdmin
+        .from("user_flags")
+        .select("is_premium, is_lifetime, manual_premium")
+        .eq("user_id", userId)
+        .maybeSingle();
+      return {
+        isPremium: Boolean(data?.is_premium),
+        isLifetime: Boolean(data?.is_lifetime),
+        manualPremium: Boolean(data?.manual_premium),
+      };
+    }
+
+    async function grantPremium(userId: string, opts: { lifetime?: boolean } = {}) {
+      console.log(`Granting premium for user ${userId}`, opts);
+      const payload: Record<string, unknown> = {
+        user_id: userId,
+        is_premium: true,
+        updated_at: new Date().toISOString(),
+      };
+      if (opts.lifetime) payload.is_lifetime = true;
+      const { error } = await supabaseAdmin
+        .from("user_flags")
+        .upsert(payload, { onConflict: "user_id" });
+      if (error) {
+        console.error("Error updating user_flags:", error);
+        throw error;
+      }
+    }
+
+    /** Count active subscriptions for the user in ANY account, excluding one id. */
+    async function otherActiveSubscriptionCount(userId: string, excludeSubId: string) {
+      const [legacyRes, newRes] = await Promise.all([
+        supabaseAdmin
+          .from("stripe_subscriptions")
+          .select("stripe_subscription_id")
+          .eq("user_id", userId)
+          .in("status", ["active", "trialing"]),
+        supabaseAdmin
+          .from("stripe_account_subscriptions")
+          .select("stripe_subscription_id")
+          .eq("user_id", userId)
+          .in("status", ["active", "trialing"]),
+      ]);
+      const all = [...(legacyRes.data ?? []), ...(newRes.data ?? [])];
+      return all.filter((r) => r.stripe_subscription_id !== excludeSubId).length;
+    }
+
+    /**
+     * Never downgrade lifetime buyers, manually granted users, or someone whose
+     * access is backed by an active subscription in the other account.
+     */
+    async function maybeRevokePremium(userId: string, subscriptionId: string) {
+      const flags = await getFlags(userId);
+      const otherActive = await otherActiveSubscriptionCount(userId, subscriptionId);
+      const revoke = shouldRevokePremium({
+        isLifetime: flags.isLifetime,
+        manualPremium: flags.manualPremium,
+        otherActiveSubscriptionCount: otherActive,
+      });
+
+      console.log("Downgrade decision", {
+        userId,
+        isLifetime: flags.isLifetime,
+        manualPremium: flags.manualPremium,
+        otherActive,
+        revoke,
+      });
+
+      if (!revoke) return;
+
       const { error } = await supabaseAdmin.from("user_flags").upsert(
-        {
-          user_id: userId,
-          is_premium: isPremium,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
+        { user_id: userId, is_premium: false, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" },
       );
       if (error) {
         console.error("Error updating user_flags:", error);
@@ -133,60 +207,91 @@ serve(async (req) => {
       }
     }
 
-    // Helper function to upsert subscription record
+    async function upsertCustomer(userId: string, customerId: string) {
+      if (isLegacy) {
+        await supabaseAdmin
+          .from("stripe_customers")
+          .upsert(
+            { user_id: userId, stripe_customer_id: customerId },
+            { onConflict: "user_id" },
+          );
+      } else {
+        await supabaseAdmin.from(customersTable).upsert(
+          {
+            user_id: userId,
+            stripe_account: accountId,
+            stripe_customer_id: customerId,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id,stripe_account" },
+        );
+      }
+    }
+
     async function upsertSubscription(
       userId: string,
       subscription: Stripe.Subscription,
       eventType: string,
     ) {
-      console.log(`Upserting subscription ${subscription.id} for user ${userId}`);
       const currentPeriodEndIso = unixSecondsToIso(
         subscription.current_period_end,
         "current_period_end",
         { eventType, subscriptionId: subscription.id },
       );
-      const { error } = await supabaseAdmin.from("stripe_subscriptions").upsert(
-        {
-          user_id: userId,
-          stripe_subscription_id: subscription.id,
-          status: subscription.status,
-          price_id: subscription.items.data[0]?.price?.id ?? null,
-          current_period_end: currentPeriodEndIso,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "stripe_subscription_id" }
-      );
+      const base = {
+        user_id: userId,
+        stripe_subscription_id: subscription.id,
+        status: subscription.status,
+        price_id: subscription.items.data[0]?.price?.id ?? null,
+        current_period_end: currentPeriodEndIso,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = isLegacy
+        ? await supabaseAdmin
+            .from("stripe_subscriptions")
+            .upsert(base, { onConflict: "stripe_subscription_id" })
+        : await supabaseAdmin
+            .from(subscriptionsTable)
+            .upsert(
+              { ...base, stripe_account: accountId },
+              { onConflict: "stripe_account,stripe_subscription_id" },
+            );
+
       if (error) {
-        console.error("Error upserting stripe_subscriptions:", error);
+        console.error("Error upserting subscription:", error);
         throw error;
       }
     }
 
-    // Helper to get user_id from subscription or customer metadata
     async function getUserIdFromSubscription(
-      subscription: Stripe.Subscription
+      subscription: Stripe.Subscription,
     ): Promise<string | null> {
-      // First check subscription metadata
-      if (subscription.metadata?.user_id) {
-        return subscription.metadata.user_id;
-      }
+      if (subscription.metadata?.user_id) return subscription.metadata.user_id;
 
-      // Then check customer
       const customerId =
         typeof subscription.customer === "string"
           ? subscription.customer
           : subscription.customer.id;
 
-      const { data } = await supabaseAdmin
-        .from("stripe_customers")
-        .select("user_id")
-        .eq("stripe_customer_id", customerId)
-        .single();
+      if (isLegacy) {
+        const { data } = await supabaseAdmin
+          .from("stripe_customers")
+          .select("user_id")
+          .eq("stripe_customer_id", customerId)
+          .maybeSingle();
+        return data?.user_id ?? null;
+      }
 
+      const { data } = await supabaseAdmin
+        .from(customersTable)
+        .select("user_id")
+        .eq("stripe_account", accountId)
+        .eq("stripe_customer_id", customerId)
+        .maybeSingle();
       return data?.user_id ?? null;
     }
 
-    // Handle specific events
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -198,28 +303,19 @@ serve(async (req) => {
           break;
         }
 
-        // Store customer mapping
         if (session.customer) {
           const customerId =
-            typeof session.customer === "string"
-              ? session.customer
-              : session.customer.id;
-
-          await supabaseAdmin.from("stripe_customers").upsert(
-            { user_id: userId, stripe_customer_id: customerId },
-            { onConflict: "user_id" }
-          );
+            typeof session.customer === "string" ? session.customer : session.customer.id;
+          await upsertCustomer(userId, customerId);
         }
 
-        // One-time lifetime purchases: grant permanent premium immediately.
-        // Subscription purchases are handled by customer.subscription.* events.
         if (session.mode === "payment" && session.payment_status === "paid") {
           const plan = session.metadata?.plan ?? "lifetime";
           const product = session.metadata?.product ?? "betstreaks";
           console.log(
-            `Lifetime purchase: user=${userId} plan=${plan} product=${product}`
+            `Lifetime purchase: user=${userId} plan=${plan} product=${product} account=${accountId}`,
           );
-          await updatePremiumStatus(userId, true);
+          await grantPremium(userId, { lifetime: true });
         }
 
         console.log("Checkout completed for user:", userId);
@@ -229,57 +325,44 @@ serve(async (req) => {
       case "customer.subscription.created":
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription;
-        console.log(`Subscription ${event.type}:`, subscription.id, subscription.status);
-
         const userId = await getUserIdFromSubscription(subscription);
         if (!userId) {
           console.error("Could not determine user_id for subscription:", subscription.id);
           break;
         }
 
-        // Upsert subscription record
         await upsertSubscription(userId, subscription, event.type);
 
-        // Update premium status based on subscription status
         const isActive = ["active", "trialing"].includes(subscription.status);
-        await updatePremiumStatus(userId, isActive);
+        if (isActive) {
+          await grantPremium(userId);
+        } else {
+          await maybeRevokePremium(userId, subscription.id);
+        }
 
-        console.log(`User ${userId} premium status set to ${isActive}`);
+        console.log(`User ${userId} subscription ${subscription.status} on ${accountId}`);
         break;
       }
 
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
-        console.log("Subscription deleted:", subscription.id);
-
         const userId = await getUserIdFromSubscription(subscription);
         if (!userId) {
           console.error("Could not determine user_id for subscription:", subscription.id);
           break;
         }
 
-        // Update subscription record
         await upsertSubscription(userId, subscription, event.type);
-
-        // Set premium to false
-        await updatePremiumStatus(userId, false);
-
-        console.log(`User ${userId} premium status set to false (subscription deleted)`);
+        await maybeRevokePremium(userId, subscription.id);
         break;
       }
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        console.log("Invoice payment failed:", invoice.id);
-
-        // Log for alerting - the subscription status will be updated separately
-        // by Stripe's automatic handling, triggering subscription.updated
-        console.warn(
-          "Payment failed for customer:",
-          invoice.customer,
-          "invoice:",
-          invoice.id
-        );
+        console.warn("Payment failed", {
+          account: accountId,
+          invoiceId: invoice.id,
+        });
         break;
       }
 
@@ -287,7 +370,7 @@ serve(async (req) => {
         console.log("Unhandled event type:", event.type);
     }
 
-    return new Response(JSON.stringify({ received: true }), {
+    return new Response(JSON.stringify({ received: true, account: accountId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
@@ -298,7 +381,7 @@ serve(async (req) => {
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 500,
-      }
+      },
     );
   }
 });
