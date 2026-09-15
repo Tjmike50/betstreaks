@@ -38,7 +38,7 @@ export const PREMIUM_FEATURES_WITH_ICONS: PremiumFeatureWithIcon[] = [
 
 // Plan keys are the contract between frontend and the create-checkout-session
 // edge function. The function maps each key to its Stripe price env var.
-export type PlanKey = "monthly" | "yearly" | "lifetime" | "all_apps_lifetime";
+export type PlanKey = "monthly" | "yearly" | "lifetime" | "all_apps_lifetime" | "weekly_pass";
 
 export const PREMIUM_PRICING = {
   monthly: {

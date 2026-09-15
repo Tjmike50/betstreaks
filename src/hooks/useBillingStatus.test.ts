@@ -49,3 +49,23 @@ describe("billing controls across Stripe accounts", () => {
     await waitFor(() => expect(result.current.state).toBe("premium_no_billing"));
   });
 });
+
+
+describe("prepaid pass billing status", () => {
+  it("does not label a weekly buyer as lifetime", async () => {
+    fixture.rows.stripe_account_customers = { stripe_customer_id: "cus_weekly" };
+    const expiry = new Date(Date.now() + 9 * 7 * 86400000).toISOString();
+    const { result } = renderHook(() => useBillingStatus(true, false, expiry, false));
+    await waitFor(() => expect(result.current.state).toBe("weekly_pass"));
+  });
+  it("preserves lifetime status with an expired weekly pass", async () => {
+    fixture.rows.stripe_account_customers = { stripe_customer_id: "cus_lifetime" };
+    const { result } = renderHook(() => useBillingStatus(true, false, "2020-01-01T00:00:00Z", true));
+    await waitFor(() => expect(result.current.state).toBe("lifetime"));
+  });
+  it("shows no subscription after prepaid access expires", async () => {
+    fixture.rows.stripe_account_customers = { stripe_customer_id: "cus_weekly" };
+    const { result } = renderHook(() => useBillingStatus(false, false, "2020-01-01T00:00:00Z", false));
+    await waitFor(() => expect(result.current.state).toBe("no_subscription"));
+  });
+});

@@ -17,8 +17,8 @@ export default function AccountPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
-  const { isPremium, isLoading: isPremiumLoading } = usePremiumStatus();
-  const billing = useBillingStatus(isPremium, isPremiumLoading);
+  const { isPremium, basePremium, weeklyExpiresAt, isLoading: isPremiumLoading } = usePremiumStatus();
+  const billing = useBillingStatus(isPremium, isPremiumLoading, weeklyExpiresAt, basePremium);
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -114,7 +114,7 @@ export default function AccountPage() {
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">Go Premium</h3>
-                <p className="text-xs text-muted-foreground">From $17.50/mo · Lifetime from $480</p>
+                <p className="text-xs text-muted-foreground">$5/week prepaid · $17.50/mo · Lifetime $480</p>
               </div>
             </div>
             <Button variant="outline" size="sm" className="border-premium/30 text-premium hover:bg-premium/10">
@@ -140,6 +140,8 @@ export default function AccountPage() {
       const statusLine =
         billing.state === "active_subscription"
           ? "All features unlocked"
+          : billing.state === "weekly_pass"
+            ? `Prepaid until ${new Date(weeklyExpiresAt!).toLocaleString()}. No automatic renewal.`
           : billing.state === "lifetime"
             ? "Lifetime access active. No subscription to manage."
             : billing.state === "premium_no_billing"
@@ -158,6 +160,7 @@ export default function AccountPage() {
                 <p className="text-xs text-muted-foreground">{statusLine}</p>
               </div>
             </div>
+            {billing.state === "weekly_pass" && <Button variant="outline" size="sm" onClick={() => navigate("/premium")}>Add weeks</Button>}
             {showManage && (
               <Button
                 variant="outline"
@@ -194,7 +197,7 @@ export default function AccountPage() {
             </div>
             <div>
               <h3 className="font-semibold text-foreground">Go Premium</h3>
-              <p className="text-xs text-muted-foreground">From $17.50/mo · Lifetime from $480</p>
+              <p className="text-xs text-muted-foreground">$5/week prepaid · $17.50/mo · Lifetime $480</p>
             </div>
           </div>
           <Button variant="outline" size="sm" className="border-premium/30 text-premium hover:bg-premium/10">

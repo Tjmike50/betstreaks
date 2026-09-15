@@ -27,7 +27,9 @@ function makeStore(seed: {
   const customers = [...(seed.customers ?? [])];
   const subscriptions = [...(seed.subscriptions ?? [])];
 
+  const weeklyGrants: Array<{ userId: string; sessionId: string; weeks: number }> = [];
   const store: WebhookStore = {
+    grantWeeklyPass: (userId, sessionId, weeks) => { weeklyGrants.push({ userId, sessionId, weeks }); return Promise.resolve("2027-07-13T00:00:00Z"); },
     getFlags: (userId) =>
       Promise.resolve({
         isPremium: Boolean(flags.get(userId)?.is_premium),
@@ -79,7 +81,7 @@ function makeStore(seed: {
       ),
   };
 
-  return { store, flags, customers, subscriptions };
+  return { store, flags, customers, subscriptions, weeklyGrants };
 }
 
 const NOW = Math.floor(Date.parse("2026-09-15T12:00:00Z") / 1000);
@@ -461,4 +463,30 @@ Deno.test("signature: replayed old timestamp is rejected by tolerance", async ()
 
 Deno.test("required event list is the documented set", () => {
   assertEquals(REQUIRED_WEBHOOK_EVENTS.length, 8);
+});
+
+for (const weeks of [9, 43]) {
+  Deno.test(`paid ${weeks}-week pass grants time without lifetime flags`, async () => {
+    const { store, flags, weeklyGrants } = makeStore();
+    const event = checkoutEvent({ mode: "payment", plan: "weekly_pass" });
+    Object.assign(event.data.object, { currency: "usd", amount_total: weeks * 500 });
+    Object.assign(event.data.object.metadata, { weeks: String(weeks) });
+    const result = await handleStripeEvent(event, "betstreaks", store);
+    assertEquals(result.action, "granted_weekly_pass");
+    assertEquals(weeklyGrants, [{ userId: "user_a", sessionId: "cs_1", weeks }]);
+    assertEquals(flags.size, 0);
+  });
+}
+Deno.test("pending weekly payment waits for successful async payment", async () => {
+  const { store, flags, weeklyGrants } = makeStore();
+  const event = checkoutEvent({ mode: "payment", plan: "weekly_pass", payment_status: "unpaid" });
+  Object.assign(event.data.object, { currency: "usd", amount_total: 4500 });
+  Object.assign(event.data.object.metadata, { weeks: "9" });
+  await handleStripeEvent(event, "betstreaks", store);
+  assertEquals(weeklyGrants.length, 0);
+  event.type = "checkout.session.async_payment_succeeded";
+  event.data.object.payment_status = "paid";
+  await handleStripeEvent(event, "betstreaks", store);
+  assertEquals(weeklyGrants.length, 1);
+  assertEquals(flags.size, 0);
 });

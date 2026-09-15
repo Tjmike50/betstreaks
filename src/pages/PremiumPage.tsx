@@ -7,6 +7,7 @@ import { Footer } from "@/components/Footer";
 import { ArrowLeft, Crown, Check, Loader2, ExternalLink, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
+import { WeeklyPassCard } from "@/components/WeeklyPassCard";
 import { Badge } from "@/components/ui/badge";
 import {
   PREMIUM_FEATURES,
@@ -76,8 +77,8 @@ export default function PremiumPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
-  const { isPremium, isLoading: isPremiumLoading, refetch } = usePremiumStatus();
-  const billing = useBillingStatus(isPremium, isPremiumLoading);
+  const { isPremium, basePremium, weeklyExpiresAt, isLoading: isPremiumLoading, refetch } = usePremiumStatus();
+  const billing = useBillingStatus(isPremium, isPremiumLoading, weeklyExpiresAt, basePremium);
 
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -85,12 +86,13 @@ export default function PremiumPage() {
   const [isPortalLoading, setIsPortalLoading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmFailed, setConfirmFailed] = useState(false);
+  const [weeks, setWeeks] = useState(() => sessionStorage.getItem("betstreaks-prepaid-weeks") || "1");
 
   useEffect(() => {
     analytics.viewPremiumPage();
   }, []);
 
-  const confirmPremiumStatus = useCallback(async () => {
+  const confirmPremiumStatus = useCallback(async (weeklySession?: string | null) => {
     setIsConfirming(true);
     setConfirmFailed(false);
 
@@ -101,11 +103,10 @@ export default function PremiumPage() {
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           if (currentUser) {
             const { data } = await supabase
-              .from("user_flags")
-              .select("is_premium")
-              .eq("user_id", currentUser.id)
+              .rpc("get_premium_access")
               .single();
-            if (data?.is_premium) {
+            const purchase = weeklySession ? await supabase.from("premium_weekly_passes").select("expires_at").eq("checkout_session_id", weeklySession).maybeSingle() : null;
+            if (data?.is_premium && (!weeklySession || purchase?.data)) {
               setIsConfirming(false);
               toast({
                 title: "Welcome to Premium! 🎉",
@@ -135,7 +136,7 @@ export default function PremiumPage() {
     const canceled = searchParams.get("canceled");
 
     if (success === "1") {
-      confirmPremiumStatus();
+      confirmPremiumStatus(searchParams.get("weekly_session"));
       window.history.replaceState({}, "", "/premium");
     } else if (canceled === "1") {
       toast({
@@ -164,8 +165,13 @@ export default function PremiumPage() {
   }, []);
 
   const handleCheckout = async (plan: PlanKey) => {
+    if (plan === "weekly_pass") {
+      const count = Number(weeks);
+      if (!Number.isInteger(count) || count < 1 || count > 520) return;
+      sessionStorage.setItem("betstreaks-prepaid-weeks", weeks);
+    }
     if (!user) {
-      navigate("/auth");
+      navigate("/auth?next=premium");
       return;
     }
 
@@ -176,7 +182,7 @@ export default function PremiumPage() {
 
     try {
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
-        body: { plan },
+        body: { plan, ...(plan === "weekly_pass" ? { weeks: Number(weeks) } : {}) },
       });
 
       if (error) throw error;
@@ -265,9 +271,9 @@ export default function PremiumPage() {
                 <div className="w-16 h-16 mx-auto rounded-full bg-primary/20 flex items-center justify-center">
                   <Check className="h-8 w-8 text-primary" />
                 </div>
-                <h2 className="text-xl font-bold text-foreground">Payment received!</h2>
+                <h2 className="text-xl font-bold text-foreground">Still confirming your purchase</h2>
                 <p className="text-sm text-muted-foreground">
-                  Your payment went through, but your Premium access may take a few more seconds to activate. Please refresh in a moment.
+                  Your Premium access is not confirmed yet. If you completed payment, please refresh in a moment.
                 </p>
               </div>
               <Button onClick={() => window.location.reload()} className="w-full" size="lg">
@@ -283,7 +289,7 @@ export default function PremiumPage() {
                   <Sparkles className="h-8 w-8 text-premium" />
                 </div>
                 <h2 className="text-xl font-bold text-foreground">You're a Premium Member!</h2>
-                <p className="text-muted-foreground">Enjoy unlimited access to all premium features.</p>
+                <p className="text-muted-foreground">Enjoy access to all premium features.</p>
               </div>
 
               <div className="space-y-3">
@@ -317,6 +323,8 @@ export default function PremiumPage() {
                     </>
                   )}
                 </Button>
+              ) : billing.state === "weekly_pass" ? (
+                <p className="text-sm text-center">Prepaid access until {new Date(weeklyExpiresAt!).toLocaleString()}. No automatic renewal.</p>
               ) : billing.state === "lifetime" ? (
                 <div className="rounded-md border border-border bg-muted/30 p-3 text-center">
                   <p className="text-sm font-medium text-foreground">
@@ -371,7 +379,7 @@ export default function PremiumPage() {
             <div className="text-center space-y-2">
               <h2 className="text-2xl font-bold text-foreground">Choose your plan</h2>
               <p className="text-sm text-muted-foreground">
-                Subscriptions or one-time lifetime — your choice.
+                Choose a subscription, prepaid weeks, or lifetime access.
               </p>
             </div>
 
@@ -461,6 +469,11 @@ export default function PremiumPage() {
                 </p>
               </CardContent>
             </Card>
+          </div>
+        )}
+        {!isLoading && !isConfirming && (!isPremium || billing.state === "weekly_pass") && (
+          <div className="mt-6">
+            <WeeklyPassCard weeks={weeks} onWeeksChange={setWeeks} onCheckout={() => handleCheckout("weekly_pass")} loading={isCheckoutLoading !== null} loggedIn={!!user} expiresAt={weeklyExpiresAt} />
           </div>
         )}
       </main>

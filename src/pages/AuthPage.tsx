@@ -17,6 +17,7 @@ const passwordSchema = z.string().min(6, "Password must be at least 6 characters
 
 export default function AuthPage() {
   const navigate = useNavigate();
+  const destination = new URLSearchParams(window.location.search).get("next") === "premium" ? "/premium" : "/";
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
@@ -27,10 +28,10 @@ export default function AuthPage() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate("/");
+        navigate(destination);
       }
     });
-  }, [navigate]);
+  }, [navigate, destination]);
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
@@ -100,7 +101,7 @@ export default function AuthPage() {
     if (!validateForm()) return;
 
     setIsLoading(true);
-    const redirectUrl = `${window.location.origin}/`;
+    const redirectUrl = `${window.location.origin}${destination}`;
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -141,7 +142,7 @@ export default function AuthPage() {
           description: `${migratedCount} saved pick${migratedCount > 1 ? 's' : ''} synced to your account.`,
         });
       }
-      navigate("/");
+      navigate(destination);
     } else {
       toast({
         title: "Check your email",
@@ -186,7 +187,7 @@ export default function AuthPage() {
         title: "Welcome back!",
         description: "You're now logged in.",
       });
-      navigate("/");
+      navigate(destination);
     }
   };
 

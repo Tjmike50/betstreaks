@@ -1,3 +1,4 @@
+import { paidWeeklyPass } from "./weeklyPass.ts";
 // ============================================================
 // Account-aware Stripe webhook handling, written against an injected data
 // layer so every branch is testable without a network or a database.
@@ -34,6 +35,7 @@ export interface UserFlags {
 }
 
 export interface WebhookStore {
+  grantWeeklyPass(userId: string, sessionId: string, weeks: number): Promise<string>;
   getFlags(userId: string): Promise<UserFlags>;
   setPremium(userId: string, value: boolean, lifetime?: boolean): Promise<void>;
   getUserIdByCustomer(account: StripeAccountId, customerId: string): Promise<string | null>;
@@ -111,6 +113,16 @@ async function handleCheckoutSession(
 
   const customerId = resolveCustomerId(session.customer);
   if (customerId) await store.upsertCustomer(account, userId, customerId);
+
+  if (session.metadata?.plan === "weekly_pass") {
+    const purchase = paidWeeklyPass(session);
+    if (account !== "betstreaks" || !purchase ||
+      !["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type)) {
+      return { handled: true, action: "weekly_pass_not_paid_or_invalid", userId };
+    }
+    const expiresAt = await store.grantWeeklyPass(userId, purchase.sessionId, purchase.weeks);
+    return { handled: true, action: "granted_weekly_pass", userId, details: { expiresAt, weeks: purchase.weeks } };
+  }
 
   const decision = checkoutGrantDecision(session);
   log("Checkout session", {

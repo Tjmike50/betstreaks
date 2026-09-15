@@ -6,6 +6,7 @@ export type BillingState =
   | "no_user"
   | "no_subscription"      // not premium, no customer
   | "active_subscription"  // premium + active monthly/yearly
+  | "weekly_pass"
   | "lifetime"             // premium + has a stripe customer but no active sub (one-time paid)
   | "premium_no_billing";  // premium flag true but no stripe customer at all
 
@@ -18,7 +19,7 @@ interface BillingStatus {
 
 const ACTIVE_STATUSES = ["active", "trialing", "past_due"];
 
-export function useBillingStatus(isPremium: boolean, isPremiumLoading: boolean): BillingStatus {
+export function useBillingStatus(isPremium: boolean, isPremiumLoading: boolean, weeklyExpiresAt: string | null = null, basePremium = false): BillingStatus {
   const [hasCustomer, setHasCustomer] = useState(false);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -74,7 +75,7 @@ export function useBillingStatus(isPremium: boolean, isPremiumLoading: boolean):
     }
 
     check();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => check());
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => { queueMicrotask(() => void check()); });
     return () => {
       mounted = false;
       subscription.unsubscribe();
@@ -87,6 +88,7 @@ export function useBillingStatus(isPremium: boolean, isPremiumLoading: boolean):
   if (!loading) {
     if (!hasUser) state = "no_user";
     else if (isPremium && hasActiveSubscription) state = "active_subscription";
+    else if (isPremium && !basePremium && weeklyExpiresAt && Date.parse(weeklyExpiresAt) > Date.now()) state = "weekly_pass";
     else if (isPremium && hasCustomer) state = "lifetime";
     else if (isPremium && !hasCustomer) state = "premium_no_billing";
     else state = "no_subscription";

@@ -1,3 +1,4 @@
+import { validWeekCount, WEEKLY_PRICE_CENTS } from "../_shared/weeklyPass.ts";
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -66,11 +67,16 @@ serve(async (req) => {
     const plan = body?.plan as PlanKey | undefined;
     const allowPromoCodes = body?.allowPromoCodes === true;
 
-    if (!plan || !(plan in PLAN_MODES)) {
+    if (!plan || !Object.prototype.hasOwnProperty.call(PLAN_MODES, plan)) {
       return jsonError(
         `Invalid or missing plan. Expected one of: ${Object.keys(PLAN_MODES).join(", ")}`,
         "invalid_plan",
       );
+    }
+
+    const weeks = plan === "weekly_pass" ? body?.weeks : 1;
+    if (plan === "weekly_pass" && !validWeekCount(weeks)) {
+      return jsonError("Choose a whole number of weeks from 1 to 520.", "invalid_weeks");
     }
 
     // ── Which Stripe account handles this new checkout? ──
@@ -83,6 +89,10 @@ serve(async (req) => {
         "Checkout is temporarily unavailable. Please try again shortly.",
         "config_missing",
       );
+    }
+
+    if (plan === "weekly_pass" && account.id !== "betstreaks") {
+      return jsonError("Weekly passes are temporarily unavailable.", "weekly_unavailable");
     }
 
     const priceId = priceForPlan(account, plan);
@@ -99,6 +109,13 @@ serve(async (req) => {
     const { customersTable, subscriptionsTable } = tablesForAccount(account.id);
 
     const stripe = new Stripe(account.secretKey, { apiVersion: "2023-10-16" });
+
+    if (plan === "weekly_pass") {
+      const price = await stripe.prices.retrieve(priceId);
+      if (!price.active || price.type !== "one_time" || price.currency !== "usd" || price.unit_amount !== WEEKLY_PRICE_CENTS) {
+        return jsonError("Weekly pricing is temporarily unavailable.", "weekly_price_mismatch");
+      }
+    }
 
     // ── Duplicate-subscription guard across BOTH accounts ──
     if (mode === "subscription") {
@@ -211,13 +228,14 @@ serve(async (req) => {
       plan,
       product,
       stripe_account: account.id,
+      ...(plan === "weekly_pass" ? { weeks: String(weeks) } : {}),
     };
 
     const sessionParams: Record<string, unknown> = {
       customer: stripeCustomerId,
-      line_items: [{ price: priceId, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: weeks }],
       mode,
-      success_url: `${origin}/premium?success=1`,
+      success_url: `${origin}/premium?success=1${plan === "weekly_pass" ? "&weekly_session={CHECKOUT_SESSION_ID}" : ""}`,
       cancel_url: `${origin}/premium?canceled=1`,
       metadata,
     };
@@ -228,7 +246,7 @@ serve(async (req) => {
       sessionParams.payment_intent_data = { metadata };
     }
 
-    if (allowPromoCodes) sessionParams.allow_promotion_codes = true;
+    if (allowPromoCodes && plan !== "weekly_pass") sessionParams.allow_promotion_codes = true;
 
     const session = await stripe.checkout.sessions.create(sessionParams);
 

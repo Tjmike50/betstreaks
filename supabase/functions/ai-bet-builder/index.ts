@@ -1424,8 +1424,8 @@ serve(async (req) => {
     const { data: { user } } = await supabase.auth.getUser();
     let isPremium = false;
     if (user) {
-      const { data: flags } = await supabase.from("user_flags").select("is_premium").eq("user_id", user.id).single();
-      isPremium = flags?.is_premium ?? false;
+      const { data: flags } = await supabase.rpc("get_premium_access").single();
+      isPremium = (flags as { is_premium?: boolean } | null)?.is_premium === true;
       if (!isPremium) {
         const today = easternDateString();
         const { data: usage } = await serviceClient.from("ai_usage").select("request_count").eq("user_id", user.id).eq("usage_date", today).single();

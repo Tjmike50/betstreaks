@@ -49,11 +49,9 @@ serve(async (req) => {
 
     {
       const { data: flags } = await supabase
-        .from("user_flags")
-        .select("is_premium")
-        .eq("user_id", user.id)
+        .rpc("get_premium_access")
         .single();
-      isPremium = flags?.is_premium ?? false;
+      isPremium = (flags as { is_premium?: boolean } | null)?.is_premium === true;
 
       if (!isPremium) {
         const today = new Date().toISOString().split("T")[0];

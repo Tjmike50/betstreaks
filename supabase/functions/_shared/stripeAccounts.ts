@@ -19,9 +19,11 @@
 
 export type StripeAccountId = "legacy" | "betstreaks";
 
-export type PlanKey = "monthly" | "yearly" | "lifetime" | "all_apps_lifetime";
+export type StandardPlanKey = "monthly" | "yearly" | "lifetime" | "all_apps_lifetime";
+export type PlanKey = StandardPlanKey | "weekly_pass";
 
 export const PLAN_MODES: Record<PlanKey, "subscription" | "payment"> = {
+  weekly_pass: "payment",
   monthly: "subscription",
   yearly: "subscription",
   lifetime: "payment",
@@ -29,6 +31,7 @@ export const PLAN_MODES: Record<PlanKey, "subscription" | "payment"> = {
 };
 
 export const PLAN_LABELS: Record<PlanKey, string> = {
+  weekly_pass: "BetStreaks Weekly Pass",
   monthly: "Premium Monthly",
   yearly: "Premium Yearly",
   lifetime: "BetStreaks Lifetime",
@@ -36,13 +39,14 @@ export const PLAN_LABELS: Record<PlanKey, string> = {
 };
 
 export const PLAN_PRODUCTS: Record<PlanKey, "betstreaks" | "all_apps"> = {
+  weekly_pass: "betstreaks",
   monthly: "betstreaks",
   yearly: "betstreaks",
   lifetime: "betstreaks",
   all_apps_lifetime: "all_apps",
 };
 
-export const LEGACY_PRICE_ENV: Record<PlanKey, string> = {
+export const LEGACY_PRICE_ENV: Record<StandardPlanKey, string> = {
   monthly: "STRIPE_PRICE_BETSTREAKS_MONTHLY_1750",
   yearly: "STRIPE_PRICE_BETSTREAKS_YEARLY_180",
   lifetime: "STRIPE_PRICE_BETSTREAKS_LIFETIME_480",
@@ -50,6 +54,7 @@ export const LEGACY_PRICE_ENV: Record<PlanKey, string> = {
 };
 
 export const BETSTREAKS_PRICE_ENV: Record<PlanKey, string> = {
+  weekly_pass: "STRIPE_BETSTREAKS_PRICE_WEEKLY_PASS",
   monthly: "STRIPE_BETSTREAKS_PRICE_MONTHLY",
   yearly: "STRIPE_BETSTREAKS_PRICE_YEARLY",
   lifetime: "STRIPE_BETSTREAKS_PRICE_LIFETIME",
@@ -85,10 +90,10 @@ export function tablesForAccount(id: StripeAccountId): AccountTables {
       };
 }
 
-function readPrices(env: EnvReader, map: Record<PlanKey, string>) {
+function readPrices(env: EnvReader, map: Partial<Record<PlanKey, string>>) {
   const prices: Partial<Record<PlanKey, string>> = {};
   for (const plan of Object.keys(map) as PlanKey[]) {
-    const value = env(map[plan])?.trim();
+    const value = env(map[plan]!)?.trim();
     if (value && value.startsWith("price_")) prices[plan] = value;
   }
   return prices;
@@ -145,7 +150,7 @@ export function betstreaksActivation(env: EnvReader): ActivationState {
   if (!account.webhookSecret) {
     return { active: false, reason: "missing_webhook_secret", missingPlans: [] };
   }
-  const missingPlans = (Object.keys(BETSTREAKS_PRICE_ENV) as PlanKey[]).filter(
+  const missingPlans = (Object.keys(LEGACY_PRICE_ENV) as PlanKey[]).filter(
     (plan) => !account.prices[plan],
   );
   if (missingPlans.length > 0) {

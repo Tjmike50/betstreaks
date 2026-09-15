@@ -24,6 +24,13 @@ export function createSupabaseStore(db: SupabaseClient): WebhookStore {
   const isLegacy = (a: StripeAccountId) => a === "legacy";
 
   return {
+    async grantWeeklyPass(userId, sessionId, weeks) {
+      const { data, error } = await db.rpc("grant_weekly_pass", {
+        p_user_id: userId, p_checkout_session_id: sessionId, p_weeks: weeks,
+      });
+      if (error) throw error;
+      return data as string;
+    },
     async getFlags(userId) {
       const { data } = await db
         .from("user_flags")
