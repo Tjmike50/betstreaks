@@ -43,8 +43,8 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
-import {
 import { requireAdmin } from "../_shared/adminAuth.ts";
+import {
   MLB_MARKET_MAP,
   MLB_STAT_KEYS,
   type MlbStatKey,
