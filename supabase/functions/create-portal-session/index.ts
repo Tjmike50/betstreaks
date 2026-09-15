@@ -165,7 +165,7 @@ serve(async (req) => {
     // would otherwise surface as a raw Stripe error.
     const subs = await stripe.subscriptions
       .list({ customer: stripeCustomerId, status: "all", limit: 1 })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error("[create-portal-session] subscription lookup failed", {
           account: targetAccountId,
           message: err instanceof Error ? err.message : String(err),

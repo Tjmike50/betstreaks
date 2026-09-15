@@ -176,7 +176,7 @@ serve(async (req) => {
       const found = await stripe.customers.list({ email: user.email, limit: 1 });
       if (found.data.length > 0) {
         stripeCustomerId = found.data[0].id;
-        await rememberCustomer(stripeCustomerId);
+        await rememberCustomer(found.data[0].id);
       }
     }
 
@@ -186,7 +186,7 @@ serve(async (req) => {
         metadata: { user_id: user.id, stripe_account: account.id },
       });
       stripeCustomerId = created.id;
-      await rememberCustomer(stripeCustomerId);
+      await rememberCustomer(created.id);
     }
 
     // Second guard directly against Stripe for the selected account.

@@ -406,21 +406,28 @@ async function verify(payload: string, header: string, secret: string) {
   );
 }
 
-function sign(payload: string, secret: string, timestamp = Math.floor(Date.now() / 1000)) {
-  return Stripe.webhooks.generateTestHeaderString({ payload, secret, timestamp });
+async function sign(payload: string, secret: string, timestamp = Math.floor(Date.now() / 1000)) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const digest = await crypto.subtle.sign("HMAC", key, encoder.encode(`${timestamp}.${payload}`));
+  const signature = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `t=${timestamp},v1=${signature}`;
 }
 
 Deno.test("signature: valid header for the matching secret is accepted", async () => {
   const payload = JSON.stringify({ id: "evt_sig", type: "ping", created: NOW });
-  const event = await verify(payload, sign(payload, SECRET_A), SECRET_A);
+  const event = await verify(payload, await sign(payload, SECRET_A), SECRET_A);
   assertEquals(event.id, "evt_sig");
 });
 
 Deno.test("signature: header signed by the other account is rejected", async () => {
   const payload = JSON.stringify({ id: "evt_sig", type: "ping", created: NOW });
+  const header = await sign(payload, SECRET_B);
   let rejected = false;
   try {
-    await verify(payload, sign(payload, SECRET_B), SECRET_A);
+    await verify(payload, header, SECRET_A);
   } catch {
     rejected = true;
   }
@@ -429,7 +436,7 @@ Deno.test("signature: header signed by the other account is rejected", async () 
 
 Deno.test("signature: tampered payload is rejected", async () => {
   const payload = JSON.stringify({ id: "evt_sig", type: "ping", created: NOW });
-  const header = sign(payload, SECRET_A);
+  const header = await sign(payload, SECRET_A);
   let rejected = false;
   try {
     await verify(payload.replace("evt_sig", "evt_bad"), header, SECRET_A);
@@ -442,9 +449,10 @@ Deno.test("signature: tampered payload is rejected", async () => {
 Deno.test("signature: replayed old timestamp is rejected by tolerance", async () => {
   const payload = JSON.stringify({ id: "evt_sig", type: "ping", created: NOW });
   const old = Math.floor(Date.now() / 1000) - 60 * 60 * 24;
+  const header = await sign(payload, SECRET_A, old);
   let rejected = false;
   try {
-    await verify(payload, sign(payload, SECRET_A, old), SECRET_A);
+    await verify(payload, header, SECRET_A);
   } catch {
     rejected = true;
   }

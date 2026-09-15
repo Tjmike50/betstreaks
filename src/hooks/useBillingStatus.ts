@@ -39,7 +39,7 @@ export function useBillingStatus(isPremium: boolean, isPremiumLoading: boolean):
       }
       setHasUser(true);
 
-      const [{ data: customer }, { data: subs }] = await Promise.all([
+      const [legacyCustomer, legacySubscriptions, accountCustomer, accountSubscriptions] = await Promise.all([
         supabase
           .from("stripe_customers")
           .select("stripe_customer_id")
@@ -49,10 +49,24 @@ export function useBillingStatus(isPremium: boolean, isPremiumLoading: boolean):
           .from("stripe_subscriptions")
           .select("status")
           .eq("user_id", user.id),
+        supabase
+          .from("stripe_account_customers")
+          .select("stripe_customer_id")
+          .eq("user_id", user.id)
+          .eq("stripe_account", "betstreaks")
+          .maybeSingle(),
+        supabase
+          .from("stripe_account_subscriptions")
+          .select("status")
+          .eq("user_id", user.id)
+          .eq("stripe_account", "betstreaks"),
       ]);
 
       if (!mounted) return;
-      setHasCustomer(!!customer?.stripe_customer_id);
+      setHasCustomer(Boolean(
+        legacyCustomer.data?.stripe_customer_id || accountCustomer.data?.stripe_customer_id
+      ));
+      const subs = [...(legacySubscriptions.data ?? []), ...(accountSubscriptions.data ?? [])];
       setHasActiveSubscription(
         Array.isArray(subs) && subs.some((s) => ACTIVE_STATUSES.includes(s.status as string))
       );
