@@ -253,6 +253,3 @@ serve(async (req) => {
     );
   }
 });
-
-// Subscriptions mirror is written by the webhook, not here.
-void ["stripe_account_subscriptions"];
