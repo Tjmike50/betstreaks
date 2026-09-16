@@ -23,6 +23,37 @@ export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const emailResult = emailSchema.safeParse(email);
+    if (!emailResult.success) {
+      setErrors({ email: emailResult.error.errors[0].message });
+      return;
+    }
+
+    setIsLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setIsLoading(false);
+
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Reset failed",
+        description: error.message,
+      });
+      return;
+    }
+
+    toast({
+      title: "Check your email",
+      description: "If an account exists for that email, we sent a password reset link.",
+    });
+    setShowForgotPassword(false);
+  };
 
   // Check if already logged in
   useEffect(() => {
@@ -221,6 +252,49 @@ export default function AuthPage() {
               </TabsList>
 
               <TabsContent value="login">
+                {showForgotPassword ? (
+                  <form onSubmit={handleForgotPassword} className="space-y-4 mt-4">
+                    <p className="text-sm text-muted-foreground">
+                      Enter your account email and we'll send you a reset link.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="reset-email">Email</Label>
+                      <Input
+                        id="reset-email"
+                        type="email"
+                        placeholder="you@example.com"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setErrors((prev) => ({ ...prev, email: undefined }));
+                        }}
+                        disabled={isLoading}
+                      />
+                      {errors.email && (
+                        <p className="text-sm text-destructive">{errors.email}</p>
+                      )}
+                    </div>
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Sending...
+                        </>
+                      ) : (
+                        "Send reset link"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full"
+                      onClick={() => setShowForgotPassword(false)}
+                      disabled={isLoading}
+                    >
+                      Back to log in
+                    </Button>
+                  </form>
+                ) : (
                 <form onSubmit={handleLogin} className="space-y-4 mt-4">
                   <div className="space-y-2">
                     <Label htmlFor="login-email">Email</Label>
@@ -266,7 +340,17 @@ export default function AuthPage() {
                       "Log in"
                     )}
                   </Button>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="w-full"
+                    onClick={() => setShowForgotPassword(true)}
+                    disabled={isLoading}
+                  >
+                    Forgot password?
+                  </Button>
                 </form>
+                )}
               </TabsContent>
 
               <TabsContent value="signup">
