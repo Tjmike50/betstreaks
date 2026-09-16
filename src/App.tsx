@@ -19,6 +19,7 @@ import AlertsPage from "./pages/AlertsPage";
 import AccountPage from "./pages/AccountPage";
 import PremiumPage from "./pages/PremiumPage";
 import AuthPage from "./pages/AuthPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import ResponsibleGamblingPage from "./pages/ResponsibleGamblingPage";
@@ -72,6 +73,7 @@ const App = () => (
                     <Route path="/account" element={<AccountPage />} />
                     <Route path="/premium" element={<PremiumPage />} />
                     <Route path="/auth" element={<AuthPage />} />
+                    <Route path="/reset-password" element={<ResetPasswordPage />} />
                     <Route path="/terms" element={<TermsPage />} />
                     <Route path="/privacy" element={<PrivacyPage />} />
                     <Route path="/responsible-gambling" element={<ResponsibleGamblingPage />} />

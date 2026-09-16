@@ -340,7 +340,17 @@ export default function AuthPage() {
                       "Log in"
                     )}
                   </Button>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="w-full"
+                    onClick={() => setShowForgotPassword(true)}
+                    disabled={isLoading}
+                  >
+                    Forgot password?
+                  </Button>
                 </form>
+                )}
               </TabsContent>
 
               <TabsContent value="signup">
