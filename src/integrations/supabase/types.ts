@@ -14,12 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      premium_weekly_passes: {
-        Row: { checkout_session_id: string; user_id: string; weeks: number; starts_at: string; expires_at: string; created_at: string }
-        Insert: { checkout_session_id: string; user_id: string; weeks: number; starts_at: string; expires_at: string; created_at?: string }
-        Update: { checkout_session_id?: string; user_id?: string; weeks?: number; starts_at?: string; expires_at?: string; created_at?: string }
-        Relationships: []
-      }
       admin_cron_backup_20260512: {
         Row: {
           active: boolean | null
@@ -2132,6 +2126,33 @@ export type Database = {
         }
         Relationships: []
       }
+      premium_weekly_passes: {
+        Row: {
+          checkout_session_id: string
+          created_at: string
+          expires_at: string
+          starts_at: string
+          user_id: string
+          weeks: number
+        }
+        Insert: {
+          checkout_session_id: string
+          created_at?: string
+          expires_at: string
+          starts_at: string
+          user_id: string
+          weeks: number
+        }
+        Update: {
+          checkout_session_id?: string
+          created_at?: string
+          expires_at?: string
+          starts_at?: string
+          user_id?: string
+          weeks?: number
+        }
+        Relationships: []
+      }
       prop_outcomes: {
         Row: {
           actual_value: number | null
@@ -3149,14 +3170,6 @@ export type Database = {
       }
     }
     Functions: {
-      get_premium_access: {
-        Args: Record<PropertyKey, never>
-        Returns: { is_premium: boolean; base_premium: boolean; weekly_expires_at: string | null }[]
-      }
-      grant_weekly_pass: {
-        Args: { p_user_id: string; p_checkout_session_id: string; p_weeks: number }
-        Returns: string
-      }
       batch_try_ingest_nba_market_payloads: {
         Args: { p_payloads: Json; p_source_name: string }
         Returns: Json
@@ -3243,6 +3256,14 @@ export type Database = {
           under_odds_american: number
         }[]
       }
+      get_premium_access: {
+        Args: never
+        Returns: {
+          base_premium: boolean
+          is_premium: boolean
+          weekly_expires_at: string
+        }[]
+      }
       get_today_nba_props: {
         Args: { p_target_date?: string; p_timezone?: string }
         Returns: {
@@ -3291,6 +3312,14 @@ export type Database = {
           updated_at: string
           verification_status: string
         }[]
+      }
+      grant_weekly_pass: {
+        Args: {
+          p_checkout_session_id: string
+          p_user_id: string
+          p_weeks: number
+        }
+        Returns: string
       }
       import_nba_players_from_staging: { Args: never; Returns: Json }
       ingest_nba_event_payload: { Args: { p_payload: Json }; Returns: string }
