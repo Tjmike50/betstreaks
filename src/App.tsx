@@ -48,9 +48,10 @@ const RecoveryLinkRedirect = () => {
   const navigate = useNavigate();
   const location = useLocation();
   useEffect(() => {
+    const hash = window.location.hash;
     if (
       location.pathname !== "/reset-password" &&
-      window.location.hash.includes("type=recovery")
+      (hash.includes("type=recovery") || hash.includes("error_code="))
     ) {
       navigate(`/reset-password${window.location.hash}`, { replace: true });
     }
