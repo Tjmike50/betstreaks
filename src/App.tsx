@@ -2,7 +2,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { SportProvider } from "@/contexts/SportContext";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -41,6 +42,23 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+// Password-reset emails can land on any page (e.g. the site root) with the
+// recovery token in the URL hash. Forward them to the reset page.
+const RecoveryLinkRedirect = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (
+      location.pathname !== "/reset-password" &&
+      (hash.includes("type=recovery") || hash.includes("error_code="))
+    ) {
+      navigate(`/reset-password${window.location.hash}`, { replace: true });
+    }
+  }, [location.pathname, navigate]);
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
@@ -49,6 +67,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
+            <RecoveryLinkRedirect />
             <SidebarProvider defaultOpen={true}>
             <div className="min-h-screen flex w-full">
               <DesktopSidebar />
