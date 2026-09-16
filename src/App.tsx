@@ -41,6 +41,22 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+// Password-reset emails can land on any page (e.g. the site root) with the
+// recovery token in the URL hash. Forward them to the reset page.
+const RecoveryLinkRedirect = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    if (
+      location.pathname !== "/reset-password" &&
+      window.location.hash.includes("type=recovery")
+    ) {
+      navigate(`/reset-password${window.location.hash}`, { replace: true });
+    }
+  }, [location.pathname, navigate]);
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
