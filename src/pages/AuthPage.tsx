@@ -252,6 +252,49 @@ export default function AuthPage() {
               </TabsList>
 
               <TabsContent value="login">
+                {showForgotPassword ? (
+                  <form onSubmit={handleForgotPassword} className="space-y-4 mt-4">
+                    <p className="text-sm text-muted-foreground">
+                      Enter your account email and we'll send you a reset link.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="reset-email">Email</Label>
+                      <Input
+                        id="reset-email"
+                        type="email"
+                        placeholder="you@example.com"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setErrors((prev) => ({ ...prev, email: undefined }));
+                        }}
+                        disabled={isLoading}
+                      />
+                      {errors.email && (
+                        <p className="text-sm text-destructive">{errors.email}</p>
+                      )}
+                    </div>
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Sending...
+                        </>
+                      ) : (
+                        "Send reset link"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full"
+                      onClick={() => setShowForgotPassword(false)}
+                      disabled={isLoading}
+                    >
+                      Back to log in
+                    </Button>
+                  </form>
+                ) : (
                 <form onSubmit={handleLogin} className="space-y-4 mt-4">
                   <div className="space-y-2">
                     <Label htmlFor="login-email">Email</Label>
