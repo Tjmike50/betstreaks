@@ -61,6 +61,22 @@ export const BETSTREAKS_PRICE_ENV: Record<PlanKey, string> = {
   all_apps_lifetime: "STRIPE_BETSTREAKS_PRICE_ALL_APPS_LIFETIME",
 };
 
+// ── Sandbox / test mode ──
+// Temporary end-to-end testing against Stripe test mode. Enabled only when
+// STRIPE_TEST_MODE === "true" AND STRIPE_TEST_SECRET_KEY is a real sk_test_ key.
+// Live credentials are never read or modified while this is on.
+export const TEST_MODE_ENV = "STRIPE_TEST_MODE";
+export const TEST_SECRET_KEY_ENV = "STRIPE_TEST_SECRET_KEY";
+export const TEST_WEBHOOK_SECRET_ENV = "STRIPE_TEST_WEBHOOK_SECRET";
+
+export const TEST_PRICE_ENV: Record<PlanKey, string> = {
+  weekly_pass: "STRIPE_TEST_PRICE_WEEKLY_PASS",
+  monthly: "STRIPE_TEST_PRICE_MONTHLY",
+  yearly: "STRIPE_TEST_PRICE_YEARLY",
+  lifetime: "STRIPE_TEST_PRICE_LIFETIME",
+  all_apps_lifetime: "STRIPE_TEST_PRICE_ALL_APPS_LIFETIME",
+};
+
 export const BETSTREAKS_SECRET_KEY_ENV = "STRIPE_BETSTREAKS_SECRET_KEY";
 export const BETSTREAKS_WEBHOOK_SECRET_ENV = "STRIPE_BETSTREAKS_WEBHOOK_SECRET";
 export const BETSTREAKS_ACTIVE_ENV = "STRIPE_BETSTREAKS_ACTIVE";
@@ -166,14 +182,51 @@ export interface CheckoutAccountSelection {
   diagnostics: Record<string, unknown>;
 }
 
+export function testModeEnabled(env: EnvReader): boolean {
+  return (env(TEST_MODE_ENV) ?? "").trim().toLowerCase() === "true";
+}
+
+/** Test-mode account. Null unless a genuine sk_test_ key is configured. */
+export function loadTestAccount(env: EnvReader): AccountConfig | null {
+  const secretKey = env(TEST_SECRET_KEY_ENV)?.trim();
+  if (!secretKey || !secretKey.startsWith("sk_test_")) return null;
+  return {
+    id: "betstreaks",
+    secretKey,
+    webhookSecret: env(TEST_WEBHOOK_SECRET_ENV)?.trim() || null,
+    prices: readPrices(env, TEST_PRICE_ENV),
+    ...tablesForAccount("betstreaks"),
+  };
+}
+
 export function selectCheckoutAccount(env: EnvReader): CheckoutAccountSelection {
   const activation = betstreaksActivation(env);
+
+  if (testModeEnabled(env)) {
+    const testAccount = loadTestAccount(env);
+    if (testAccount) {
+      return {
+        account: testAccount,
+        activation,
+        diagnostics: {
+          selectedAccount: testAccount.id,
+          testMode: true,
+          betstreaksActive: activation.active,
+          activationReason: activation.reason,
+          missingPlans: activation.missingPlans,
+        },
+      };
+    }
+  }
+
   const account = activation.active ? loadBetstreaksAccount(env) : loadLegacyAccount(env);
   return {
     account,
     activation,
     diagnostics: {
       selectedAccount: account?.id ?? null,
+      testMode: false,
+      testModeRequested: testModeEnabled(env),
       betstreaksActive: activation.active,
       activationReason: activation.reason,
       missingPlans: activation.missingPlans,
