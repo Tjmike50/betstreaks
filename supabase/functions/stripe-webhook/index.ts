@@ -4,6 +4,8 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import {
   loadBetstreaksAccount,
   loadLegacyAccount,
+  loadTestAccount,
+  testModeEnabled,
   type AccountConfig,
   type StripeAccountId,
 } from "../_shared/stripeAccounts.ts";
@@ -156,9 +158,10 @@ serve(async (req) => {
 
   const legacyAccount = loadLegacyAccount(env);
   const betstreaksAccount = loadBetstreaksAccount(env);
+  const testAccount = testModeEnabled(env) ? loadTestAccount(env) : null;
 
-  // Newest account first so new-account events match on the first attempt.
-  const verifiable: AccountConfig[] = [betstreaksAccount, legacyAccount].filter(
+  // Test mode first (when on), then newest live account, then legacy.
+  const verifiable: AccountConfig[] = [testAccount, betstreaksAccount, legacyAccount].filter(
     (a): a is AccountConfig => Boolean(a && a.webhookSecret),
   );
 
