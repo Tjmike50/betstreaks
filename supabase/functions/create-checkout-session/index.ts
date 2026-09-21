@@ -74,7 +74,6 @@ serve(async (req) => {
     const env = (key: string) => Deno.env.get(key);
 
     // Populate presence-only diagnostics (booleans, never values).
-    const testModeOn = (env("STRIPE_TEST_MODE") ?? "").trim().toLowerCase() === "true";
     diag.testSecretKeyPresent = !!env("STRIPE_TEST_SECRET_KEY")?.trim();
     diag.testWeeklyPricePresent = !!env("STRIPE_TEST_PRICE_WEEKLY_PASS")?.trim();
 
