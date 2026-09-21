@@ -18,11 +18,49 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-function jsonError(message: string, code: string, status = 400) {
-  return new Response(JSON.stringify({ error: message, code }), {
+// ── Temporary non-sensitive diagnostics (booleans only, never values) ──
+interface CheckoutDiagnostics {
+  stage: string;
+  reachedCheckoutCreate: boolean;
+  testModeSelected: boolean | null;
+  testSecretKeyPresent: boolean | null;
+  testWeeklyPricePresent: boolean | null;
+  selectedAccount: string | null;
+  priceIdCompatible: boolean | null;
+  stripeError: { type?: string; code?: string; message?: string } | null;
+}
+
+function newDiagnostics(): CheckoutDiagnostics {
+  return {
+    stage: "init",
+    reachedCheckoutCreate: false,
+    testModeSelected: null,
+    testSecretKeyPresent: null,
+    testWeeklyPricePresent: null,
+    selectedAccount: null,
+    priceIdCompatible: null,
+    stripeError: null,
+  };
+}
+
+function jsonError(message: string, code: string, status = 400, diag?: CheckoutDiagnostics) {
+  return new Response(JSON.stringify({ error: message, code, diagnostics: diag ?? null }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
     status,
   });
+}
+
+function extractStripeError(error: unknown): CheckoutDiagnostics["stripeError"] {
+  if (error && typeof error === "object" && (error as { type?: unknown }).type) {
+    const e = error as { type?: string; code?: string; message?: string };
+    return {
+      type: typeof e.type === "string" ? e.type : undefined,
+      code: typeof e.code === "string" ? e.code : undefined,
+      // Stripe error messages are safe: they never contain secret material.
+      message: typeof e.message === "string" ? e.message : undefined,
+    };
+  }
+  return null;
 }
 
 serve(async (req) => {
@@ -30,9 +68,17 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  const diag = newDiagnostics();
+
   try {
     const env = (key: string) => Deno.env.get(key);
 
+    // Populate presence-only diagnostics (booleans, never values).
+    const testModeOn = (env("STRIPE_TEST_MODE") ?? "").trim().toLowerCase() === "true";
+    diag.testSecretKeyPresent = !!env("STRIPE_TEST_SECRET_KEY")?.trim();
+    diag.testWeeklyPricePresent = !!env("STRIPE_TEST_PRICE_WEEKLY_PASS")?.trim();
+
+    diag.stage = "auth";
     const supabaseAdmin = createClient(
       env("SUPABASE_URL") ?? "",
       env("SUPABASE_SERVICE_ROLE_KEY") ?? "",
@@ -41,7 +87,7 @@ serve(async (req) => {
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return jsonError("No authorization header", "no_auth");
+      return jsonError("No authorization header", "no_auth", 400, diag);
     }
 
     const supabaseClient = createClient(
@@ -60,9 +106,10 @@ serve(async (req) => {
 
     if (userError || !user) {
       console.error("Auth error:", userError?.message);
-      return jsonError("User not authenticated", "no_auth", 401);
+      return jsonError("User not authenticated", "no_auth", 401, diag);
     }
 
+    diag.stage = "body_validation";
     const body = await req.json().catch(() => ({}));
     const plan = body?.plan as PlanKey | undefined;
     const allowPromoCodes = body?.allowPromoCodes === true;
@@ -71,16 +118,21 @@ serve(async (req) => {
       return jsonError(
         `Invalid or missing plan. Expected one of: ${Object.keys(PLAN_MODES).join(", ")}`,
         "invalid_plan",
+        400,
+        diag,
       );
     }
 
     const weeks = plan === "weekly_pass" ? body?.weeks : 1;
     if (plan === "weekly_pass" && !validWeekCount(weeks)) {
-      return jsonError("Choose a whole number of weeks from 1 to 520.", "invalid_weeks");
+      return jsonError("Choose a whole number of weeks from 1 to 520.", "invalid_weeks", 400, diag);
     }
 
     // ── Which Stripe account handles this new checkout? ──
+    diag.stage = "account_selection";
     const { account, diagnostics } = selectCheckoutAccount(env);
+    diag.testModeSelected = diagnostics?.testMode === true;
+    diag.selectedAccount = account?.id ?? null;
     console.log("[create-checkout-session] account selection", { plan, ...diagnostics });
 
     if (!account) {
@@ -88,11 +140,13 @@ serve(async (req) => {
       return jsonError(
         "Checkout is temporarily unavailable. Please try again shortly.",
         "config_missing",
+        400,
+        diag,
       );
     }
 
     if (plan === "weekly_pass" && account.id !== "betstreaks") {
-      return jsonError("Weekly passes are temporarily unavailable.", "weekly_unavailable");
+      return jsonError("Weekly passes are temporarily unavailable.", "weekly_unavailable", 400, diag);
     }
 
     const priceId = priceForPlan(account, plan);
@@ -101,7 +155,7 @@ serve(async (req) => {
         plan,
         account: account.id,
       });
-      return jsonError(`Pricing configuration missing for plan: ${plan}`, "price_missing");
+      return jsonError(`Pricing configuration missing for plan: ${plan}`, "price_missing", 400, diag);
     }
 
     const mode = PLAN_MODES[plan];
@@ -110,14 +164,29 @@ serve(async (req) => {
 
     const stripe = new Stripe(account.secretKey, { apiVersion: "2023-10-16" });
 
+    // Price/account compatibility check: retrieves the price object using the
+    // selected account's key. Confirms the price exists and its expected mode
+    // matches the plan, without exposing any credential material.
     if (plan === "weekly_pass") {
+      diag.stage = "price_verify";
       const price = await stripe.prices.retrieve(priceId);
-      if (!price.active || price.type !== "one_time" || price.currency !== "usd" || price.unit_amount !== WEEKLY_PRICE_CENTS) {
-        return jsonError("Weekly pricing is temporarily unavailable.", "weekly_price_mismatch");
+      diag.priceIdCompatible =
+        price.active && price.type === "one_time" && price.currency === "usd";
+      if (
+        !price.active ||
+        price.type !== "one_time" ||
+        price.currency !== "usd" ||
+        price.unit_amount !== WEEKLY_PRICE_CENTS
+      ) {
+        diag.stage = "price_mismatch";
+        return jsonError("Weekly pricing is temporarily unavailable.", "weekly_price_mismatch", 400, diag);
       }
+    } else {
+      diag.priceIdCompatible = true;
     }
 
     // ── Duplicate-subscription guard across BOTH accounts ──
+    diag.stage = "duplicate_guard";
     if (mode === "subscription") {
       const [{ data: legacyActive }, { data: newActive }] = await Promise.all([
         supabaseAdmin
@@ -144,11 +213,14 @@ serve(async (req) => {
         return jsonError(
           "You already have an active subscription. Manage it from your account page.",
           "already_subscribed",
+          400,
+          diag,
         );
       }
     }
 
     // ── Customer lookup / creation, scoped to the selected account ──
+    diag.stage = "customer_lookup";
     let stripeCustomerId: string | null = null;
 
     if (account.id === "legacy") {
@@ -217,10 +289,14 @@ serve(async (req) => {
         return jsonError(
           "You already have an active subscription. Manage it from your account page.",
           "already_subscribed",
+          400,
+          diag,
         );
       }
     }
 
+    diag.stage = "checkout_create";
+    diag.reachedCheckoutCreate = true;
     const origin = req.headers.get("origin") || "https://betstreaks.lovable.app";
 
     const metadata = {
@@ -264,10 +340,19 @@ serve(async (req) => {
       status: 200,
     });
   } catch (error) {
-    console.error("Error creating checkout session:", error);
+    diag.stripeError = extractStripeError(error);
+    if (diag.stage === "checkout_create") diag.reachedCheckoutCreate = true;
+    console.error("Error creating checkout session:", {
+      stage: diag.stage,
+      stripeError: diag.stripeError,
+      testModeSelected: diag.testModeSelected,
+      selectedAccount: diag.selectedAccount,
+    });
     return jsonError(
-      error instanceof Error ? error.message : "Unknown error",
+      diag.stripeError?.message ?? (error instanceof Error ? error.message : "Unknown error"),
       "stripe_error",
+      400,
+      diag,
     );
   }
 });
