@@ -90,7 +90,15 @@ export interface AccountConfig {
   prices: Partial<Record<PlanKey, string>>;
   customersTable: string;
   subscriptionsTable: string;
+  /**
+   * Row label used in the account-scoped mapping tables. Test mode gets its own
+   * scope so sandbox customer ids are never mixed with live ones.
+   */
+  customerScope: string;
 }
+
+/** Storage scope for sandbox/test-mode customers. Never used in live mode. */
+export const TEST_CUSTOMER_SCOPE = "betstreaks_test";
 
 export interface AccountTables {
   customersTable: string;
