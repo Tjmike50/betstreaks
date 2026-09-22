@@ -6,6 +6,7 @@ import {
   betstreaksActivation,
   loadBetstreaksAccount,
   loadLegacyAccount,
+  loadTestAccount,
   priceForPlan,
   selectCheckoutAccount,
   selectPortalAccount,
@@ -82,6 +83,7 @@ Deno.test("fully configured switch routes new checkouts to the new account", () 
   assertEquals(state.active, true);
   const { account } = selectCheckoutAccount(env);
   assertEquals(account?.id, "betstreaks");
+  assertEquals(account?.customerScope, "betstreaks");
   assertEquals(priceForPlan(account!, "monthly"), "price_1UG21bAHW2dqNeWSUccrYHEv");
   assertEquals(priceForPlan(account!, "yearly"), "price_1UG21xAHW2dqNeWSjd7M4iCZ");
   assertEquals(priceForPlan(account!, "lifetime"), "price_1UG22BAHW2dqNeWS2kpJK8US");
@@ -95,6 +97,7 @@ Deno.test("legacy prices are never served from the new account config", () => {
   const env = envOf(LEGACY_ENV, NEW_ENV, { STRIPE_BETSTREAKS_ACTIVE: "true" });
   const legacy = loadLegacyAccount(env)!;
   const neu = loadBetstreaksAccount(env)!;
+  assertEquals(legacy.customerScope, "legacy");
   assertNotEquals(priceForPlan(legacy, "monthly"), priceForPlan(neu, "monthly"));
   assertEquals(priceForPlan(legacy, "monthly"), "price_legacy_monthly");
 });
@@ -196,4 +199,24 @@ Deno.test("a plain subscriber with nothing else does get downgraded", () => {
     }),
     true,
   );
+});
+
+Deno.test("test configuration selects an isolated scope without reading live credentials", () => {
+  const values: Record<string, string> = {
+    STRIPE_TEST_MODE: "true",
+    STRIPE_TEST_SECRET_KEY: "sk_test_fixture",
+    STRIPE_TEST_WEBHOOK_SECRET: "whsec_fixture",
+    STRIPE_TEST_PRICE_WEEKLY_PASS: "price_fixture",
+  };
+  const env: EnvReader = (key) => {
+    if (!key.startsWith("STRIPE_TEST_")) throw new Error("Must not read live configuration");
+    return values[key];
+  };
+  const { account, diagnostics } = selectCheckoutAccount(env);
+  assertEquals(account?.customerScope, "betstreaks_test");
+  assertEquals(account?.id, "betstreaks");
+  assertEquals(account?.secretKey, values.STRIPE_TEST_SECRET_KEY);
+  assertEquals(account?.prices.weekly_pass, "price_fixture");
+  assertEquals(diagnostics.testMode, true);
+  assertEquals(loadTestAccount(env)?.customerScope, "betstreaks_test");
 });

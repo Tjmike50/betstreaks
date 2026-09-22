@@ -18,6 +18,7 @@
 // ============================================================
 
 export type StripeAccountId = "legacy" | "betstreaks";
+export type StripeCustomerScope = StripeAccountId | "betstreaks_test";
 
 export type StandardPlanKey = "monthly" | "yearly" | "lifetime" | "all_apps_lifetime";
 export type PlanKey = StandardPlanKey | "weekly_pass";
@@ -62,9 +63,9 @@ export const BETSTREAKS_PRICE_ENV: Record<PlanKey, string> = {
 };
 
 // ── Sandbox / test mode ──
-// Temporary end-to-end testing against Stripe test mode. Enabled only when
-// STRIPE_TEST_MODE === "true" AND STRIPE_TEST_SECRET_KEY is a real sk_test_ key.
-// Live credentials are never read or modified while this is on.
+// Temporary end-to-end testing against Stripe test mode. An explicit
+// STRIPE_TEST_MODE=true request selects valid test configuration or fails closed.
+// Checkout selection never reads or falls back to live credentials in test mode.
 export const TEST_MODE_ENV = "STRIPE_TEST_MODE";
 export const TEST_SECRET_KEY_ENV = "STRIPE_TEST_SECRET_KEY";
 export const TEST_WEBHOOK_SECRET_ENV = "STRIPE_TEST_WEBHOOK_SECRET";
@@ -94,7 +95,7 @@ export interface AccountConfig {
    * Row label used in the account-scoped mapping tables. Test mode gets its own
    * scope so sandbox customer ids are never mixed with live ones.
    */
-  customerScope: string;
+  customerScope: StripeCustomerScope;
 }
 
 /** Storage scope for sandbox/test-mode customers. Never used in live mode. */
@@ -128,6 +129,7 @@ export function loadLegacyAccount(env: EnvReader): AccountConfig | null {
   if (!secretKey) return null;
   return {
     id: "legacy",
+    customerScope: "legacy",
     secretKey,
     webhookSecret: env("STRIPE_WEBHOOK_SECRET")?.trim() || null,
     prices: readPrices(env, LEGACY_PRICE_ENV),
@@ -140,6 +142,7 @@ export function loadBetstreaksAccount(env: EnvReader): AccountConfig | null {
   if (!secretKey) return null;
   return {
     id: "betstreaks",
+    customerScope: "betstreaks",
     secretKey,
     webhookSecret: env(BETSTREAKS_WEBHOOK_SECRET_ENV)?.trim() || null,
     prices: readPrices(env, BETSTREAKS_PRICE_ENV),
@@ -194,12 +197,13 @@ export function testModeEnabled(env: EnvReader): boolean {
   return (env(TEST_MODE_ENV) ?? "").trim().toLowerCase() === "true";
 }
 
-/** Test-mode account. Null unless a genuine sk_test_ key is configured. */
+/** Test-mode account. Key format is checked here; Stripe validates it on use. */
 export function loadTestAccount(env: EnvReader): AccountConfig | null {
   const secretKey = env(TEST_SECRET_KEY_ENV)?.trim();
-  if (!secretKey || !secretKey.startsWith("sk_test_")) return null;
+  if (!secretKey || !/^sk_test_[A-Za-z0-9]+$/.test(secretKey)) return null;
   return {
     id: "betstreaks",
+    customerScope: TEST_CUSTOMER_SCOPE,
     secretKey,
     webhookSecret: env(TEST_WEBHOOK_SECRET_ENV)?.trim() || null,
     prices: readPrices(env, TEST_PRICE_ENV),
@@ -207,34 +211,38 @@ export function loadTestAccount(env: EnvReader): AccountConfig | null {
   };
 }
 
-export function selectCheckoutAccount(env: EnvReader): CheckoutAccountSelection {
-  const activation = betstreaksActivation(env);
-
+/** Explicit test mode never falls through to either live account. */
+export function selectCheckoutAccount(env: EnvReader, plan: PlanKey = "weekly_pass"): CheckoutAccountSelection {
   if (testModeEnabled(env)) {
     const testAccount = loadTestAccount(env);
-    if (testAccount) {
-      return {
-        account: testAccount,
-        activation,
-        diagnostics: {
-          selectedAccount: testAccount.id,
-          testMode: true,
-          betstreaksActive: activation.active,
-          activationReason: activation.reason,
-          missingPlans: activation.missingPlans,
-        },
-      };
-    }
+    const price = testAccount?.prices[plan];
+    const configurationError = !testAccount ? "test_secret_invalid"
+      : !/^whsec_[A-Za-z0-9]+$/.test(testAccount.webhookSecret ?? "") ? "test_webhook_secret_invalid"
+      : !price || !/^price_[A-Za-z0-9]+$/.test(price) ? "test_price_invalid"
+      : null;
+    return {
+      account: configurationError ? null : testAccount,
+      activation: { active: false, reason: "switch_off", missingPlans: [] },
+      diagnostics: {
+        selectedAccount: configurationError ? null : testAccount!.id,
+        customerScope: configurationError ? null : TEST_CUSTOMER_SCOPE,
+        testMode: !configurationError,
+        testModeRequested: true,
+        configurationError,
+      },
+    };
   }
 
+  const activation = betstreaksActivation(env);
   const account = activation.active ? loadBetstreaksAccount(env) : loadLegacyAccount(env);
   return {
     account,
     activation,
     diagnostics: {
       selectedAccount: account?.id ?? null,
+      customerScope: account?.customerScope ?? null,
       testMode: false,
-      testModeRequested: testModeEnabled(env),
+      testModeRequested: false,
       betstreaksActive: activation.active,
       activationReason: activation.reason,
       missingPlans: activation.missingPlans,
