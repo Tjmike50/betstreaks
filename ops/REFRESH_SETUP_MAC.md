@@ -2,7 +2,34 @@
 
 This guide sets up automated NBA data refresh on a local Mac (e.g., Mac mini) instead of GitHub Actions, avoiding `stats.nba.com` IP blocking issues.
 
-## Overview
+## Existing `com.betstreaks.refresh` LaunchAgent
+
+The separate legacy LaunchAgent calls `~/betstreaks-refresh/run_refresh.sh`
+and runs `refresh_players.py` and `refresh_teams.py`. Its replacement is
+[`ops/legacy-run-refresh.sh`](legacy-run-refresh.sh).
+
+1. In Supabase **Settings → API Keys**, create a named secret API key for the
+   legacy Mac job. In the login Keychain of the user who owns the LaunchAgent,
+   create a generic password with service `com.betstreaks.refresh.supabase` and
+   account matching `id -un`. Set the password to the new secret API key.
+2. Make the item available to `/usr/bin/security` under that user's LaunchAgent
+   session. A locked Keychain or denied access causes the launcher to exit before
+   either script runs. The installed Python Supabase SDK must support modern keys.
+3. Install the replacement from the repository root using the existing script
+   path. The plist, times and Python scripts stay in place.
+
+   ```bash
+   install -m 700 ops/legacy-run-refresh.sh "$HOME/betstreaks-refresh/.run_refresh.new"
+   mv -f "$HOME/betstreaks-refresh/.run_refresh.new" "$HOME/betstreaks-refresh/run_refresh.sh"
+   ```
+
+The standalone `refresh_games_today.py` helper also reads
+`SUPABASE_SERVICE_ROLE_KEY`. It is outside this LaunchAgent's run sequence.
+If retained for separate use, give it the same runtime Keychain injection.
+
+## Repository refresh job
+
+### Overview
 
 | Component | Location |
 |-----------|----------|
@@ -25,18 +52,22 @@ This guide sets up automated NBA data refresh on a local Mac (e.g., Mac mini) in
 Create the directory and `.env` file:
 
 ```bash
-mkdir -p ~/.config/betstreaks
+mkdir -p -m 700 ~/.config/betstreaks
+chmod 700 ~/.config/betstreaks
+(umask 077; touch ~/.config/betstreaks/.env)
+chmod 600 ~/.config/betstreaks/.env
 nano ~/.config/betstreaks/.env
 ```
 
-Add your credentials (get from Supabase dashboard → Settings → API):
+Add the values as unquoted `NAME=value` lines. Create a separate named secret API key for this job in **Settings → API Keys**. Use the existing Edge Function `REFRESH_SECRET` for the scoring call.
 
 ```env
 SUPABASE_URL=https://enhksxikgvvdohseivpx.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+SUPABASE_REFRESH_API_KEY=your-named-supabase-secret-api-key
+REFRESH_SECRET=your-existing-scoring-secret
 ```
 
-**Security:** This file is NOT committed to git. Only the service role key is needed (not the anon key).
+Keep this file outside the repository with mode 600. The wrapper reads it as data. For GitHub Actions, set the same three variable names in **Settings → Secrets and variables → Actions**, using a separate named secret API key for the workflow. The workflow still runs on its configured cadence when enabled.
 
 ---
 

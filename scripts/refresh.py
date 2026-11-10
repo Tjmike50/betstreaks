@@ -79,13 +79,14 @@ def get_season_string() -> str:
 def get_supabase_client() -> Client:
     """Initialize Supabase client from environment variables."""
     url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    key = os.environ.get("SUPABASE_REFRESH_API_KEY", "")
     
-    if not url or not key:
-        print("ERROR: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
-        sys.exit(1)
-    
-    return create_client(url, key)
+    if not url or not key.startswith("sb_secret_") or len(key) <= len("sb_secret_"):
+        sys.exit("ERROR: SUPABASE_URL and a Supabase secret API key in SUPABASE_REFRESH_API_KEY are required")
+    try:
+        return create_client(url, key)
+    except Exception:
+        sys.exit("ERROR: Could not initialize the Supabase client")
 
 
 def fetch_todays_games() -> list[dict]:
@@ -765,37 +766,35 @@ def update_refresh_status(supabase: Client, refresh_id: int):
     print(f"Updated refresh_status id={refresh_id}")
 
 
-def trigger_scoring_engine(supabase: Client):
+def trigger_scoring_engine():
     """Call the prop-scoring-engine edge function after data refresh."""
     import urllib.request
     import json as _json
     
     url = os.environ.get("SUPABASE_URL", "")
-    anon_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-    
-    if not url or not anon_key:
-        print("WARNING: Cannot trigger scoring engine - missing SUPABASE_URL or key")
+    scoring_secret = os.environ.get("REFRESH_SECRET", "")
+
+    if not url or not scoring_secret:
+        print("WARNING: Cannot trigger scoring engine - missing SUPABASE_URL or REFRESH_SECRET")
         return
-    
-    endpoint = f"{url}/functions/v1/prop-scoring-engine"
-    print(f"Triggering prop-scoring-engine at {endpoint}...")
-    
+
+    endpoint = f"{url.rstrip('/')}/functions/v1/prop-scoring-engine"
+    print("Triggering prop-scoring-engine...")
+
     try:
         req = urllib.request.Request(
             endpoint,
-            data=_json.dumps({}).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {anon_key}",
-            },
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
+        req.add_unredirected_header("x-admin-secret", scoring_secret)
         with urllib.request.urlopen(req, timeout=120) as resp:
             body = _json.loads(resp.read().decode("utf-8"))
             scored = body.get("scored_count", "?")
             print(f"Scoring engine completed: {scored} props scored")
-    except Exception as e:
-        print(f"WARNING: Scoring engine trigger failed (non-fatal): {e}")
+    except Exception:
+        print("WARNING: Scoring engine trigger failed (non-fatal)")
 
 
 def filter_postseason_player_games(games: list[dict]) -> list[dict]:
@@ -898,7 +897,7 @@ def main():
     update_refresh_status(supabase, 1)  # id=1 for players/streaks
     
     # 11. Trigger prop-scoring-engine edge function
-    trigger_scoring_engine(supabase)
+    trigger_scoring_engine()
     
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()

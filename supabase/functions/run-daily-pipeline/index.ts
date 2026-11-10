@@ -1,6 +1,6 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
 import { requireAdmin } from "../_shared/adminAuth.ts";
+import { readInternalSecret, scheduleVerification } from "../_shared/privilegedPost.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,7 +37,7 @@ const PIPELINE_SPORTS: { sport: SportKey; seasonState: "preseason" | "regular" |
  * NBA path is unchanged when sport==='NBA' (default everywhere downstream).
  * WNBA short-circuits cleanly while seasonState='offseason'.
  */
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const __auth = await requireAdmin(req);
@@ -174,14 +174,23 @@ serve(async (req) => {
     const stepA2Start = Date.now();
 
     try {
+      const verificationSecret = readInternalSecret(scheduleVerification);
+      if (!verificationSecret) throw new Error("Schedule verification is unconfigured");
       const res = await fetch(`${fnBase}/verify-schedule`, {
         method: "POST",
-        headers: svcHeaders,
+        headers: {
+          "Content-Type": "application/json",
+          [scheduleVerification.header]: verificationSecret,
+        },
         body: JSON.stringify({ sports: [sport], game_date: todayET }),
+        redirect: "error",
         signal: AbortSignal.timeout(30_000),
       });
       const body = await res.json();
-      const sportResult = body.sports?.[sport] || {};
+      const sportResult = body.sports?.[sport];
+      if (!res.ok || body.ok !== true || !sportResult) {
+        throw new Error(`Schedule verification failed (HTTP ${res.status})`);
+      }
 
       results.schedule_verification = {
         status: sportResult.error ? "failed" : "success",

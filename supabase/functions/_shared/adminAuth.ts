@@ -1,6 +1,6 @@
 // Shared auth helper: verifies the caller is an admin (via user JWT + user_flags)
 // OR is calling with the service-role key (for server-to-server invocations).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
 
 export interface AdminAuthResult {
   ok: boolean;
@@ -33,25 +33,30 @@ export async function requireAdmin(req: Request): Promise<AdminAuthResult> {
     return { ok: true, status: 200, isServiceRole: true };
   }
 
-  // Otherwise validate user JWT and check is_admin flag
-  const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
+  return await verifyAdminUser(
+    token,
+    createClient(SUPABASE_URL, ANON_KEY),
+    () => createClient(SUPABASE_URL, SERVICE_KEY),
+  );
+}
 
+export async function verifyAdminUser(
+  token: string,
+  userClient: SupabaseClient,
+  getAdminClient: () => SupabaseClient,
+): Promise<AdminAuthResult> {
   const { data: userData, error: userErr } = await userClient.auth.getUser(token);
   if (userErr || !userData?.user) {
     return { ok: false, status: 401, error: "Unauthorized — invalid token" };
   }
   const userId = userData.user.id;
-
-  const adminClient = createClient(SUPABASE_URL, SERVICE_KEY);
-  const { data: flags, error: flagsErr } = await adminClient
+  const { data: flags, error: flagsErr } = await getAdminClient()
     .from("user_flags")
     .select("is_admin")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (flagsErr || !flags?.is_admin) {
+  if (flagsErr || flags?.is_admin !== true) {
     return { ok: false, status: 403, error: "Forbidden — admin access required" };
   }
 

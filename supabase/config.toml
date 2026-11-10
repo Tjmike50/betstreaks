@@ -71,3 +71,6 @@ verify_jwt = false
 
 [functions.summarize-mlb-performance]
 verify_jwt = false
+
+[functions.verify-schedule]
+verify_jwt = false

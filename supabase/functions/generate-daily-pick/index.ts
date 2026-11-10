@@ -5,11 +5,10 @@
 // ai_daily_picks (+ ai_daily_pick_legs). Idempotent via UNIQUE(sport,pick_date)
 // — duplicate calls for the same (sport,date) skip silently.
 //
-// No AI prose layer yet (deterministic name + templated reasoning only).
-// No cron yet — invoke manually via supabase.functions.invoke or curl.
+// Non-force calls accept an admin user or the dedicated daily-pick cron secret.
 //
 // Query/body params:
-//   sport: "NBA" | "WNBA"  (required, default "NBA")
+//   sport: "NBA" | "WNBA" | "MLB" (default "NBA")
 //   leg_count: number      (optional, default 3, clamped 1..6)
 //   game_date: "YYYY-MM-DD" (optional, defaults to today UTC date)
 //   force: boolean         (optional, ADMIN-ONLY) — when true, deletes any
@@ -17,7 +16,8 @@
 //                          Requires Authorization: Bearer <user_jwt> for an
 //                          admin user (user_flags.is_admin = true).
 // =============================================================================
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { dailyPickCron, withPrivilegedPost } from "../_shared/privilegedPost.ts";
 import {
   getMlbDailyPickCandidates,
   inferMlbSide,
@@ -28,10 +28,6 @@ import {
   enrichMlbAnchorLegs,
   parlayAmerican,
 } from "../_shared/mlbOddsEnrichment.ts";
-import {
-  americanToDecimal,
-  decimalToAmerican,
-} from "../_shared/parlayOdds.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -181,7 +177,7 @@ interface EnrichedLeg extends PropScoreRow {
 }
 
 async function enrichLegsWithOdds(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   legs: PropScoreRow[],
   gameDate: string,
 ): Promise<{ enriched: EnrichedLeg[]; estimatedOdds: string | null }> {
@@ -221,13 +217,7 @@ async function enrichLegsWithOdds(
     }),
   );
 
-  // Compute parlay total only if every leg has odds
-  const decimals = enriched.map((l) => americanToDecimal(l.odds));
-  if (decimals.some((d) => d == null)) {
-    return { enriched, estimatedOdds: null };
-  }
-  const totalDecimal = decimals.reduce((acc, d) => acc * (d as number), 1);
-  return { enriched, estimatedOdds: decimalToAmerican(totalDecimal) };
+  return { enriched, estimatedOdds: parlayAmerican(enriched.map((leg) => leg.odds)) };
 }
 
 function buildSlipName(sport: string, dateStr: string): string {
@@ -394,7 +384,7 @@ Write a short slip_name and a 1-2 sentence reasoning explaining why these legs w
 // =============================================================================
 interface MlbDailyPickArgs {
   // deno-lint-ignore no-explicit-any
-  supabase: any;
+  supabase: SupabaseClient;
   sport: "MLB";
   gameDate: string;
   legCount: number;
@@ -646,11 +636,11 @@ async function runMlbDailyPick(args: MlbDailyPickArgs): Promise<Response> {
   );
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
+Deno.serve(withPrivilegedPost({
+  corsHeaders,
+  adminUser: true,
+  internal: dailyPickCron,
+}, async (req, { supabase, adminUserId }) => {
   const startTime = Date.now();
 
   try {
@@ -686,43 +676,13 @@ Deno.serve(async (req) => {
       gameDate = new Date().toISOString().slice(0, 10);
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // -------------------------------------------------------------------------
-    // Admin verification — only when force=true.
-    // Default (cron / non-force) path stays open.
-    // -------------------------------------------------------------------------
-    let adminUserId: string | null = null;
+    if (force && !adminUserId) {
+      return Response.json({ ok: false, error: "Admin access required for force=true" }, {
+        status: 403,
+        headers: corsHeaders,
+      });
+    }
     if (force) {
-      const authHeader = req.headers.get("Authorization") ?? "";
-      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-      if (!token) {
-        return new Response(
-          JSON.stringify({ ok: false, error: "Authentication required for force=true" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      const { data: userData, error: userError } = await supabase.auth.getUser(token);
-      if (userError || !userData?.user) {
-        return new Response(
-          JSON.stringify({ ok: false, error: "Invalid auth token" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      const { data: flags, error: flagsError } = await supabase
-        .from("user_flags")
-        .select("is_admin")
-        .eq("user_id", userData.user.id)
-        .maybeSingle();
-      if (flagsError || !flags?.is_admin) {
-        return new Response(
-          JSON.stringify({ ok: false, error: "Admin privileges required for force=true" }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      adminUserId = userData.user.id;
       console.log(
         `[generate-daily-pick] Force regenerate authorized for admin ${adminUserId} (${sport} ${gameDate})`,
       );
@@ -989,15 +949,15 @@ Deno.serve(async (req) => {
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
-  } catch (error) {
-    console.error("[generate-daily-pick] failed:", error);
+  } catch {
+    console.error("[generate-daily-pick] Request failed");
     return new Response(
       JSON.stringify({
         ok: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Daily pick generation failed",
         duration_ms: Date.now() - startTime,
       }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
-});
+}));

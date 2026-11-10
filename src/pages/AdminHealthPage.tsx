@@ -543,7 +543,7 @@ export default function AdminHealthPage() {
                 <div className="rounded-md bg-muted p-3 font-mono text-xs text-foreground">
                   {`curl -X POST "$SUPABASE_URL/functions/v1/collect-line-snapshots" -H "Authorization: Bearer $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{"sport":"NBA"}'`}
                   <br />
-                  {`curl -X POST "$SUPABASE_URL/functions/v1/mlb-health-check" -H "Authorization: Bearer $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{"game_date":"${today}"}'`}
+                  {`curl -X POST "$SUPABASE_URL/functions/v1/mlb-health-check" -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H "Content-Type: application/json" -d '{"game_date":"${today}"}'`}
                   <br />
                   {`update public.backend_alerts set resolved = true where alert_type = 'odds_api_quota_exhausted' and sport = 'NBA' and resolved is distinct from true;`}
                 </div>

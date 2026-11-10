@@ -6,6 +6,7 @@
 # Exit codes are preserved from python for launchd to detect failures.
 # =============================================================================
 
+set +x
 set -euo pipefail
 
 # ---- Configuration ----
@@ -56,24 +57,29 @@ send_imessage_alert() {
     # log "Pulling latest from origin..."
     # git pull origin main --ff-only
     
-    # Load environment variables
-    if [[ ! -f "${ENV_FILE}" ]]; then
-        log "ERROR: Environment file not found: ${ENV_FILE}"
+    # Treat the owner-only configuration as data, never as shell code.
+    if [[ ! -f "${ENV_FILE}" || -L "${ENV_FILE}" ]] ||
+       [[ "$(stat -f '%u:%Lp' "${ENV_FILE}")" != "$(id -u):600" ]]; then
+        log "ERROR: Expected a regular configuration file owned by this user with mode 600"
         exit 1
     fi
-    log "Loading env from ${ENV_FILE}"
-    set -a
-    # shellcheck source=/dev/null
-    source "${ENV_FILE}"
-    set +a
-    
-    # Verify required vars are set
-    if [[ -z "${SUPABASE_URL:-}" ]] || [[ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]]; then
-        log "ERROR: Missing required env vars (SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY)"
+    unset SUPABASE_URL SUPABASE_REFRESH_API_KEY REFRESH_SECRET SUPABASE_SERVICE_ROLE_KEY
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        case "${line}" in
+            SUPABASE_URL=*) export SUPABASE_URL="${line#*=}" ;;
+            SUPABASE_REFRESH_API_KEY=*) export SUPABASE_REFRESH_API_KEY="${line#*=}" ;;
+            REFRESH_SECRET=*) export REFRESH_SECRET="${line#*=}" ;;
+            ""|\#*) ;;
+            *) log "ERROR: Unexpected entry in refresh configuration"; exit 1 ;;
+        esac
+    done < "${ENV_FILE}"
+    unset line
+
+    if [[ -z "${SUPABASE_URL:-}" || -z "${SUPABASE_REFRESH_API_KEY:-}" || -z "${REFRESH_SECRET:-}" ]]; then
+        log "ERROR: Set SUPABASE_URL, SUPABASE_REFRESH_API_KEY and REFRESH_SECRET"
         exit 1
     fi
-    log "Environment loaded (SUPABASE_URL is set)"
-    
+
     # Setup Python environment
     if [[ -d "${VENV_DIR}" ]]; then
         log "Activating virtual environment: ${VENV_DIR}"
