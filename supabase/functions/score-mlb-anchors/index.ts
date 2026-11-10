@@ -42,7 +42,7 @@
 // ============================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createEdgeClient as createClient, readSecretKey } from "../_shared/supabaseKeys.ts";
 import { requireAdmin } from "../_shared/adminAuth.ts";
 import {
   MLB_MARKET_MAP,
@@ -1103,7 +1103,7 @@ serve(async (req) => {
 
   const startedAt = Date.now();
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const SUPABASE_SERVICE_KEY = readSecretKey()!;
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   let body: { game_date?: string } = {};
@@ -1327,7 +1327,7 @@ serve(async (req) => {
   }
 
   // Today's MLB game ids → context.
-  const todaysGameIds = new Set((gamesToday ?? []).map((g) => g.id));
+  const todaysGameIds = new Set((gamesToday ?? []).map((g: { id: string }) => g.id));
   const ctxByGameId = new Map<string, MlbGameContext>();
   for (const c of (ctxRows ?? []) as MlbGameContext[]) {
     if (todaysGameIds.has(c.game_id)) ctxByGameId.set(c.game_id, c);

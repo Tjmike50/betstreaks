@@ -36,7 +36,7 @@ export function decimalToAmerican(decimal: number | null | undefined): string | 
 export function parlayAmerican(odds: AmericanOddsInput[]): string | null {
   const decimals = odds.map(americanToDecimal);
   if (decimals.some((value) => value == null)) return null;
-  const parlayDecimal = decimals.reduce((acc, value) => acc * (value as number), 1);
+  const parlayDecimal = decimals.reduce<number>((acc, value) => acc * (value as number), 1);
   return decimalToAmerican(parlayDecimal);
 }
 

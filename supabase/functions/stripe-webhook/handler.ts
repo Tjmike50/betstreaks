@@ -1,3 +1,4 @@
+import { readSecretKey, supabaseKeyFetch } from "../_shared/supabaseKeys.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -157,7 +158,7 @@ export async function handleWebhookRequest(req: Request, dependencies: {
 
   const env = dependencies.env ?? ((key: string) => Deno.env.get(key));
   const supabaseUrl = env("SUPABASE_URL") ?? "";
-  const supabaseServiceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const supabaseSecretKey = readSecretKey(env);
 
   const legacyAccount = loadLegacyAccount(env);
   const betstreaksAccount = loadBetstreaksAccount(env);
@@ -169,10 +170,10 @@ export async function handleWebhookRequest(req: Request, dependencies: {
     (a): a is AccountConfig => Boolean(a && a.webhookSecret),
   );
 
-  if (!supabaseUrl || !supabaseServiceRoleKey || verifiable.length === 0) {
+  if (!supabaseUrl || !supabaseSecretKey || verifiable.length === 0) {
     console.error("Webhook configuration error", {
       hasSupabaseUrl: Boolean(supabaseUrl),
-      hasServiceRoleKey: Boolean(supabaseServiceRoleKey),
+      hasSupabaseSecretKey: Boolean(supabaseSecretKey),
       verifiableAccounts: verifiable.map((a) => a.customerScope),
     });
     return new Response("Webhook configuration error", { status: 500 });
@@ -220,8 +221,9 @@ export async function handleWebhookRequest(req: Request, dependencies: {
       return new Response("Webhook signature verification failed", { status: 400 });
     }
 
-    const supabaseAdmin = (dependencies.createClient ?? createClient)(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { persistSession: false },
+    const supabaseAdmin = (dependencies.createClient ?? createClient)(supabaseUrl, supabaseSecretKey, {
+      global: { fetch: supabaseKeyFetch(supabaseSecretKey) },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
     console.log("Received webhook event:", event.type, event.id, "scope:", account.customerScope);

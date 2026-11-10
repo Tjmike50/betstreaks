@@ -1,8 +1,9 @@
+import { requireAdmin } from "../_shared/adminAuth.ts";
 // Backend-only: Refresh MLB team ID map from SportsDataIO /Teams endpoint.
 // This is the ONLY authoritative source for TeamID -> abbreviation mapping.
 // Do NOT seed mlb_team_id_map from player_prop_scores or team_recent_games.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { createEdgeClient as createClient, readSecretKey } from "../_shared/supabaseKeys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -61,12 +62,19 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return Response.json({ ok: false, error: auth.error }, {
+      status: auth.status,
+      headers: corsHeaders,
+    });
+  }
 
   const startedAt = new Date();
   const startedAtIso = startedAt.toISOString();
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const serviceRoleKey = readSecretKey();
   if (!supabaseUrl || !serviceRoleKey) {
     return new Response(
       JSON.stringify({ success: false, error: "Missing Supabase env vars" }),

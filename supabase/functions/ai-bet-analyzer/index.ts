@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createEdgeClient as createClient, readSecretKey, readPublishableKey } from "../_shared/supabaseKeys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,16 +17,16 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const SUPABASE_PUBLIC_KEY = readPublishableKey()!;
+    const SUPABASE_SECRET_KEY = readSecretKey()!;
 
     const authHeader = req.headers.get("Authorization");
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
     });
 
     // Service role client for usage tracking (bypasses RLS)
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
       auth: { persistSession: false },
     });
 

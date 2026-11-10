@@ -1,3 +1,4 @@
+import { readPublishableKey, readSecretKey, supabaseKeyFetch } from "../_shared/supabaseKeys.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -35,8 +36,8 @@ export async function handlePortalRequest(req: Request, dependencies: {
   const makeClient = dependencies.createClient ?? createClient;
 
   const supabaseUrl = env("SUPABASE_URL") ?? "";
-  const supabaseAnonKey = env("SUPABASE_ANON_KEY") ?? "";
-  const supabaseServiceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const supabasePublishableKey = readPublishableKey(env);
+  const supabaseSecretKey = readSecretKey(env);
 
   const legacyAccount = loadLegacyAccount(env);
   const betstreaksAccount = loadBetstreaksAccount(env);
@@ -45,10 +46,10 @@ export async function handlePortalRequest(req: Request, dependencies: {
     hasLegacyAccount: Boolean(legacyAccount),
     hasBetstreaksAccount: Boolean(betstreaksAccount),
     hasSupabaseUrl: Boolean(supabaseUrl),
-    hasServiceRoleKey: Boolean(supabaseServiceRoleKey),
+    hasSupabaseSecretKey: Boolean(supabaseSecretKey),
   });
 
-  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
+  if (!supabaseUrl || !supabasePublishableKey || !supabaseSecretKey) {
     console.error("[create-portal-session] Missing required Supabase env vars");
     return jsonOk({
       error: "Billing portal is not configured. Please contact support.",
@@ -70,9 +71,9 @@ export async function handlePortalRequest(req: Request, dependencies: {
   }
 
   try {
-    const supabaseClient = makeClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-      auth: { persistSession: false },
+    const supabaseClient = makeClient(supabaseUrl, supabasePublishableKey, {
+      global: { headers: { Authorization: authHeader }, fetch: supabaseKeyFetch(supabasePublishableKey) },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
@@ -81,8 +82,9 @@ export async function handlePortalRequest(req: Request, dependencies: {
       return jsonOk({ error: "Not authenticated.", code: "no_auth" });
     }
 
-    const supabaseAdmin = makeClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { persistSession: false },
+    const supabaseAdmin = makeClient(supabaseUrl, supabaseSecretKey, {
+      global: { fetch: supabaseKeyFetch(supabaseSecretKey) },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
     // Portal stays live-only, even while sandbox checkout is enabled.

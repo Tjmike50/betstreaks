@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { createEdgeClient as createClient, readSecretKey } from "../_shared/supabaseKeys.ts";
 import { requireAdmin } from "../_shared/adminAuth.ts";
 
 const corsHeaders = {
@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      readSecretKey()!
     );
 
     // Get all slip_leg_outcomes that need enrichment (no confidence_score yet)
@@ -158,8 +158,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ enriched, total_checked: legs.length }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
+  } catch {
+    return new Response(JSON.stringify({ error: "Backfill failed" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
