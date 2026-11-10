@@ -1,5 +1,17 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.190.0/testing/asserts.ts";
-import { dailyPickCron, scheduleVerification } from "./privilegedPost.ts";
+import { dailyPickCron, pipelineCron, scheduleVerification } from "./internalAuth.ts";
+import { requireAdmin, requireAuth } from "./adminAuth.ts";
+
+function session(subject: string, role = "authenticated") {
+  const payload = btoa(JSON.stringify({ sub: subject, role })).replace(/=+$/, "");
+  return `fixture.${payload}.signature`;
+}
+
+const publicKey = "sb_publishable_fixture";
+const serviceKey = "sb_secret_fixture";
+const adminSession = session("admin-user");
+const memberSession = session("member-user");
+const invalidSession = session("invalid-session");
 
 const cronToken = "a".repeat(64);
 const verificationToken = "b".repeat(64);
@@ -8,12 +20,13 @@ const env = {
   SUPABASE_URL: "https://database.invalid",
   SUPABASE_ANON_KEY: "legacy-public-fixture",
   SUPABASE_SERVICE_ROLE_KEY: "legacy-service-fixture",
-  SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: "public-fixture" }),
-  SUPABASE_SECRET_KEYS: JSON.stringify({ default: "service-fixture" }),
+  SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: publicKey }),
+  SUPABASE_SECRET_KEYS: JSON.stringify({ default: serviceKey }),
   [dailyPickCron.env]: cronToken,
+  [pipelineCron.env]: "c".repeat(64),
   [scheduleVerification.env]: verificationToken,
   SPORTSDATAIO_API_KEY: fakeProviderKey,
-  REFRESH_SECRET: "fixture-pipeline-cron-token",
+  REFRESH_SECRET: "r".repeat(64),
 };
 
 type EdgeHandler = (req: Request) => Promise<Response>;
@@ -37,6 +50,14 @@ const dailyPick = await loadHandler(() => import("../generate-daily-pick/index.t
 const mlbHealth = await loadHandler(() => import("../mlb-health-check/index.ts"));
 const verifySchedule = await loadHandler(() => import("../verify-schedule/index.ts"));
 const runPipeline = await loadHandler(() => import("../run-daily-pipeline/index.ts"));
+const refreshHandlers = [
+  await loadHandler(() => import("../collect-line-snapshots/index.ts")),
+  await loadHandler(() => import("../refresh-availability/index.ts")),
+  await loadHandler(() => import("../refresh-mlb-data/index.ts")),
+  await loadHandler(() => import("../refresh-wnba-data/index.ts")),
+  await loadHandler(() => import("../refresh-mlb-team-map/index.ts")),
+  await loadHandler(() => import("../summarize-mlb-performance/index.ts")),
+];
 
 function request(headers: HeadersInit = {}, body = {}, query = "") {
   return new Request(`https://edge.invalid/${query}`, {
@@ -72,27 +93,28 @@ function mock(test: (requests: Request[]) => Promise<void>, stub?: Stub) {
 function adminLookup(req: Request, url: URL): Response | undefined {
   if (url.pathname === "/auth/v1/user") {
     const token = req.headers.get("authorization");
-    assertEquals(req.headers.get("apikey"), "public-fixture");
-    if (token === "Bearer invalid-session") {
+    assertEquals(req.headers.get("apikey"), publicKey);
+    if (token === `Bearer ${invalidSession}`) {
       return Response.json({ message: "invalid JWT" }, { status: 401 });
     }
-    return Response.json({ id: token === "Bearer admin-session" ? "admin-user" : "member-user" });
+    return Response.json({ id: token === `Bearer ${adminSession}` ? "admin-user" : "member-user" });
   }
   if (url.pathname === "/rest/v1/user_flags") {
-    assertEquals(req.headers.get("apikey"), "service-fixture");
+    assertEquals(req.headers.get("apikey"), serviceKey);
+    assertEquals(req.headers.get("authorization"), null);
     return Response.json([{ is_admin: url.searchParams.get("user_id") === "eq.admin-user" }]);
   }
 }
 
-const admin = { Authorization: "Bearer admin-session" };
+const admin = { Authorization: `Bearer ${adminSession}` };
 const cron = { [dailyPickCron.header]: cronToken };
 const pipeline = { [scheduleVerification.header]: verificationToken };
-const handlers: EdgeHandler[] = [dailyPick, mlbHealth, verifySchedule];
+const handlers: EdgeHandler[] = [dailyPick, mlbHealth, verifySchedule, runPipeline];
 
 Deno.test("all handlers reject missing credentials and public or legacy API keys", mock(async (requests) => {
   for (const handler of handlers) {
     assertEquals((await handler(request())).status, 401);
-    for (const key of [env.SUPABASE_ANON_KEY, env.SUPABASE_SERVICE_ROLE_KEY, "public-fixture", "service-fixture"]) {
+    for (const key of [env.SUPABASE_ANON_KEY, env.SUPABASE_SERVICE_ROLE_KEY, publicKey, serviceKey]) {
       assertEquals((await handler(request({ Authorization: `Bearer ${key}`, apikey: key }))).status, 401);
     }
   }
@@ -113,8 +135,8 @@ Deno.test("all handlers accept preflight and reject non-POST methods without sid
 
 Deno.test("member sessions lack admin privileges and invalid sessions are rejected", mock(async (requests) => {
   for (const handler of [dailyPick, mlbHealth]) {
-    assertEquals((await handler(request({ Authorization: "Bearer member-session" }))).status, 403);
-    assertEquals((await handler(request({ Authorization: "Bearer invalid-session" }))).status, 401);
+    assertEquals((await handler(request({ Authorization: `Bearer ${memberSession}` }))).status, 403);
+    assertEquals((await handler(request({ Authorization: `Bearer ${invalidSession}` }))).status, 401);
   }
   assertEquals(requests.map((req) => new URL(req.url).pathname), [
     "/auth/v1/user", "/rest/v1/user_flags", "/auth/v1/user",
@@ -230,7 +252,7 @@ Deno.test("missing provider configuration and malformed dates fail without exter
   assertEquals(requests.length, 0);
 }));
 
-const startPipeline = { "x-admin-secret": env.REFRESH_SECRET };
+const startPipeline = { [pipelineCron.header]: env[pipelineCron.env] };
 
 Deno.test("the pipeline sends only the dedicated verification secret and records an auth rejection", mock(async (requests) => {
   const res = await runPipeline(request(startPipeline, { sports: ["NBA"] }));
@@ -258,3 +280,66 @@ Deno.test("the pipeline skips the verification call when its secret is missing",
   assertEquals(summary.results.NBA.scoring.status, "success");
   assert(!requests.some((req) => new URL(req.url).pathname === "/functions/v1/verify-schedule"));
 }, () => Response.json({ ok: true })));
+
+Deno.test("internal DB and Edge calls use apikey, and an HTTP failure is a failed step", mock(async (requests) => {
+  const res = await runPipeline(request(startPipeline, { sports: ["NBA"] }));
+  assertEquals(res.status, 207);
+  const summary = await res.json();
+  assertEquals(summary.results.NBA.availability_refresh.status, "failed");
+  for (const call of requests.filter((req) => !req.url.endsWith("/verify-schedule"))) {
+    assertEquals(call.headers.get("apikey"), serviceKey);
+    assertEquals(call.headers.get("authorization"), null);
+    assertEquals(call.redirect, "error");
+  }
+  const lines = requests.find((call) => call.url.endsWith("/collect-line-snapshots"))!;
+  assertEquals(await lines.json(), { sport: "NBA", skip_downstream: true });
+}, (_req, url) => url.pathname.endsWith("/refresh-availability")
+  ? Response.json({ error: "private rejection" }, { status: 401 })
+  : url.pathname.endsWith("/verify-schedule")
+    ? Response.json({ ok: true, sports: { NBA: {} } })
+    : Response.json({ ok: true })));
+
+Deno.test("only scoped scheduler headers open the pipeline and pick handlers", mock(async (requests) => {
+  for (const headers of [cron, pipeline, { apikey: serviceKey }, { "x-admin-secret": env.REFRESH_SECRET }]) {
+    assertEquals((await runPipeline(request(headers))).status, 401);
+  }
+  assertEquals((await dailyPick(request(startPipeline))).status, 401);
+  assertEquals((await mlbHealth(request(startPipeline))).status, 401);
+  assertEquals(requests.length, 0);
+}));
+
+Deno.test("existing backend callers migrate to apikey while the refresh header still works for scoring", mock(async (requests) => {
+  for (const gate of [requireAdmin, requireAuth]) {
+    assertEquals((await gate(request({ apikey: serviceKey }))).isServiceRole, true);
+    for (const key of [publicKey, serviceKey, session("service", "service_role"), session("anonymous", "anon")]) {
+      assertEquals((await gate(request({ Authorization: `Bearer ${key}` }))).status, 401);
+    }
+    assertEquals((await gate(request({ apikey: publicKey }))).status, 401);
+  }
+  assertEquals((await requireAdmin(request({ "x-admin-secret": env.REFRESH_SECRET }))).isServiceRole, true);
+  assertEquals((await requireAdmin(request(startPipeline))).status, 401);
+  assertEquals((await requireAdmin(request(startPipeline), pipelineCron)).isServiceRole, true);
+  assertEquals(requests.length, 0);
+}));
+
+Deno.test("malformed modern configuration does not fall back to legacy keys", mock(async (requests) => {
+  for (const invalid of ["{", "{}", JSON.stringify({ default: env.SUPABASE_SERVICE_ROLE_KEY })]) {
+    Deno.env.set("SUPABASE_SECRET_KEYS", invalid);
+    assertEquals((await runPipeline(request(startPipeline))).status, 503);
+    assertEquals((await requireAdmin(request(admin))).status, 503);
+  }
+  assertEquals(requests.length, 0);
+}));
+
+Deno.test("refresh writers reject anonymous and fabricated credentials before data or provider access", mock(async (requests) => {
+  const credentials: HeadersInit[] = [
+    {}, { apikey: publicKey }, { Authorization: "Bearer eyJfixture" },
+    { Authorization: `Bearer ${session("fixture", "service_role")}` },
+  ];
+  for (const handler of refreshHandlers) {
+    for (const headers of credentials) {
+      assertEquals((await handler(request(headers))).status, 401);
+    }
+  }
+  assertEquals(requests.length, 0);
+}));

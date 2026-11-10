@@ -74,3 +74,9 @@ verify_jwt = false
 
 [functions.verify-schedule]
 verify_jwt = false
+
+[functions.refresh-wnba-data]
+verify_jwt = false
+
+[functions.backfill-leg-scores]
+verify_jwt = false

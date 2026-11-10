@@ -59,8 +59,8 @@ export function billingDatabase(seed: Record<string, Row[]> = {}) {
 // Deliberately fake, non-credential fixture values only.
 export const billingEnv: Record<string, string> = {
   SUPABASE_URL: "https://fixture.invalid",
-  SUPABASE_SERVICE_ROLE_KEY: "fixture-service-role",
-  SUPABASE_ANON_KEY: "fixture-anon",
+  SUPABASE_SECRET_KEYS: JSON.stringify({ default: "sb_secret_billing_fixture" }),
+  SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: "sb_publishable_billing_fixture" }),
   STRIPE_TEST_MODE: "true",
   STRIPE_TEST_SECRET_KEY: "sk_test_fixture",
   STRIPE_TEST_WEBHOOK_SECRET: "whsec_sandboxFixture",

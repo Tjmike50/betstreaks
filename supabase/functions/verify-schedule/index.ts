@@ -1,4 +1,5 @@
-import { scheduleVerification, withPrivilegedPost } from "../_shared/privilegedPost.ts";
+import { withPrivilegedPost } from "../_shared/privilegedPost.ts";
+import { scheduleVerification } from "../_shared/internalAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

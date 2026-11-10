@@ -1,3 +1,4 @@
+import { readPublishableKey, readSecretKey, supabaseKeyFetch } from "../_shared/supabaseKeys.ts";
 import { validWeekCount, WEEKLY_PRICE_CENTS } from "../_shared/weeklyPass.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -86,11 +87,12 @@ export async function handleCheckoutRequest(req: Request, dependencies: {
     diag.testWeeklyPricePresent = !!env("STRIPE_TEST_PRICE_WEEKLY_PASS")?.trim();
 
     diag.stage = "auth";
-    const supabaseAdmin = makeClient(
-      env("SUPABASE_URL") ?? "",
-      env("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-      { auth: { persistSession: false } },
-    );
+    const supabaseUrl = env("SUPABASE_URL");
+    const publicKey = readPublishableKey(env);
+    const secretKey = readSecretKey(env);
+    if (!supabaseUrl || !publicKey || !secretKey) {
+      return jsonError("Checkout is temporarily unavailable.", "config_missing", 503, diag);
+    }
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -98,11 +100,11 @@ export async function handleCheckoutRequest(req: Request, dependencies: {
     }
 
     const supabaseClient = makeClient(
-      env("SUPABASE_URL") ?? "",
-      env("SUPABASE_ANON_KEY") ?? "",
+      supabaseUrl,
+      publicKey,
       {
-        global: { headers: { Authorization: authHeader } },
-        auth: { persistSession: false },
+        global: { headers: { Authorization: authHeader }, fetch: supabaseKeyFetch(publicKey) },
+        auth: { persistSession: false, autoRefreshToken: false },
       },
     );
 
@@ -115,6 +117,11 @@ export async function handleCheckoutRequest(req: Request, dependencies: {
       console.error("[create-checkout-session] authentication failed");
       return jsonError("User not authenticated", "no_auth", 401, diag);
     }
+
+    const supabaseAdmin = makeClient(supabaseUrl, secretKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: supabaseKeyFetch(secretKey) },
+    });
 
     diag.stage = "body_validation";
     const body = await req.json().catch(() => ({}));

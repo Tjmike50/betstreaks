@@ -4,7 +4,9 @@ NBA Data Refresh Script for GitHub Actions
 Fetches player stats, team stats, and game data from nba_api and upserts to Supabase.
 """
 
+import argparse
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Optional
@@ -18,7 +20,8 @@ from nba_api.stats.endpoints import (
     TeamGameLogs,
 )
 from nba_api.stats.static import teams
-from supabase import create_client, Client
+import httpx
+from supabase import create_client, Client, ClientOptions
 
 from postseason_teams import get_postseason_teams, POSTSEASON_MODE
 
@@ -77,14 +80,26 @@ def get_season_string() -> str:
 
 
 def get_supabase_client() -> Client:
-    """Initialize Supabase client from environment variables."""
-    url = os.environ.get("SUPABASE_URL")
+    """Use the managed server key as an API key without a bearer fallback."""
+    url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_REFRESH_API_KEY", "")
-    
-    if not url or not key.startswith("sb_secret_") or len(key) <= len("sb_secret_"):
-        sys.exit("ERROR: SUPABASE_URL and a Supabase secret API key in SUPABASE_REFRESH_API_KEY are required")
+
+    if not re.fullmatch(r"https://[a-z0-9-]+[.]supabase[.]co", url):
+        sys.exit("ERROR: A Supabase HTTPS project origin is required")
+    if not re.fullmatch(r"sb_secret_[A-Za-z0-9_-]+", key):
+        sys.exit("ERROR: A modern Supabase key in SUPABASE_REFRESH_API_KEY is required")
+
+    def remove_app_key_bearer(request: httpx.Request):
+        if request.headers.get("Authorization") == f"Bearer {key}":
+            del request.headers["Authorization"]
+
     try:
-        return create_client(url, key)
+        http = httpx.Client(event_hooks={"request": [remove_app_key_bearer]}, follow_redirects=False)
+        return create_client(url, key, options=ClientOptions(
+            httpx_client=http,
+            persist_session=False,
+            auto_refresh_token=False,
+        ))
     except Exception:
         sys.exit("ERROR: Could not initialize the Supabase client")
 
@@ -701,8 +716,8 @@ def insert_streak_events(supabase: Client, events: list[dict]) -> None:
             supabase.table("streak_events").insert(chunk).execute()
             inserted += len(chunk)
             print(f"  Inserted chunk {chunk_num}/{total_chunks} ({len(chunk)} events)")
-        except Exception as e:
-            print(f"  ERROR inserting chunk {chunk_num}/{total_chunks}: {e}")
+        except Exception:
+            print(f"  ERROR inserting chunk {chunk_num}/{total_chunks}")
             print(f"  First event in failed chunk: {chunk[0]}")
             raise RuntimeError(f"Failed to insert streak events chunk {chunk_num}: {e}")
     
@@ -774,7 +789,7 @@ def trigger_scoring_engine():
     url = os.environ.get("SUPABASE_URL", "")
     scoring_secret = os.environ.get("REFRESH_SECRET", "")
 
-    if not url or not scoring_secret:
+    if not url or not re.fullmatch(r"[A-Za-z0-9_-]{32,}", scoring_secret):
         print("WARNING: Cannot trigger scoring engine - missing SUPABASE_URL or REFRESH_SECRET")
         return
 
@@ -813,7 +828,7 @@ def filter_postseason_team_games(games: list[dict]) -> list[dict]:
     return filtered
 
 
-def main():
+def main(*, game_logs_only: bool = False):
     """Main entry point."""
     start_time = datetime.now()
     print(f"=== NBA Data Refresh Started at {start_time.isoformat()} ===\n")
@@ -823,14 +838,9 @@ def main():
     
     supabase = get_supabase_client()
     
-    # 1. Fetch and upsert today's games
-    games = fetch_todays_games()
-    if games:
-        upsert_data(supabase, "games_today", games)
-    update_refresh_status(supabase, 2)  # id=2 for games
-    
-    print()
-    
+    # The hosted pipeline owns the slate and scoring in scheduled game-log mode.
+    games = [] if game_logs_only else fetch_todays_games()
+
     # 2. Fetch player game logs (will raise on failure after retries)
     player_games = fetch_player_game_logs()
     
@@ -849,7 +859,6 @@ def main():
     # Filter to postseason-relevant teams only
     player_games = filter_postseason_player_games(player_games)
     
-    upsert_data(supabase, "player_recent_games", player_games, ["player_id", "game_id"])
     
     print()
     
@@ -868,10 +877,13 @@ def main():
     # Filter to postseason-relevant teams only
     team_games = filter_postseason_team_games(team_games)
     
-    upsert_data(supabase, "team_recent_games", team_games, ["team_id", "game_id"])
     
     print()
     
+    if not player_games or not team_games:
+        sys.exit("ERROR: NBA game logs are empty after filtering")
+
+    # Finish provider reads and calculation before the first database write.
     # 4. Calculate player streaks
     player_streaks = calculate_streaks(player_games)
     
@@ -881,6 +893,12 @@ def main():
     # 6. Combine all streaks
     all_streaks = player_streaks + team_streaks
     
+    if games:
+        upsert_data(supabase, "games_today", games)
+        update_refresh_status(supabase, 2)
+    upsert_data(supabase, "player_recent_games", player_games, ["player_id", "game_id"])
+    upsert_data(supabase, "team_recent_games", team_games, ["team_id", "game_id"])
+
     # 7. Detect streak events
     events = detect_streak_events(supabase, all_streaks)
     
@@ -897,7 +915,8 @@ def main():
     update_refresh_status(supabase, 1)  # id=1 for players/streaks
     
     # 11. Trigger prop-scoring-engine edge function
-    trigger_scoring_engine()
+    if not game_logs_only:
+        trigger_scoring_engine()
     
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
@@ -912,4 +931,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--game-logs-only", action="store_true")
+    args = parser.parse_args()
+    try:
+        main(game_logs_only=args.game_logs_only)
+    except Exception:
+        sys.exit("ERROR: NBA refresh failed during execution")

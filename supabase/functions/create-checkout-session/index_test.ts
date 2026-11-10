@@ -221,3 +221,28 @@ Deno.test("live duplicate subscription protection remains active", async () => {
   assertEquals((await response.json()).code, "already_subscribed");
   assertEquals(f.sessions.length, 0);
 });
+
+Deno.test("checkout validates the session with the modern publishable key and the user's bearer", async () => {
+  const originalFetch = globalThis.fetch;
+  const authCalls: Request[] = [];
+  globalThis.fetch = (input, init) => {
+    const request = new Request(input, init);
+    authCalls.push(request);
+    return Promise.resolve(Response.json({ id: "user_a", email: "user@example.invalid" }));
+  };
+  try {
+    const response = await handleCheckoutRequest(new Request("https://edge.invalid", {
+      method: "POST",
+      headers: { Authorization: "Bearer fixture-user-session" },
+      body: "{}",
+    }), { env: envReader() });
+    assertEquals(response.status, 400);
+    assertEquals((await response.json()).code, "invalid_plan");
+    assertEquals(authCalls.length, 1);
+    assertEquals(new URL(authCalls[0].url).pathname, "/auth/v1/user");
+    assertEquals(authCalls[0].headers.get("authorization"), "Bearer fixture-user-session");
+    assertEquals(authCalls[0].headers.get("apikey"), "sb_publishable_billing_fixture");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

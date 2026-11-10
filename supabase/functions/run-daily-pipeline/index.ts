@@ -1,6 +1,6 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
-import { requireAdmin } from "../_shared/adminAuth.ts";
-import { readInternalSecret, scheduleVerification } from "../_shared/privilegedPost.ts";
+import { readSecretKey } from "../_shared/supabaseKeys.ts";
+import { withPrivilegedPost } from "../_shared/privilegedPost.ts";
+import { pipelineCron, readInternalSecret, scheduleVerification } from "../_shared/internalAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,17 +37,7 @@ const PIPELINE_SPORTS: { sport: SportKey; seasonState: "preseason" | "regular" |
  * NBA path is unchanged when sport==='NBA' (default everywhere downstream).
  * WNBA short-circuits cleanly while seasonState='offseason'.
  */
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-
-  const __auth = await requireAdmin(req);
-  if (!__auth.ok) {
-    return new Response(JSON.stringify({ error: __auth.error }), {
-      status: __auth.status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
+Deno.serve(withPrivilegedPost({ corsHeaders, adminUser: true, internal: pipelineCron }, async (req, { supabase }) => {
   // Allow caller to override sport list (e.g. {"sports":["NBA"]}) for ad-hoc runs.
   const overrideBody = await req.json().catch(() => ({}));
   const overrideSports: SportKey[] | null = Array.isArray(overrideBody?.sports) && overrideBody.sports.length > 0
@@ -58,11 +48,11 @@ Deno.serve(async (req) => {
   const allErrors: string[] = [];
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const SUPABASE_SERVICE_KEY = readSecretKey()!;
   const fnBase = SUPABASE_URL.replace(/\/$/, "") + "/functions/v1";
   const svcHeaders = {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+    apikey: SUPABASE_SERVICE_KEY,
   };
 
   const perSportResults: Record<string, Record<string, StepResult>> = {};
@@ -108,12 +98,13 @@ Deno.serve(async (req) => {
         const res = await fetch(`${fnBase}/${sportStatsFn}`, {
           method: "POST",
           headers: svcHeaders,
+        redirect: "error",
           body: JSON.stringify({}),
           signal: AbortSignal.timeout(120_000),
         });
         const body = await res.json();
         results[statsKey] = {
-          status: body.ok ? "success" : "failed",
+          status: res.ok && body.ok ? "success" : "failed",
           duration_ms: Date.now() - step0Start,
           total_rows: body.total_rows,
           steps: body.steps,
@@ -136,14 +127,13 @@ Deno.serve(async (req) => {
       const res = await fetch(`${fnBase}/collect-line-snapshots`, {
         method: "POST",
         headers: svcHeaders,
-        body: JSON.stringify({ sport }),
+        redirect: "error",
+        body: JSON.stringify({ sport, skip_downstream: true }),
         signal: AbortSignal.timeout(90_000),
       });
       const body = await res.json();
 
-      if (!res.ok || body.ok === false) {
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
+      if (!res.ok || body.ok === false) throw new Error(`Line collection failed (HTTP ${res.status})`);
 
       gameDates = body.game_dates || [];
       gameDates.forEach(d => allGameDates.add(d));
@@ -216,10 +206,13 @@ Deno.serve(async (req) => {
       const res = await fetch(`${fnBase}/refresh-availability`, {
         method: "POST",
         headers: svcHeaders,
+        redirect: "error",
         body: JSON.stringify({ game_date: todayET, sport }),
         signal: AbortSignal.timeout(60_000),
       });
       const body = await res.json();
+
+      if (!res.ok || body.ok === false) throw new Error(`Availability refresh failed (HTTP ${res.status})`);
 
       results.availability_refresh = {
         status: "success",
@@ -249,13 +242,16 @@ Deno.serve(async (req) => {
       const res = await fetch(`${fnBase}/${scoringFn}`, {
         method: "POST",
         headers: svcHeaders,
+        redirect: "error",
         body: JSON.stringify(scoringBody),
         signal: AbortSignal.timeout(90_000),
       });
       const body = await res.json();
 
+      if (!res.ok || body.ok === false) throw new Error(`Scoring failed (HTTP ${res.status})`);
+
       results.scoring = {
-        status: body.ok === false ? "failed" : "success",
+        status: "success",
         duration_ms: Date.now() - stepCStart,
         players_analyzed: body.players_analyzed,
         scored_count: body.scored_count,
@@ -293,7 +289,6 @@ Deno.serve(async (req) => {
   // The history row aggregates across sports for backward compatibility with
   // /admin dashboards that read this table; per-sport detail lives in `results`.
   try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     await supabase.from("refresh_status").upsert(
       { id: 4, sport: "PIPELINE", last_run: new Date().toISOString() },
       { onConflict: "id" }
@@ -340,4 +335,4 @@ Deno.serve(async (req) => {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
     status: allSuccess ? 200 : 207,
   });
-});
+}));

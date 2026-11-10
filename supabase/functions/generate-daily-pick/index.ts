@@ -17,7 +17,8 @@
 //                          admin user (user_flags.is_admin = true).
 // =============================================================================
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
-import { dailyPickCron, withPrivilegedPost } from "../_shared/privilegedPost.ts";
+import { withPrivilegedPost } from "../_shared/privilegedPost.ts";
+import { dailyPickCron } from "../_shared/internalAuth.ts";
 import {
   getMlbDailyPickCandidates,
   inferMlbSide,

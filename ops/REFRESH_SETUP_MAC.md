@@ -1,248 +1,62 @@
-# BetStreaks Local Refresh Setup (macOS)
+# NBA refresh on the designated Mac
 
-This guide sets up automated NBA data refresh on a local Mac (e.g., Mac mini) instead of GitHub Actions, avoiding `stats.nba.com` IP blocking issues.
+Use one Mac LaunchAgent, `com.betstreaks.refresh`, to run the repository's NBA player and team game logs, streaks and streak events. It runs `scripts/refresh.py --game-logs-only` through the repository launcher. The hosted daily pipeline owns the slate, availability and scoring. The optional GitHub runner writes the same game-log datasets and is a backup for the Mac.
 
-## Existing `com.betstreaks.refresh` LaunchAgent
+The inspected Mac's installed legacy agent runs at 9 a.m., 1 p.m. and 6 p.m. local time and has `RunAtLoad` enabled. The repository plist preserves that label and cadence. Compare the actual target Mac's plist before replacement and preserve any owner-approved timing differences. An earlier repository template used a different label, `com.betstreaks.nba-refresh`. Check both labels when taking inventory.
 
-The separate legacy LaunchAgent calls `~/betstreaks-refresh/run_refresh.sh`
-and runs `refresh_players.py` and `refresh_teams.py`. Its replacement is
-[`ops/legacy-run-refresh.sh`](legacy-run-refresh.sh).
+## Prepare the repository and runtime
 
-1. In Supabase **Settings → API Keys**, create a named secret API key for the
-   legacy Mac job. In the login Keychain of the user who owns the LaunchAgent,
-   create a generic password with service `com.betstreaks.refresh.supabase` and
-   account matching `id -un`. Set the password to the new secret API key.
-2. Make the item available to `/usr/bin/security` under that user's LaunchAgent
-   session. A locked Keychain or denied access causes the launcher to exit before
-   either script runs. The installed Python Supabase SDK must support modern keys.
-3. Install the replacement from the repository root using the existing script
-   path. The plist, times and Python scripts stay in place.
+Prepare the verified release checkout as the user who will run the LaunchAgent. Python 3.13.13 and the direct dependency versions in `requirements.txt` were tested. Use a working Python 3.13 interpreter and create the virtual environment once. The launcher uses that interpreter directly and installs nothing at launch time.
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -B -m unittest discover -s ops/tests -p test_refresh.py
+```
+
+If the interpreter cannot create its venv or install dependencies, use a working Python installation and recreate the venv. The local Homebrew 3.11/3.12 interpreters did not pass setup during this audit. The verified managed Python 3.13 runtime did. Keep the checkout and its venv at stable paths readable by the user session.
+
+Create private configuration and log directories. Put the approved project HTTPS origin on a single line in `project-url`.
+
+```bash
+install -d -m 700 "$HOME/.config/betstreaks" "$HOME/.config/betstreaks/logs"
+(umask 077; touch "$HOME/.config/betstreaks/project-url")
+chmod 600 "$HOME/.config/betstreaks/project-url"
+```
+
+In Supabase, provision a named modern secret API key for the designated Mac. In **Keychain Access** under the LaunchAgent owner's login session, create a generic password in the login Keychain with service `com.betstreaks.refresh.supabase`, account equal to that user's short username, and the new key as its password. Permit `/usr/bin/security` to read that item under the scheduled session. Confirm access for that item only. Keep the value out of shell history, process arguments and configuration files.
+
+Run the repository preflight as the same macOS user with their login Keychain available.
+
+```bash
+scripts/run_refresh.sh --check-config
+```
+
+The preflight checks private configuration, the Keychain item and Python imports without contacting Supabase or NBA services. A missing/locked Keychain item or an access prompt that cannot complete produces a nonzero exit. The launcher uses a ten-second Keychain lookup timeout and an exclusive file lock. Missing venv, bad URL, concurrent launch or a provider failure yields a nonzero exit. Successful staging writes are tracked through `refresh_status` ID 1. The supplied local tests stub Keychain and provider calls. Repeat the preflight from the actual installed account before switching writers.
+
+## Switch one writer at a time
+
+1. Confirm both GitHub workflows are disabled or gated, and confirm no hosted or external job invokes the Python game-log runner. The repository GitHub job also requires `BETSTREAKS_NBA_REFRESH_RUNNER=github` on the default branch. The separate `betstreaks-refresh` repository needs its own disabled state checked.
+2. In the cutover window, unload the existing legacy LaunchAgent and any alternate template agent. Check that their processes have exited. The legacy launcher and its three Python helpers read the legacy service-role variable. Retire that directory from scheduled use and quarantine the plaintext credential under the incident procedure. `ops/legacy-run-refresh.sh` is a safe retirement stub for an old path if needed.
+3. Prepare the replacement plist from the repository template. The following creates a local candidate at the checkout root. It fills the checkout and home paths without placing credential values in the file.
 
    ```bash
-   install -m 700 ops/legacy-run-refresh.sh "$HOME/betstreaks-refresh/.run_refresh.new"
-   mv -f "$HOME/betstreaks-refresh/.run_refresh.new" "$HOME/betstreaks-refresh/run_refresh.sh"
+   .venv/bin/python - <<'PY'
+   from pathlib import Path
+   import plistlib
+
+   root = Path.cwd().resolve()
+   config = plistlib.loads((root / "ops/com.betstreaks.refresh.plist").read_bytes())
+   config["ProgramArguments"][1] = str(root / "scripts/run_refresh.sh")
+   for name in ("StandardOutPath", "StandardErrorPath"):
+       config[name] = config[name].replace("USER_HOME", str(Path.home()))
+   out = Path.home() / ".config/betstreaks/com.betstreaks.refresh.plist"
+   out.write_bytes(plistlib.dumps(config))
+   PY
+   plutil -lint "$HOME/.config/betstreaks/com.betstreaks.refresh.plist"
    ```
 
-The standalone `refresh_games_today.py` helper also reads
-`SUPABASE_SERVICE_ROLE_KEY`. It is outside this LaunchAgent's run sequence.
-If retained for separate use, give it the same runtime Keychain injection.
+4. Install the prepared file as `~/Library/LaunchAgents/com.betstreaks.refresh.plist` and bootstrap it under `gui/$(id -u)` when the owner authorizes the first write. **Bootstrap starts a refresh immediately** because of `RunAtLoad`. Before using `launchctl kickstart`, verify the previous run has ended. The lock rejects overlap on the same Mac.
+5. Check `launchctl list com.betstreaks.refresh` for exit status and `~/.config/betstreaks/logs/` for sanitized messages. In the authorized environment, verify player/team log dates, streak counts and ID 1 refresh timing. If the source fetch or filtering returns an empty required dataset, the script fails before the first write. The existing streak replacement still uses separate delete and insert operations. If a database write fails partway through, pause the runner, check recent writes against the last successful run and repeat with the same modern key after resolving the cause.
 
-## Repository refresh job
-
-### Overview
-
-| Component | Location |
-|-----------|----------|
-| Refresh script | `scripts/refresh.py` |
-| Shell wrapper | `scripts/run_refresh.sh` |
-| LaunchAgent plist | `~/Library/LaunchAgents/com.betstreaks.nba-refresh.plist` |
-| Environment file | `~/.config/betstreaks/.env` |
-| Logs | `~/Projects/betstreaks/logs/` |
-
-## Prerequisites
-
-- macOS with Python 3.11+
-- Git configured with repo access
-- Supabase project credentials
-
----
-
-## 1. Create Environment File
-
-Create the directory and `.env` file:
-
-```bash
-mkdir -p -m 700 ~/.config/betstreaks
-chmod 700 ~/.config/betstreaks
-(umask 077; touch ~/.config/betstreaks/.env)
-chmod 600 ~/.config/betstreaks/.env
-nano ~/.config/betstreaks/.env
-```
-
-Add the values as unquoted `NAME=value` lines. Create a separate named secret API key for this job in **Settings → API Keys**. Use the existing Edge Function `REFRESH_SECRET` for the scoring call.
-
-```env
-SUPABASE_URL=https://enhksxikgvvdohseivpx.supabase.co
-SUPABASE_REFRESH_API_KEY=your-named-supabase-secret-api-key
-REFRESH_SECRET=your-existing-scoring-secret
-```
-
-Keep this file outside the repository with mode 600. The wrapper reads it as data. For GitHub Actions, set the same three variable names in **Settings → Secrets and variables → Actions**, using a separate named secret API key for the workflow. The workflow still runs on its configured cadence when enabled.
-
----
-
-## 2. Set Up Python Environment
-
-```bash
-cd ~/Projects/betstreaks
-
-# Create virtual environment (recommended)
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
----
-
-## 3. Test the Refresh Script
-
-Run manually first to verify everything works:
-
-```bash
-# Make executable
-chmod +x scripts/run_refresh.sh
-
-# Test run
-./scripts/run_refresh.sh
-
-# Check logs
-cat logs/refresh_$(date +%Y-%m-%d).log
-```
-
----
-
-## 4. Configure iMessage Alerts (Optional)
-
-Edit `scripts/run_refresh.sh` and set your contact:
-
-```bash
-ALERT_CONTACT="+1234567890"  # Phone number
-# or
-ALERT_CONTACT="you@icloud.com"  # iMessage email
-```
-
-**Note:** First-time use requires granting Terminal/script access to Messages.
-
----
-
-## 5. Install LaunchAgent
-
-```bash
-# Copy plist to LaunchAgents
-cp ops/com.betstreaks.nba-refresh.plist ~/Library/LaunchAgents/
-
-# Replace USER_HOME placeholder with your actual home directory
-sed -i '' "s|USER_HOME|$HOME|g" ~/Library/LaunchAgents/com.betstreaks.nba-refresh.plist
-
-# Create logs directory
-mkdir -p ~/Projects/betstreaks/logs
-
-# Load the agent
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.betstreaks.nba-refresh.plist
-```
-
----
-
-## 6. Verify LaunchAgent is Loaded
-
-```bash
-# Check if loaded
-launchctl list | grep betstreaks
-
-# Should show something like:
-# -    0    com.betstreaks.nba-refresh
-```
-
----
-
-## 7. LaunchAgent Commands
-
-### Start/Stop
-
-```bash
-# Manually trigger a run (for testing)
-launchctl kickstart gui/$(id -u)/com.betstreaks.nba-refresh
-
-# Stop the agent (unload)
-launchctl bootout gui/$(id -u)/com.betstreaks.nba-refresh
-
-# Reload after editing plist
-launchctl bootout gui/$(id -u)/com.betstreaks.nba-refresh
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.betstreaks.nba-refresh.plist
-```
-
-### View Status
-
-```bash
-# Check if running
-launchctl list | grep betstreaks
-
-# View last exit code (0 = success)
-launchctl list com.betstreaks.nba-refresh
-```
-
----
-
-## 8. View Logs
-
-```bash
-# Today's application log
-cat ~/Projects/betstreaks/logs/refresh_$(date +%Y-%m-%d).log
-
-# LaunchAgent stdout/stderr
-cat ~/Projects/betstreaks/logs/launchd-stdout.log
-cat ~/Projects/betstreaks/logs/launchd-stderr.log
-
-# Tail logs in real-time
-tail -f ~/Projects/betstreaks/logs/refresh_$(date +%Y-%m-%d).log
-
-# All recent logs
-ls -la ~/Projects/betstreaks/logs/
-```
-
----
-
-## Schedule
-
-The LaunchAgent runs at:
-
-| Time (ET) | Purpose |
-|-----------|---------|
-| 3:05 AM | Catch late-night game results |
-| 9:05 AM | Morning data refresh |
-
-To change the schedule, edit the plist's `StartCalendarInterval` and reload.
-
----
-
-## Troubleshooting
-
-### "Operation not permitted" error
-
-Grant Full Disk Access to Terminal:
-1. System Preferences → Privacy & Security → Full Disk Access
-2. Add Terminal.app
-
-### Script doesn't run at scheduled time
-
-1. Check Mac isn't in sleep mode at scheduled times
-2. Verify with `launchctl list | grep betstreaks`
-3. Check `launchd-stderr.log` for errors
-
-### Python/pip not found
-
-Ensure PATH in plist includes Homebrew:
-```xml
-<key>PATH</key>
-<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-```
-
-### iMessage alerts not sending
-
-1. Open Messages.app manually first
-2. Grant script access when prompted
-3. Test with: `osascript -e 'tell application "Messages" to send "test" to buddy "+1234567890"'`
-
----
-
-## Disabling GitHub Actions
-
-Once local refresh is working, you can disable the GitHub Actions workflow:
-
-1. Delete `.github/workflows/refresh.yml`, or
-2. Add `if: false` to the job, or
-3. Rename to `refresh.yml.disabled`
-
-The GitHub Actions workflow will continue to fail with timeouts if left enabled, but won't affect the local refresh.
+To switch to GitHub as backup, unload the Mac and confirm its run has drained first. Enable only the main repository workflow with `BETSTREAKS_NBA_REFRESH_RUNNER=github` and its own named key in `SUPABASE_REFRESH_API_KEY`, plus the approved `SUPABASE_URL`. GitHub serializes runs in that workflow. Mac and hosted jobs require a separate ownership check during every switch. Reverse the sequence to return to the Mac and confirm GitHub is idle before bootstrapping. Follow the [cutover runbook](SECURITY_RELEASE_RUNBOOK.md) for recovery and scheduler coordination.
