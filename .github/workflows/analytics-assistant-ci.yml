@@ -11,6 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       VITE_SUPABASE_URL: http://127.0.0.1:47961
       VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_offline_fixture
@@ -29,4 +30,4 @@ jobs:
       - run: npx --no-install tsc -p tsconfig.node.json --noEmit
       - run: npm run build
       - run: deno check --frozen supabase/functions/*/index.ts ops/analytics-demo.ts
-      - run: deno test --frozen --allow-env supabase/functions/
+      - run: deno test --frozen --import-map=ops/tests/deno-imports.json --allow-env supabase/functions/

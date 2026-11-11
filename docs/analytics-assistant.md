@@ -67,11 +67,13 @@ npm test
 npx --no-install tsc -p tsconfig.app.json --noEmit
 npx --no-install tsc -p tsconfig.node.json --noEmit
 deno check --frozen supabase/functions/*/index.ts ops/analytics-demo.ts
-deno test --frozen --allow-env supabase/functions/
+deno test --frozen --import-map=ops/tests/deno-imports.json --allow-env supabase/functions/
 deno test --frozen supabase/functions/_shared/analyticsAssistant/golden_test.ts
 ```
 
 The local suite passed 32 Vitest tests and 187 Deno tests, including 46 versioned synthetic goldens and the existing billing and security tests. The Vite build and both TypeScript checks passed. `.github/workflows/analytics-assistant-ci.yml` repeats the build and suites with Node 22 and Deno 2.5.6. It has no schedule, deploy step, provider credentials or ingestion step.
+
+The first clean GitHub runner received different bytes from esm.sh for the same tslib URL and Deno rejected them. The test-only import map resolves that one module to tslib 2.8.1 from the existing npm lockfile, installed by `npm ci`. Edge type checking still uses the frozen Deno lockfile and deployed imports are unaffected.
 
 For a reproducible Chromium check, run these commands with the corresponding loopback server mode running. The second run requires restarting the server with `--fail-source`.
 
