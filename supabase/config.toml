@@ -80,3 +80,6 @@ verify_jwt = false
 
 [functions.backfill-leg-scores]
 verify_jwt = false
+
+[functions.ai-analytics-assistant]
+verify_jwt = false

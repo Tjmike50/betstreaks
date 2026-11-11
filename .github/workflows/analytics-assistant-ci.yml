@@ -1,0 +1,32 @@
+name: Analytics Assistant CI
+
+on:
+  push:
+    branches: [feat/fixture-analytics-assistant]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: http://127.0.0.1:47961
+      VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_offline_fixture
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.5.6
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npx --no-install tsc -p tsconfig.app.json --noEmit
+      - run: npx --no-install tsc -p tsconfig.node.json --noEmit
+      - run: npm run build
+      - run: deno check --frozen supabase/functions/*/index.ts ops/analytics-demo.ts
+      - run: deno test --frozen --allow-env supabase/functions/

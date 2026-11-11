@@ -17,7 +17,8 @@ const passwordSchema = z.string().min(6, "Password must be at least 6 characters
 
 export default function AuthPage() {
   const navigate = useNavigate();
-  const destination = new URLSearchParams(window.location.search).get("next") === "premium" ? "/premium" : "/";
+  const next = new URLSearchParams(window.location.search).get("next");
+  const destination = next === "premium" ? "/premium" : next === "analytics" ? "/research/analytics" : "/";
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");

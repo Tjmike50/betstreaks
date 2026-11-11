@@ -34,6 +34,7 @@ import CheatsheetsHubPage from "./pages/CheatsheetsHubPage";
 import ResearchHubPage from "./pages/ResearchHubPage";
 import ResearchGamesPage from "./pages/research/ResearchGamesPage";
 import ResearchPlayersPage from "./pages/research/ResearchPlayersPage";
+import AnalyticsAssistantPage from "./pages/research/AnalyticsAssistantPage";
 import ValueCheatsheetPage from "./pages/cheatsheets/ValueCheatsheetPage";
 import StreakCheatsheetPage from "./pages/cheatsheets/StreakCheatsheetPage";
 import MatchupCheatsheetPage from "./pages/cheatsheets/MatchupCheatsheetPage";
@@ -103,6 +104,7 @@ const App = () => (
                     <Route path="/research" element={<ResearchHubPage />} />
                     <Route path="/research/games" element={<ResearchGamesPage />} />
                     <Route path="/research/players" element={<ResearchPlayersPage />} />
+                    <Route path="/research/analytics" element={<AnalyticsAssistantPage />} />
                     <Route path="/research/player/:playerId" element={<PlayerPage />} />
                     <Route path="/player/:playerId" element={<PlayerPage />} />
                     <Route path="/admin/health" element={<AdminHealthPage />} />

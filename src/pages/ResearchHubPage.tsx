@@ -2,7 +2,7 @@
 // ResearchHubPage — entry point for player/game research surfaces.
 // Sport-aware via SportContext. Reuses CheatsheetCard for visual consistency.
 // =============================================================================
-import { Users, CalendarDays, Flame } from "lucide-react";
+import { Users, CalendarDays, Flame, BarChart3 } from "lucide-react";
 import { CheatsheetCard } from "@/components/cheatsheets/CheatsheetCard";
 import { useSport } from "@/contexts/SportContext";
 import { Footer } from "@/components/Footer";
@@ -31,6 +31,13 @@ export default function ResearchHubPage() {
         </div>
 
         <div className="grid gap-3">
+          <CheatsheetCard
+            title="AI Analytics Assistant"
+            description="Ask about NBA player stats and see the calculation using synthetic game logs."
+            icon={BarChart3}
+            to="/research/analytics"
+            accent="primary"
+          />
           <CheatsheetCard
             title="Players"
             description="Search players, view recent form, splits, and streaks."
