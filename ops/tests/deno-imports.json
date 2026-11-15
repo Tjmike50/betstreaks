@@ -1,5 +1,6 @@
 {
   "imports": {
+    "https://esm.sh/stripe@14.21.0?target=deno": "npm:stripe@14.21.0",
     "https://esm.sh/tslib@2.8.1/denonext/tslib.mjs": "../../node_modules/tslib/tslib.es6.mjs"
   }
 }

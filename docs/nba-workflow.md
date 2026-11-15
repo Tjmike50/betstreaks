@@ -58,6 +58,8 @@ deno check --frozen supabase/functions/*/index.ts ops/analytics-demo.ts ops/publ
 deno test --frozen --import-map=ops/tests/deno-imports.json --allow-env supabase/functions/
 ```
 
+The Deno test-only import map resolves the existing Stripe SDK version from the npm lockfile because esm.sh served different bytes for a transitive runtime module during PR verification. Edge source imports and the frozen Edge type check still use the deployment URLs.
+
 Against a disposable PostgreSQL database, run `psql -f ops/tests/nba-workflow-db.sql` with the appropriate local connection args. The test applies the migration in a rolled-back transaction and verifies service permissions, monotonic snapshots, shared model limits and push claims.
 
 On a fresh fixture server, run the Chromium walkthrough with Playwright CLI. It uses desktop and 390 px viewports and checks that the two fixture accounts see separate saved slips.
