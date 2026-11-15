@@ -39,13 +39,13 @@ export default function ResearchHubPage() {
             to="/research/nba"
             accent="primary"
           />}
-          <CheatsheetCard
+          {import.meta.env.VITE_ANALYTICS_FIXTURE_ENABLED === "true" && <CheatsheetCard
             title="AI Analytics Assistant"
             description="Ask about NBA player stats and see the calculation using synthetic game logs."
             icon={BarChart3}
             to="/research/analytics"
             accent="primary"
-          />
+          />}
           <CheatsheetCard
             title="Players"
             description="Search players, view recent form, splits, and streaks."

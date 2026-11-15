@@ -89,3 +89,6 @@ verify_jwt = false
 
 [functions.nba-workflow-push]
 verify_jwt = false
+
+[functions.refresh-nba-workflow]
+verify_jwt = false

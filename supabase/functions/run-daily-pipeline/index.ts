@@ -265,6 +265,30 @@ Deno.serve(withPrivilegedPost({ corsHeaders, adminUser: true, internal: pipeline
       console.error(`[${sport}] Step C failed:`, msg);
     }
 
+    if (sport === "NBA" && Deno.env.get("NBA_WORKFLOW_FEED_ENABLED") === "true" &&
+      results.schedule_verification?.status === "success" && results.scoring?.status === "success") {
+      const start = Date.now();
+      try {
+        const secret = readInternalSecret(pipelineCron);
+        if (!secret) throw new Error("NBA workflow publisher authorization unavailable");
+        const response = await fetch(`${fnBase}/refresh-nba-workflow`, {
+          method: "POST",
+          headers: { [pipelineCron.header]: secret },
+          redirect: "error",
+          signal: AbortSignal.timeout(22_000),
+        });
+        const summary = await response.json();
+        if (!response.ok || summary.status !== "published") {
+          throw new Error(`NBA workflow publisher returned HTTP ${response.status}`);
+        }
+        results.nba_workflow = { status: "success", duration_ms: Date.now() - start, markets: summary.markets };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "NBA workflow publish failed";
+        allErrors.push(`NBA.nba_workflow: ${message}`);
+        results.nba_workflow = { status: "failed", duration_ms: Date.now() - start, error: message };
+      }
+    }
+
     console.log(`=== Pipeline complete for ${sport} ===`);
   }
 

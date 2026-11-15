@@ -10,6 +10,7 @@ insert into auth.users values
   ('90000000-0000-4000-8000-000000000001'),
   ('90000000-0000-4000-8000-000000000002');
 \ir ../../supabase/migrations/20261114090000_nba_research_workflow.sql
+\ir ../../supabase/migrations/20261114100000_nba_workflow_feed_retention.sql
 
 do $$
 begin
@@ -17,7 +18,8 @@ begin
     or has_table_privilege('anon', 'public.nba_workflow_snapshot', 'select')
     or has_function_privilege('authenticated', 'public.reserve_nba_workflow_model(uuid,integer,integer)', 'execute')
     or has_function_privilege('authenticated', 'public.publish_nba_workflow_snapshot(jsonb)', 'execute')
-    or has_function_privilege('anon', 'public.next_nba_workflow_watch_accounts()', 'execute') then
+    or has_function_privilege('anon', 'public.next_nba_workflow_watch_accounts()', 'execute')
+    or has_function_privilege('authenticated', 'public.referenced_nba_workflow_markets(text[])', 'execute') then
     raise exception 'Unexpected public data or worker access';
   end if;
 end;
@@ -47,10 +49,15 @@ begin
   end if;
 
   insert into public.nba_workflow_accounts(user_id, version, state) values
-    (first_id, 1, '{"watch":[{}],"preferences":{"enabled":false},"subscription":null}'),
+    (first_id, 1, '{"watch":[{"leg":{"id":"fixture-watch"}}],"slips":[{"legs":[{"id":"fixture-slip"}]}],"preferences":{"enabled":false},"subscription":null}'),
     (second_id, 1, '{"watch":[],"preferences":{"enabled":true},"subscription":{"endpoint":"test"}}');
   if (select array_agg(x) from public.next_nba_workflow_watch_accounts() as x) is distinct from array[first_id] then
     raise exception 'watched account batch failure';
+  end if;
+
+  if public.referenced_nba_workflow_markets(array['fixture-slip', 'fixture-watch', 'unused']) <>
+      '["fixture-slip","fixture-watch"]'::jsonb then
+    raise exception 'market retention does not match saved slips and watched markets';
   end if;
 
   insert into public.nba_workflow_push_claims(user_id, event_id) values (first_id, 'result');

@@ -32,6 +32,23 @@ Open [NBA Research on loopback](http://127.0.0.1:47962/research/nba) or [the NBA
 - **Watchlist worker and Web Push.** Put `NBA_WORKFLOW_VAPID_PUBLIC_KEY`, `NBA_WORKFLOW_VAPID_PRIVATE_KEY`, `NBA_WORKFLOW_VAPID_SUBJECT`, and a dedicated high-entropy `NBA_WORKFLOW_PUSH_CRON_SECRET` in staging Edge secrets. Configure a scoped scheduler to POST to `nba-workflow-push` using the secret in `x-nba-workflow-push-secret`. Verify the scheduler runs after snapshot refresh and rehearse physical browser opt-in, quiet hours, revoked subscriptions, and deduplication. The worker records changes for followed quotes even when push is disabled. In-app alerts are also reconciled when a user opens the board. Push notifications are generic and open the authenticated watchlist.
 - **Live rollout.** Check verified source completeness, exact market and result matching against real sample records, hosted auth isolation, the Gemini request path, and physical push delivery in staging. Review the named staging project and release revision before production deployment. Disable the frontend flag or unset the workflow mode to pause release. Use the [security release runbook](../ops/SECURITY_RELEASE_RUNBOOK.md) for scheduled-job and credential cutover.
 
+### Reuse the BetStreaks feeds
+
+The scheduled NBA branch of `run-daily-pipeline` calls `refresh-nba-workflow` after schedule verification and prop scoring pass. Enable it with `NBA_WORKFLOW_FEED_ENABLED=true` only in the environment being rehearsed. The publisher uses the existing scoped `PIPELINE_CRON_SECRET` through the internal pipeline header. Deploy it alongside the two NBA workflow migrations. The publisher runs in the same Supabase project as the collectors and reads sports data only.
+
+| Input | Existing source | Required match |
+| --- | --- | --- |
+| `games_today` | ESPN scoreboard and schedule verification | Unique verified Eastern date, home team, and away team |
+| `odds_cache` | The Odds API and Odds-API.io via `get-odds` | Provider event, book, side, line, and observation no more than 15 minutes old |
+| `player_prop_scores` | Prop-scoring engine | Unique player ID matching the quote name, both teams, date, and stat |
+| `player_recent_games`, `team_recent_games` | NBA Stats through the existing Python runner | Same official NBA game ID for final settlement. History coverage only when the last ten player appearances reconcile to the team's completed games through the snapshot cutoff |
+
+Availability inferred by the legacy refresh doesn't establish an official injury or void status. The publisher leaves availability unverified and requires matching final team and player logs to settle. It preserves markets referenced by saved slips and watchlists for up to 30 days. Both the board and source reads have size limits and an invalid refresh preserves the previous snapshot.
+
+In staging, use staging-scoped credentials, the existing NBA Stats runner, and approved sportsbook quota. Rehearse NBA-only pipeline calls, then check the publish result and confirm one real market, one historical evidence window, and one final result. Check the update cadence against the 15-minute quote window before public rollout. A fixture-only staging database needs the sports input schema and collectors before this rehearsal. Keep `NBA_WORKFLOW_MODE=fixture` for the hosted demo until verified inputs are present.
+
+The earlier fixture-only Analytics Assistant route and card require `VITE_ANALYTICS_FIXTURE_ENABLED=true`. The hosted fixture endpoint also requires `ANALYTICS_FIXTURE_ENABLED=true`. The local demo enables the UI and runs its own loopback handler. Leave both flags disabled in the public BetStreaks deployment.
+
 ### Snapshot handoff
 
 The approved refresh job should produce a JSON object with `board`, `appearances`, and `completePlayerIds`. The schema is described by [the board contract](../supabase/functions/_shared/nbaWorkflow/domain.ts) and [appearance contract](../supabase/functions/_shared/analyticsAssistant/source.ts). The loader applies [source validation](../supabase/functions/_shared/nbaWorkflow/store.ts).

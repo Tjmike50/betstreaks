@@ -11,7 +11,7 @@ demo_dist="dist/nba-workflow-demo"
 
 VITE_SUPABASE_URL="$demo_origin" \
   VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_offline_fixture \
-  VITE_NBA_WORKFLOW_ENABLED=true VITE_NBA_WORKFLOW_FIXTURE_CONTROLS=true \
+  VITE_ANALYTICS_FIXTURE_ENABLED=true VITE_NBA_WORKFLOW_ENABLED=true VITE_NBA_WORKFLOW_FIXTURE_CONTROLS=true \
   npm run build -- --outDir "$demo_dist"
 
 echo "NBA fixture demo at $demo_origin/research/nba"

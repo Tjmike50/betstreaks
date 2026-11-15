@@ -8,7 +8,7 @@ const origins = (Deno.env.get("ANALYTICS_ALLOWED_ORIGINS") ??
   .split(",").map((value) => value.trim())
   .filter((value) => /^https?:\/\/[\w.-]+(?::\d+)?$/.test(value));
 
-Deno.serve(createAssistantHandler({
+const handler = createAssistantHandler({
   authenticate: requireAuth,
   secret: () => {
     const dedicated = Deno.env.get("ANALYTICS_CONTEXT_SECRET");
@@ -17,4 +17,8 @@ Deno.serve(createAssistantHandler({
   source: fixtureSource,
   origins,
   log: (event) => console.info(JSON.stringify(event)),
-}));
+});
+
+Deno.serve((request) => Deno.env.get("ANALYTICS_FIXTURE_ENABLED") === "true"
+  ? handler(request)
+  : new Response(null, { status: 404 }));

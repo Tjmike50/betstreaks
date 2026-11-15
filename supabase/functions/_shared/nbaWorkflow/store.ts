@@ -93,7 +93,8 @@ export function verifiedSource(value: unknown, now: Date): Source | undefined {
   if (!isRecord(value) || !validBoard(value.board) || value.board.snapshot.mode !== "verified" ||
     Date.parse(value.board.asOf) > +now || !Array.isArray(value.appearances) || value.appearances.length > 30_000 ||
     !value.appearances.every(validAppearance) || !Array.isArray(value.completePlayerIds) ||
-    !value.completePlayerIds.every(isPlayerId)) return undefined;
+    !value.completePlayerIds.every(isPlayerId) ||
+    (value.coverageScope !== undefined && value.coverageScope !== "as_of")) return undefined;
   const board = value.board;
   const appearances: Appearance[] = value.appearances;
   if (appearances.some((row) => row.game_date > board.snapshot.coverageThrough || row.updated_at > board.asOf)) return;
@@ -106,7 +107,8 @@ export function verifiedSource(value: unknown, now: Date): Source | undefined {
       readGames(query, signal) {
         signal.throwIfAborted();
         return Promise.resolve({
-          complete: completePlayerIds.has(query.playerId),
+          complete: completePlayerIds.has(query.playerId) &&
+            (value.coverageScope !== "as_of" || query.asOf === board.snapshot.coverageThrough),
           rows: appearances.filter((row) => row.player_id === query.playerId && row.game_date <= query.asOf),
         });
       },

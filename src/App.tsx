@@ -45,6 +45,7 @@ import BestBetsCheatsheetPage from "./pages/cheatsheets/BestBetsCheatsheetPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+const analyticsFixtureEnabled = import.meta.env.VITE_ANALYTICS_FIXTURE_ENABLED === "true";
 
 // Password-reset emails can land on any page (e.g. the site root) with the
 // recovery token in the URL hash. Forward them to the reset page.
@@ -107,7 +108,7 @@ const App = () => (
                     <Route path="/research" element={<ResearchHubPage />} />
                     <Route path="/research/games" element={<ResearchGamesPage />} />
                     <Route path="/research/players" element={<ResearchPlayersPage />} />
-                    <Route path="/research/analytics" element={<AnalyticsAssistantPage />} />
+                    {analyticsFixtureEnabled && <Route path="/research/analytics" element={<AnalyticsAssistantPage />} />}
                     {nbaWorkflowEnabled && <Route path="/research/nba" element={<NbaWorkflowPage />} />}
                     {nbaWorkflowEnabled && <Route path="/admin/nba-research" element={<NbaDiagnosticsPage />} />}
                     <Route path="/research/player/:playerId" element={<PlayerPage />} />

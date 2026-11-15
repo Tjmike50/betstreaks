@@ -214,9 +214,11 @@ function validMarket(value: unknown, asOf: string): value is Market {
     stamp(result.observedAt) && result.observedAt <= asOf);
 }
 
+export const maxBoardMarkets = 3000;
+
 export function validBoard(value: unknown): value is Board {
   if (!isRecord(value) || !stamp(value.asOf) || !isRecord(value.snapshot) || !Array.isArray(value.markets) ||
-    value.markets.length > 500) return false;
+    value.markets.length > maxBoardMarkets) return false;
   const { snapshot, asOf, markets } = value;
   return shortText(snapshot.dataset) && shortText(snapshot.revision) && shortText(snapshot.source) &&
     stamp(snapshot.snapshotAt) && snapshot.snapshotAt <= asOf && isDate(snapshot.coverageThrough) &&
