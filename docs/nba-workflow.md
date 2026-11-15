@@ -59,3 +59,11 @@ deno test --frozen --import-map=ops/tests/deno-imports.json --allow-env supabase
 ```
 
 Against a disposable PostgreSQL database, run `psql -f ops/tests/nba-workflow-db.sql` with the appropriate local connection args. The test applies the migration in a rolled-back transaction and verifies service permissions, monotonic snapshots, shared model limits and push claims.
+
+On a fresh fixture server, run the Chromium walkthrough with Playwright CLI. It uses desktop and 390 px viewports and checks that the two fixture accounts see separate saved slips.
+
+```sh
+playwright-cli -s=betstreaks-nba open http://127.0.0.1:47962/cheatsheets/best-bets
+playwright-cli -s=betstreaks-nba run-code --filename=ops/tests/nba-workflow-browser.js
+playwright-cli -s=betstreaks-nba close
+```
