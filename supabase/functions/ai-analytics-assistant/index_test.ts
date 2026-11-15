@@ -18,6 +18,7 @@ const token = `fixture.${btoa(JSON.stringify({ sub: userId, role: "authenticated
 const publicKey = "sb_publishable_integration_fixture";
 const serviceKey = "sb_secret_integration_fixture";
 const env = {
+  ANALYTICS_FIXTURE_ENABLED: "true",
   SUPABASE_URL: "https://auth-fixture.invalid",
   SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: publicKey }),
   SUPABASE_SECRET_KEYS: JSON.stringify({ default: serviceKey }),
@@ -89,5 +90,14 @@ Deno.test("registered Edge Function fails closed with a weak explicit signing se
     const response = await handle(request({ apikey: publicKey, authorization: `Bearer ${token}` }));
     assertEquals(response.status, 503);
     assertEquals((await response.json()).code, "AUTH_UNAVAILABLE");
+  });
+});
+
+Deno.test("fixture endpoint defaults off before checking credentials", async () => {
+  await withAuthStub(async (calls) => {
+    Deno.env.delete("ANALYTICS_FIXTURE_ENABLED");
+    const response = await handle(request({ apikey: publicKey, authorization: `Bearer ${token}` }));
+    assertEquals(response.status, 404);
+    assertEquals(calls.length, 0);
   });
 });
