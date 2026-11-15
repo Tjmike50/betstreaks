@@ -1,3 +1,5 @@
+import { NbaWorkflowLink } from "@/components/nba-workflow/NbaWorkflowLink";
+import { adaptLegacyLegs } from "@/components/nba-workflow/client";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, Plus, Trash2, Loader2, ShieldCheck, AlertTriangle, TrendingUp, TrendingDown, Brain, BarChart3 } from "lucide-react";
@@ -215,6 +217,7 @@ export default function BetAnalyzerPage() {
           <p className="text-sm text-muted-foreground">
             Enter your bet legs and get an AI-powered analysis
           </p>
+          {isValid && <NbaWorkflowLink label="Verify NBA legs" legs={adaptLegacyLegs(legs)} />}
         </div>
 
         {/* Leg Inputs */}

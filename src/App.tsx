@@ -35,6 +35,9 @@ import ResearchHubPage from "./pages/ResearchHubPage";
 import ResearchGamesPage from "./pages/research/ResearchGamesPage";
 import ResearchPlayersPage from "./pages/research/ResearchPlayersPage";
 import AnalyticsAssistantPage from "./pages/research/AnalyticsAssistantPage";
+import NbaWorkflowPage from "./pages/research/NbaWorkflowPage";
+import NbaDiagnosticsPage from "./pages/research/NbaDiagnosticsPage";
+import { nbaWorkflowEnabled } from "./components/nba-workflow/client";
 import ValueCheatsheetPage from "./pages/cheatsheets/ValueCheatsheetPage";
 import StreakCheatsheetPage from "./pages/cheatsheets/StreakCheatsheetPage";
 import MatchupCheatsheetPage from "./pages/cheatsheets/MatchupCheatsheetPage";
@@ -105,6 +108,8 @@ const App = () => (
                     <Route path="/research/games" element={<ResearchGamesPage />} />
                     <Route path="/research/players" element={<ResearchPlayersPage />} />
                     <Route path="/research/analytics" element={<AnalyticsAssistantPage />} />
+                    {nbaWorkflowEnabled && <Route path="/research/nba" element={<NbaWorkflowPage />} />}
+                    {nbaWorkflowEnabled && <Route path="/admin/nba-research" element={<NbaDiagnosticsPage />} />}
                     <Route path="/research/player/:playerId" element={<PlayerPage />} />
                     <Route path="/player/:playerId" element={<PlayerPage />} />
                     <Route path="/admin/health" element={<AdminHealthPage />} />

@@ -83,3 +83,9 @@ verify_jwt = false
 
 [functions.ai-analytics-assistant]
 verify_jwt = false
+
+[functions.nba-workflow]
+verify_jwt = false
+
+[functions.nba-workflow-push]
+verify_jwt = false

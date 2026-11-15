@@ -4,6 +4,7 @@
 // =============================================================================
 import { Users, CalendarDays, Flame, BarChart3 } from "lucide-react";
 import { CheatsheetCard } from "@/components/cheatsheets/CheatsheetCard";
+import { nbaWorkflowEnabled } from "@/components/nba-workflow/client";
 import { useSport } from "@/contexts/SportContext";
 import { Footer } from "@/components/Footer";
 import { DataFreshnessIndicator } from "@/components/DataFreshnessIndicator";
@@ -31,6 +32,13 @@ export default function ResearchHubPage() {
         </div>
 
         <div className="grid gap-3">
+          {nbaWorkflowEnabled && config.key === "NBA" && <CheatsheetCard
+            title="NBA Research"
+            description="Inspect prop evidence, compare quotes, and review saved slips."
+            icon={BarChart3}
+            to="/research/nba"
+            accent="primary"
+          />}
           <CheatsheetCard
             title="AI Analytics Assistant"
             description="Ask about NBA player stats and see the calculation using synthetic game logs."

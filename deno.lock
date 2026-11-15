@@ -323,6 +323,7 @@
         "npm:@types/node@^22.16.5",
         "npm:@types/react-dom@^18.3.7",
         "npm:@types/react@^18.3.23",
+        "npm:@types/web-push@3.6.4",
         "npm:@vitejs/plugin-react-swc@^3.11.0",
         "npm:autoprefixer@^10.4.21",
         "npm:class-variance-authority@~0.7.1",
@@ -356,6 +357,7 @@
         "npm:vaul@~0.9.9",
         "npm:vite@^5.4.19",
         "npm:vitest@^3.2.4",
+        "npm:web-push@3.6.7",
         "npm:zod@^3.25.76"
       ]
     }

@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { nbaWorkflowEnabled } from "@/components/nba-workflow/client";
+import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   AlertTriangle,
@@ -388,6 +389,7 @@ export default function AdminHealthPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">System Health</h1>
+            {nbaWorkflowEnabled && <Link className="text-sm text-primary underline" to="/admin/nba-research">NBA research diagnostics</Link>}
             <p className="text-sm text-muted-foreground">Read-only production monitoring for the 7-day watch period.</p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
