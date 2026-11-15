@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createEdgeClient as createClient, readSecretKey } from "../_shared/supabaseKeys.ts";
 import { requireAuth } from "../_shared/adminAuth.ts";
 
 const corsHeaders = {
@@ -462,14 +462,14 @@ serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const sport = body.sport || "basketball_nba";
-    const market = body.market || "h2h";
+    const market: string = typeof body.market === "string" && body.market ? body.market : "h2h";
     const eventId = body.eventId || undefined;
     const bookmaker = body.bookmaker || undefined;
     // Tightened TTLs: 90s for game-level, 45s for player props
     const ttl = body.ttl || (market.startsWith("player_") ? 45 : 90);
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const SUPABASE_SERVICE_KEY = readSecretKey()!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     // Step 1: Check cache

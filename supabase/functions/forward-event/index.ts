@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createEdgeClient as createClient, readPublishableKey, readUserBearer } from "../_shared/supabaseKeys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,13 +47,12 @@ Deno.serve(async (req) => {
 
     // Derive user_id from the verified caller JWT (never trust the body).
     let resolvedUserId: string | null = null;
-    const authHeader = req.headers.get("Authorization") ?? "";
-    if (authHeader.startsWith("Bearer ")) {
-      const token = authHeader.slice("Bearer ".length).trim();
+    const token = readUserBearer(req);
+    if (token) {
       try {
         const supabaseAuth = createClient(
           Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_ANON_KEY")!,
+          readPublishableKey()!,
         );
         const { data, error } = await supabaseAuth.auth.getUser(token);
         if (!error && data?.user?.id) {
@@ -65,10 +64,10 @@ Deno.serve(async (req) => {
     }
 
     const externalUrl = Deno.env.get("EXTERNAL_SUPABASE_URL");
-    const externalKey = Deno.env.get("EXTERNAL_SUPABASE_SERVICE_ROLE_KEY");
+    const externalKey = Deno.env.get("EXTERNAL_SUPABASE_SECRET_KEY");
 
-    if (!externalUrl || !externalKey) {
-      console.error("Missing EXTERNAL_SUPABASE_URL or EXTERNAL_SUPABASE_SERVICE_ROLE_KEY");
+    if (!externalUrl || !externalKey || !/^sb_secret_[\w-]+$/.test(externalKey)) {
+      console.error("Missing EXTERNAL_SUPABASE_URL or EXTERNAL_SUPABASE_SECRET_KEY");
       return new Response(
         JSON.stringify({ error: "Server misconfigured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

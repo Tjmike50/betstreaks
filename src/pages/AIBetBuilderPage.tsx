@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { NbaWorkflowLink } from "@/components/nba-workflow/NbaWorkflowLink";
+import { adaptLegacyLegs } from "@/components/nba-workflow/client";
 import { useAIBetBuilder } from "@/hooks/useAIBetBuilder";
 import { usePremiumStatus } from "@/hooks/usePremiumStatus";
 import { useAuth } from "@/contexts/AuthContext";
@@ -361,7 +363,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
         })}
 
         {/* Actions */}
-        <div className="flex items-center gap-2 pt-2">
+        <div className="flex flex-wrap items-center gap-2 pt-2">
           <Button
             size="sm"
             variant={saved ? "default" : "outline"}
@@ -376,6 +378,7 @@ function SlipCard({ slip, index }: { slip: AISlip; index: number }) {
             <Copy className="h-3.5 w-3.5 mr-1" />
             Copy
           </Button>
+          {(!("sport" in slip) || slip.sport === "NBA") && <NbaWorkflowLink label="Verify NBA legs" legs={adaptLegacyLegs(slip.legs)} />}
         </div>
       </CardContent>
     </Card>

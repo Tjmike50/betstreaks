@@ -5,8 +5,14 @@ on:
     - cron: "0 */3 * * *"   # Every 3 hours (UTC)
   workflow_dispatch: {}      # Manual trigger button
 
+concurrency:
+  group: betstreaks-nba-refresh
+  cancel-in-progress: false
+
 jobs:
   refresh:
+    # Opt-in backup. Switch off the designated Mac before choosing GitHub.
+    if: vars.BETSTREAKS_NBA_REFRESH_RUNNER == 'github' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -14,7 +20,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
           cache: "pip"
 
       - name: Install dependencies
@@ -23,5 +29,5 @@ jobs:
       - name: Run refresh
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/refresh.py
+          SUPABASE_REFRESH_API_KEY: ${{ secrets.SUPABASE_REFRESH_API_KEY }}
+        run: python scripts/refresh.py --game-logs-only

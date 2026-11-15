@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createEdgeClient as createClient, readSecretKey, readPublishableKey } from "../_shared/supabaseKeys.ts";
 import {
   getMlbBuilderCandidates,
   inferMlbSide,
@@ -556,6 +556,7 @@ interface VerifiedPropCandidate {
   market_confidence: number;
   consensus_line: number | null;
   is_main_line: boolean;
+  alt_line_flag?: boolean;
   implied_over: number | null;
   implied_under: number | null;
   // Scoring enrichment (from player_prop_scores, if available)
@@ -600,7 +601,9 @@ interface MarketQualityDebug {
   market_confidence_distribution: Record<string, number>;
 }
 
-interface DebugInfo {
+type ScoringSource = "today" | "auto-triggered" | "yesterday" | "none";
+
+type DebugInfo = {
   db_candidates_found: number;
   db_query_date: string;
   fallback_used: boolean;
@@ -649,7 +652,8 @@ interface DebugInfo {
   response_slips_count?: number;
   response_legs_count?: number;
   slip_build_error?: string | null;
-}
+  scoring_source?: ScoringSource;
+};
 
 function parseThresholdFromLine(line: unknown): number | null {
   if (typeof line !== "string") return null;
@@ -1396,11 +1400,11 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const SUPABASE_PUBLIC_KEY = readPublishableKey()!;
+    const SUPABASE_SERVICE_KEY = readSecretKey()!;
 
     const authHeader = req.headers.get("Authorization");
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
     });
     const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -1499,7 +1503,7 @@ serve(async (req) => {
     const fnBase = SUPABASE_URL.replace(/\/$/, "") + "/functions/v1";
     const svcFetchHeaders = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+      apikey: SUPABASE_SERVICE_KEY,
     };
 
     // Fetch game-level odds
@@ -1510,6 +1514,7 @@ serve(async (req) => {
       const gameOddsRes = await fetch(`${fnBase}/get-odds`, {
         method: "POST",
         headers: svcFetchHeaders,
+        redirect: "error",
         body: JSON.stringify({ sport: oddsApiSport, market: "h2h,spreads,totals", ttl: 300 }),
         signal: AbortSignal.timeout(30_000),
       });
@@ -1675,6 +1680,7 @@ serve(async (req) => {
           const propsRes = await fetch(`${fnBase}/get-odds`, {
             method: "POST",
             headers: svcFetchHeaders,
+            redirect: "error",
             body: JSON.stringify({
               sport: oddsApiSport,
               market: "player_points,player_rebounds,player_assists,player_threes",
@@ -1769,18 +1775,19 @@ serve(async (req) => {
     // ===== PHASE 2: FETCH SCORING DATA FOR ENRICHMENT =====
     const SCORING_SPARSE_THRESHOLD = 10;
     let scoredProps: any[] = [];
-    let scoringSource: "today" | "auto-triggered" | "yesterday" | "none" = "none";
+    let scoringSource: ScoringSource = "none";
 
     // Helper: trigger scoring engine with market lines
-    async function triggerScoringEngine(marketLines: { player_name: string; stat_type: string; threshold: number }[]) {
+    async function triggerScoringEngine(marketLines: { player_name: string; stat_type: string; threshold: number }[]): Promise<ScoringSource> {
       const scoringUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/prop-scoring-engine`;
       const scoringRes = await Promise.race([
         fetch(scoringUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            apikey: SUPABASE_SERVICE_KEY,
           },
+          redirect: "error",
           body: JSON.stringify({ top_n: 500, sport, game_date: todayStr, market_lines: marketLines }),
         }),
         new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("scoring-timeout")), 45000)),
@@ -1788,7 +1795,7 @@ serve(async (req) => {
       if (!scoringRes.ok) {
         console.warn(`[AI-Builder] Scoring engine returned ${scoringRes.status}`);
         await scoringRes.text().catch(() => {});
-        return false;
+        return scoringSource;
       }
       const scoringResult = await scoringRes.json();
       console.log(`[AI-Builder] Scoring engine completed: ${scoringResult.scored_count ?? "?"} props scored (market_lines=${marketLines.length})`);
@@ -1797,10 +1804,10 @@ serve(async (req) => {
       if (freshScores && freshScores.length > scoredProps.length) {
         scoredProps = freshScores;
         debug.db_candidates_found = scoredProps.length;
-        scoringSource = "auto-triggered";
         console.log(`[AI-Builder] After scoring: ${scoredProps.length} scored props`);
+        return "auto-triggered";
       }
-      return true;
+      return scoringSource;
     }
 
     if (includePlayerProps) {
@@ -1836,7 +1843,7 @@ serve(async (req) => {
         if (coverageRatio < 0.6 && marketLines.length > 0) {
           console.log(`[AI-Builder] Low scoring coverage (${Math.round(coverageRatio * 100)}%, ${uncoveredPlayers.length} uncovered players) — re-scoring with market lines`);
           try {
-            await triggerScoringEngine(marketLines);
+            scoringSource = await triggerScoringEngine(marketLines);
           } catch (e) {
             console.warn(`[AI-Builder] Scoring re-trigger failed (non-blocking): ${e instanceof Error ? e.message : e}`);
           }
@@ -1845,7 +1852,7 @@ serve(async (req) => {
         // Sparse data — auto-trigger with market lines
         console.log(`[AI-Builder] Scoring data sparse (${scoredProps.length} < ${SCORING_SPARSE_THRESHOLD}) — auto-triggering scoring engine`);
         try {
-          await triggerScoringEngine(marketLines);
+          scoringSource = await triggerScoringEngine(marketLines);
         } catch (e) {
           console.warn(`[AI-Builder] Scoring engine auto-trigger failed (non-blocking): ${e instanceof Error ? e.message : e}`);
         }

@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Star, Trash2, Cloud, LogIn, BellRing, Loader2 } from "lucide-react";
+import { NbaWorkflowLink } from "@/components/nba-workflow/NbaWorkflowLink";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSport } from "@/contexts/SportContext";
@@ -411,6 +412,8 @@ export default function WatchlistPage() {
             onCheckedChange={() => setShowPremiumModal(true)}
           />
           
+          <NbaWorkflowLink label="Open NBA watchlist brief" tab="watchlist" />
+
           {/* Data Freshness Indicator */}
           <div className="mt-3 pt-3 border-t border-border">
             <DataFreshnessIndicator />

@@ -1,5 +1,5 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { withPrivilegedPost } from "../_shared/privilegedPost.ts";
+import { scheduleVerification } from "../_shared/internalAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -172,21 +172,18 @@ function timeDisagrees(t1: string | null, t2: string | null): boolean {
  *
  * Called by run-daily-pipeline after collect-line-snapshots.
  */
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+Deno.serve(withPrivilegedPost({
+  corsHeaders,
+  internal: scheduleVerification,
+}, async (req, { supabase }) => {
   const SPORTSDATAIO_KEY = Deno.env.get("SPORTSDATAIO_API_KEY");
 
   if (!SPORTSDATAIO_KEY) {
     return new Response(
-      JSON.stringify({ ok: false, error: "SPORTSDATAIO_API_KEY not configured" }),
+      JSON.stringify({ ok: false, error: "Schedule verification unavailable" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   const reqBody = await req.json().catch(() => ({}));
   const overrideSports: SportKey[] | null = Array.isArray(reqBody?.sports)
@@ -194,7 +191,10 @@ serve(async (req) => {
     : null;
 
   const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  const gameDate = (reqBody?.game_date as string) || todayET;
+  const gameDate = reqBody?.game_date ?? todayET;
+  if (typeof gameDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(gameDate)) {
+    return Response.json({ ok: false, error: "Invalid game_date" }, { status: 400, headers: corsHeaders });
+  }
 
   const allSports: SportKey[] = overrideSports || (["NBA", "WNBA", "MLB"] as SportKey[]);
   const perSport: Record<string, unknown> = {};
@@ -210,22 +210,24 @@ serve(async (req) => {
 
     // ── 1. Fetch secondary source (SportsData.io) ──
     let sdioGames: SportsDataGame[] = [];
-    const sdioDateFormatted = gameDate.replace(/-/g, "-"); // already YYYY-MM-DD
-    const sdioUrl = `https://api.sportsdata.io/${cfg.scheduleEndpoint}/${sdioDateFormatted}?key=${SPORTSDATAIO_KEY}`;
+    const sdioUrl = `https://api.sportsdata.io/${cfg.scheduleEndpoint}/${gameDate}`;
 
     try {
-      const res = await fetch(sdioUrl, { signal: AbortSignal.timeout(15_000) });
+      const res = await fetch(sdioUrl, {
+        headers: { "Ocp-Apim-Subscription-Key": SPORTSDATAIO_KEY },
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
       if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        console.error(`[${sport}] SportsData.io HTTP ${res.status}: ${errText}`);
+        console.error(`[${sport}] SportsData.io HTTP ${res.status}`);
         perSport[sport] = { error: `SportsData.io HTTP ${res.status}`, verification_skipped: true };
         continue;
       }
       sdioGames = await res.json();
       console.log(`[${sport}] SportsData.io returned ${sdioGames.length} games`);
-    } catch (e) {
-      console.error(`[${sport}] SportsData.io fetch failed:`, e);
-      perSport[sport] = { error: String(e), verification_skipped: true };
+    } catch {
+      console.error(`[${sport}] SportsData.io fetch failed`);
+      perSport[sport] = { error: "Schedule provider request failed", verification_skipped: true };
       continue;
     }
 
@@ -265,8 +267,8 @@ serve(async (req) => {
       .eq("game_date", gameDate);
 
     if (dbErr) {
-      console.error(`[${sport}] DB read error:`, dbErr);
-      perSport[sport] = { error: dbErr.message };
+      console.error(`[${sport}] Could not read canonical games`);
+      perSport[sport] = { error: "Could not read canonical games" };
       continue;
     }
 
@@ -460,4 +462,4 @@ serve(async (req) => {
   return new Response(JSON.stringify(summary), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-});
+}));

@@ -10,11 +10,19 @@ vi.mock("@/integrations/supabase/client", () => ({
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
     },
     from: (table: string) => {
-      const result = () => ({ data: fixture.rows[table] ?? null });
+      const filters: Array<[string, unknown]> = [];
+      let single = false;
+      const result = () => {
+        const value = fixture.rows[table];
+        const records = Array.isArray(value) ? value : value ? [value] : [];
+        const matching = records.filter((row) => filters.every(([key, expected]) =>
+          row[key] === undefined || row[key] === expected));
+        return { data: single ? matching[0] ?? null : matching };
+      };
       const query = {
         select: () => query,
-        eq: () => query,
-        maybeSingle: async () => result(),
+        eq: (key: string, value: unknown) => { filters.push([key, value]); return query; },
+        maybeSingle: async () => { single = true; return result(); },
         then: (resolve: (value: ReturnType<typeof result>) => unknown) => Promise.resolve(result()).then(resolve),
       };
       return query;
@@ -67,5 +75,29 @@ describe("prepaid pass billing status", () => {
     fixture.rows.stripe_account_customers = { stripe_customer_id: "cus_weekly" };
     const { result } = renderHook(() => useBillingStatus(false, false, "2020-01-01T00:00:00Z", false));
     await waitFor(() => expect(result.current.state).toBe("no_subscription"));
+  });
+});
+
+describe("sandbox billing isolation", () => {
+  it("does not treat sandbox customer/subscription records as paid billing", async () => {
+    fixture.rows.stripe_account_customers = [{ stripe_account: "betstreaks_test", stripe_customer_id: "cus_sandbox" }];
+    fixture.rows.stripe_account_subscriptions = [{ stripe_account: "betstreaks_test", status: "active" }];
+    const { result } = renderHook(() => useBillingStatus(true, false));
+    await waitFor(() => expect(result.current.state).toBe("premium_no_billing"));
+    expect(result.current.hasCustomer).toBe(false);
+    expect(result.current.hasActiveSubscription).toBe(false);
+  });
+  it("retains live subscription status alongside sandbox records", async () => {
+    fixture.rows.stripe_account_customers = [
+      { stripe_account: "betstreaks_test", stripe_customer_id: "cus_sandbox" },
+      { stripe_account: "betstreaks", stripe_customer_id: "cus_live" },
+    ];
+    fixture.rows.stripe_account_subscriptions = [
+      { stripe_account: "betstreaks_test", status: "canceled" },
+      { stripe_account: "betstreaks", status: "active" },
+    ];
+    const { result } = renderHook(() => useBillingStatus(true, false));
+    await waitFor(() => expect(result.current.state).toBe("active_subscription"));
+    expect(result.current.hasCustomer).toBe(true);
   });
 });

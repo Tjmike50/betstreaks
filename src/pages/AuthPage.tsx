@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,12 @@ const passwordSchema = z.string().min(6, "Password must be at least 6 characters
 
 export default function AuthPage() {
   const navigate = useNavigate();
-  const destination = new URLSearchParams(window.location.search).get("next") === "premium" ? "/premium" : "/";
+  const location = useLocation();
+  const next = new URLSearchParams(location.search).get("next");
+  const nbaSearch = next === "nba" && typeof location.state?.nbaSearch === "string"
+      && location.state.nbaSearch.startsWith("?") && location.state.nbaSearch.length <= 512
+    ? location.state.nbaSearch : "";
+  const destination = next === "premium" ? "/premium" : next === "analytics" ? "/research/analytics" : next === "nba" ? `/research/nba${nbaSearch}` : "/";
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
@@ -59,10 +64,10 @@ export default function AuthPage() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate(destination);
+        navigate(destination, next === "nba" ? { state: { nbaImport: location.state?.nbaImport } } : undefined);
       }
     });
-  }, [navigate, destination]);
+  }, [navigate, destination, next, location.state]);
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
@@ -173,7 +178,7 @@ export default function AuthPage() {
           description: `${migratedCount} saved pick${migratedCount > 1 ? 's' : ''} synced to your account.`,
         });
       }
-      navigate(destination);
+      navigate(destination, next === "nba" ? { state: { nbaImport: location.state?.nbaImport } } : undefined);
     } else {
       toast({
         title: "Check your email",
@@ -218,7 +223,7 @@ export default function AuthPage() {
         title: "Welcome back!",
         description: "You're now logged in.",
       });
-      navigate(destination);
+      navigate(destination, next === "nba" ? { state: { nbaImport: location.state?.nbaImport } } : undefined);
     }
   };
 

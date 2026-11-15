@@ -10,14 +10,14 @@ import {
   resolveCurrentPeriodEnd,
   resolveInvoiceSubscriptionId,
 } from "../_shared/stripeEvents.ts";
-import type { StripeAccountId } from "../_shared/stripeAccounts.ts";
+import type { StripeAccountId, StripeCustomerScope } from "../_shared/stripeAccounts.ts";
 
 // ── In-memory store ────────────────────────────────────────────
 interface Flags { is_premium: boolean; is_lifetime: boolean; manual_premium: boolean }
 
 function makeStore(seed: {
   flags?: Record<string, Partial<Flags>>;
-  customers?: Array<{ account: StripeAccountId; customerId: string; userId: string }>;
+  customers?: Array<{ account: StripeCustomerScope; customerId: string; userId: string }>;
   subscriptions?: Array<{ account: StripeAccountId } & SubscriptionRow>;
 } = {}) {
   const flags = new Map<string, Flags>();

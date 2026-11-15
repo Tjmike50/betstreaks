@@ -1,7 +1,9 @@
 // =============================================================================
 // CheatsheetRowCard — compact prop row used in Value/Streak/Matchup pages.
 // =============================================================================
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { nbaWorkflowEnabled, parseMetric } from "@/components/nba-workflow/client";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { CheatsheetRow } from "@/hooks/useCheatsheet";
@@ -67,50 +69,60 @@ export function CheatsheetRowCard({ row, highlight = "value" }: Props) {
   const matchup = buildMatchup(row);
   const subtitle = matchup ? `Over ${row.threshold} · ${matchup}` : `Over ${row.threshold}`;
   const tags = normalizeTags(row.reason_tags);
+  const researchParams = new URLSearchParams({ player: String(row.player_id), stat: row.stat_type,
+    line: String(row.threshold), date: row.game_date });
+  const showResearch = nbaWorkflowEnabled && row.sport === "NBA" && !!parseMetric(row.stat_type);
 
   return (
-    <button
-      type="button"
-      onClick={() => navigate(`/player/${row.player_id}`)}
-      className="glass-card p-3 w-full text-left hover:border-primary/40 transition-colors"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-sm font-semibold text-foreground truncate">
-              {row.player_name}
-            </span>
-            <Badge variant="outline" className="text-[10px] shrink-0">
-              {compactStatLabel(row.stat_type)}
-            </Badge>
-          </div>
-          <p className="text-xs text-muted-foreground truncate">
-            {subtitle}
-          </p>
-          <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
-            <span>L5: <span className="text-foreground font-medium">{formatHitRate(row.last5_hit_rate)}</span></span>
-            <span>L10: <span className="text-foreground font-medium">{formatHitRate(row.last10_hit_rate)}</span></span>
-            <span>Avg: <span className="text-foreground font-medium">{row.last10_avg?.toFixed(1) ?? "—"}</span></span>
-          </div>
-          {tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="text-[10px]">
-                  {tag.replace(/_/g, " ")}
-                </Badge>
-              ))}
+    <div className={showResearch ? "glass-card" : undefined}>
+      <button
+        type="button"
+        onClick={() => navigate(`/player/${row.player_id}`)}
+        className={cn("p-3 w-full text-left hover:border-primary/40 transition-colors", !showResearch && "glass-card")}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-sm font-semibold text-foreground truncate">
+                {row.player_name}
+              </span>
+              <Badge variant="outline" className="text-[10px] shrink-0">
+                {compactStatLabel(row.stat_type)}
+              </Badge>
             </div>
-          )}
-        </div>
-        <div className="shrink-0 text-right">
-          <div className={cn("text-2xl font-bold leading-none", highlightValue.color)}>
-            {highlightValue.val}
+            <p className="text-xs text-muted-foreground truncate">
+              {subtitle}
+            </p>
+            <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
+              <span>L5: <span className="text-foreground font-medium">{formatHitRate(row.last5_hit_rate)}</span></span>
+              <span>L10: <span className="text-foreground font-medium">{formatHitRate(row.last10_hit_rate)}</span></span>
+              <span>Avg: <span className="text-foreground font-medium">{row.last10_avg?.toFixed(1) ?? "—"}</span></span>
+            </div>
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {tags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="text-[10px]">
+                    {tag.replace(/_/g, " ")}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">
-            {highlightValue.label}
+          <div className="shrink-0 text-right">
+            <div className={cn("text-2xl font-bold leading-none", highlightValue.color)}>
+              {highlightValue.val}
+            </div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">
+              {highlightValue.label}
+            </div>
           </div>
         </div>
-      </div>
-    </button>
+      </button>
+      {showResearch && <div className="border-t border-border px-3 py-1.5">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to={`/research/nba?${researchParams}`}>Explain this line</Link>
+        </Button>
+      </div>}
+    </div>
   );
 }

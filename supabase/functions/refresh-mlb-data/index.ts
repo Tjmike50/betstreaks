@@ -1,3 +1,4 @@
+import { requireAdmin } from "../_shared/adminAuth.ts";
 // ============================================================
 // BetStreaks — MLB Daily Data Refresh (v1 real ingestion)
 //
@@ -13,8 +14,7 @@
 // Mirrors refresh-wnba-data architecture.
 // ============================================================
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createEdgeClient as createClient, readSecretKey } from "../_shared/supabaseKeys.ts";
 import { ingestGameLogsWindow } from "../_shared/mlbGameLogIngest.ts";
 import {
   rebuildRollingStats,
@@ -60,24 +60,6 @@ function todayET(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
-function isAuthorized(req: Request): boolean {
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const token = authHeader.replace("Bearer ", "").trim();
-  const apikeyHeader = req.headers.get("apikey") ?? "";
-  const candidates = [token, apikeyHeader].filter(Boolean);
-  if (candidates.length === 0) return true;
-
-  const refreshSecret = Deno.env.get("REFRESH_SECRET");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  for (const c of candidates) {
-    if (refreshSecret && c === refreshSecret) return true;
-    if (serviceKey && c === serviceKey) return true;
-    if (anonKey && c === anonKey) return true;
-    if (c.startsWith("eyJ")) return true;
-  }
-  return false;
-}
 
 interface StepResult {
   step: string;
@@ -327,9 +309,8 @@ async function ingestProbablePitchers(supabase: Supa, pitcherIds: Set<number>): 
     const ids = Array.from(pitcherIds);
     const { error, count } = await supabase
       .from("mlb_player_profiles")
-      .update({ is_probable_pitcher: true })
-      .in("player_id", ids)
-      .select("player_id", { count: "exact", head: true });
+      .update({ is_probable_pitcher: true }, { count: "exact" })
+      .in("player_id", ids);
     if (error) throw error;
     console.log(`[refresh-mlb-data] Probable pitchers flagged=${count ?? ids.length}`);
     return { step: "mlb_probable_pitchers", rows: count ?? ids.length };
@@ -340,12 +321,13 @@ async function ingestProbablePitchers(supabase: Supa, pitcherIds: Set<number>): 
 
 // ─── HTTP entry ─────────────────────────────────────────────
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  if (!isAuthorized(req)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return Response.json({ ok: false, error: auth.error }, {
+      status: auth.status,
+      headers: corsHeaders,
     });
   }
 
@@ -378,7 +360,7 @@ serve(async (req) => {
   }
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const SUPABASE_SERVICE_KEY = readSecretKey()!;
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   console.log(

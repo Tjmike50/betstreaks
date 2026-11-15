@@ -1,3 +1,4 @@
+import { requireAdmin } from "../_shared/adminAuth.ts";
 // ============================================================
 // BetStreaks — WNBA Daily Stats Refresh
 //
@@ -13,8 +14,7 @@
 // Short-circuits cleanly when WNBA is offseason.
 // ============================================================
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { createEdgeClient as createClient, readSecretKey } from "../_shared/supabaseKeys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,24 +65,6 @@ function todayET(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
-function isAuthorized(req: Request): boolean {
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const token = authHeader.replace("Bearer ", "").trim();
-  const apikeyHeader = req.headers.get("apikey") ?? "";
-  const candidates = [token, apikeyHeader].filter(Boolean);
-  if (candidates.length === 0) return true;
-
-  const refreshSecret = Deno.env.get("REFRESH_SECRET");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  for (const c of candidates) {
-    if (refreshSecret && c === refreshSecret) return true;
-    if (serviceKey && c === serviceKey) return true;
-    if (anonKey && c === anonKey) return true;
-    if (c.startsWith("eyJ")) return true;
-  }
-  return false;
-}
 
 interface StepResult {
   step: string;
@@ -448,12 +430,13 @@ async function recomputeStreaks(supabase: ReturnType<typeof createClient>): Prom
 
 // ─── HTTP entry ─────────────────────────────────────────────
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  if (!isAuthorized(req)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return Response.json({ ok: false, error: auth.error }, {
+      status: auth.status,
+      headers: corsHeaders,
     });
   }
 
@@ -483,7 +466,7 @@ serve(async (req) => {
   }
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const SUPABASE_SERVICE_KEY = readSecretKey()!;
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   const steps: StepResult[] = [];

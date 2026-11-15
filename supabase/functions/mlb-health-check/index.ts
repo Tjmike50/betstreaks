@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { withPrivilegedPost } from "../_shared/privilegedPost.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,26 +53,19 @@ function makeCheck(
   return { key, ok, severity: ok ? null : severity, message, metadata };
 }
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+Deno.serve(withPrivilegedPost({ corsHeaders, adminUser: true }, async (req, { supabase }) => {
+
+  const body = await req.json().catch(() => ({}));
+  const gameDate = body?.game_date ?? todayET();
+  if (typeof gameDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(gameDate) ||
+      !Number.isFinite(Date.parse(`${gameDate}T00:00:00Z`))) {
+    return Response.json({ ok: false, error: "Invalid game_date" }, { status: 400, headers: corsHeaders });
+  }
 
   const startedAt = new Date();
   const startedAtIso = startedAt.toISOString();
 
   try {
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
-    let body: { game_date?: string } = {};
-    try {
-      body = await req.json();
-    } catch (_) {
-      // allow empty body
-    }
-    const gameDate = body.game_date || todayET();
     const { startIso, endIso } = etDayRange(gameDate);
 
     const checks: CheckResult[] = [];
@@ -401,34 +393,26 @@ serve(async (req) => {
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
-  } catch (e) {
-    console.error("[mlb-health-check] fatal error", e);
+  } catch {
+    console.error("[mlb-health-check] Request failed");
     try {
-      const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-      const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-      if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
-        const finishedAt = new Date();
-        await supabase.from("mlb_refresh_health").insert({
-          job_name: "mlb-health-check",
-          status: "failed",
-          started_at: startedAtIso,
-          finished_at: finishedAt.toISOString(),
-          duration_ms: finishedAt.getTime() - startedAt.getTime(),
-          rows_inserted: 0,
-          rows_updated: 0,
-          metadata: { fatal_error: e instanceof Error ? e.message : String(e) },
-          error_message: e instanceof Error ? e.message : String(e),
-        });
-      }
-    } catch (logErr) {
-      console.error("[mlb-health-check] failed to write fatal health row", logErr);
+      const finishedAt = new Date();
+      await supabase.from("mlb_refresh_health").insert({
+        job_name: "mlb-health-check",
+        status: "failed",
+        started_at: startedAtIso,
+        finished_at: finishedAt.toISOString(),
+        duration_ms: finishedAt.getTime() - startedAt.getTime(),
+        rows_inserted: 0,
+        rows_updated: 0,
+        error_message: "Health check failed",
+      });
+    } catch {
+      console.error("[mlb-health-check] Failed to write fatal health row");
     }
-    return new Response(
-      JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return Response.json({ ok: false, error: "Health check failed" }, {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
-});
+}));

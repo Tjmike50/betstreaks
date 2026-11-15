@@ -1,5 +1,6 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.1";
+import { NBA_TEAM_ABBRS } from "../_shared/nbaTeams.ts";
+import { requireAdmin } from "../_shared/adminAuth.ts";
+import { createEdgeClient as createClient, readSecretKey } from "../_shared/supabaseKeys.ts";
 import {
   MLB_ODDS_API_MARKETS,
   MLB_ODDS_API_SPORT,
@@ -9,19 +10,6 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-const NBA_TEAM_ABBRS: Record<string, string> = {
-  "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
-  "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
-  "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
-  "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
-  "Los Angeles Clippers": "LAC", "Los Angeles Lakers": "LAL", "Memphis Grizzlies": "MEM",
-  "Miami Heat": "MIA", "Milwaukee Bucks": "MIL", "Minnesota Timberwolves": "MIN",
-  "New Orleans Pelicans": "NOP", "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC",
-  "Orlando Magic": "ORL", "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX",
-  "Portland Trail Blazers": "POR", "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS",
-  "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
 };
 
 const WNBA_TEAM_ABBRS: Record<string, string> = {
@@ -634,7 +622,7 @@ function computeVerification(
   mismatchFlags: string[],
   dupeCount: number,
   existingRow: { verification_status: string; source_secondary: string | null } | null,
-): { verification_status: string; schedule_confidence: number; source_secondary: string | null } {
+): { verification_status: VerifiedGameRow["verification_status"]; schedule_confidence: number; source_secondary: string | null } {
   let confidence = 50; // base: from odds API
 
   if (candidate.home_team_abbr && candidate.away_team_abbr) confidence += 20;
@@ -652,7 +640,7 @@ function computeVerification(
   // Preserve existing source_secondary if set by verify-schedule
   const sourceSecondary = existingRow?.source_secondary || null;
 
-  let verificationStatus: string;
+  let verificationStatus: VerifiedGameRow["verification_status"];
   if (mismatchFlags.length > 0) {
     verificationStatus = "mismatch";
   } else if (existingRow?.verification_status === "verified" && mismatchFlags.length === 0) {
@@ -679,17 +667,24 @@ function deriveActiveFlags(status: string | null): { is_active: boolean; is_post
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return Response.json({ ok: false, error: auth.error }, {
+      status: auth.status,
+      headers: corsHeaders,
+    });
+  }
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const SUPABASE_SERVICE_KEY = readSecretKey()!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const fnBase = SUPABASE_URL.replace(/\/$/, "") + "/functions/v1";
     const svcHeaders = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+      apikey: SUPABASE_SERVICE_KEY,
     };
 
     const reqBody = await req.json().catch(() => ({}));
@@ -742,6 +737,7 @@ serve(async (req) => {
       const res = await fetch(`${fnBase}/get-odds`, {
         method: "POST",
         headers: svcHeaders,
+        redirect: "error",
         body: JSON.stringify({ sport: cfg.oddsApiSport, market: "h2h", ttl: 300 }),
         signal: AbortSignal.timeout(30_000),
       });
@@ -895,7 +891,11 @@ serve(async (req) => {
       for (const game of gamesData) {
         const isManualGame = game.manual === true;
         const commence = isManualGame ? null : new Date(game.commence_time);
-        const gameDate = isManualGame ? todayStr : commence?.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+        const gameDate = isManualGame
+          ? todayStr
+          : commence && Number.isFinite(commence.getTime())
+          ? commence.toLocaleDateString("en-CA", { timeZone: "America/New_York" })
+          : null;
         const homeAbbr = isManualGame
           ? String(game.home_team ?? "").trim().toUpperCase() || null
           : sport === "NBA" || sport === "WNBA"
@@ -956,7 +956,7 @@ serve(async (req) => {
           away_team_abbr: awayAbbr,
           game_time: gameTime,
           status: isManualGame ? String(game.manual_status ?? "Scheduled") : "Scheduled",
-          commence_time_iso: isManualGame ? `${todayStr}T00:00:00.000Z` : commence.toISOString(),
+          commence_time_iso: commence?.toISOString() ?? `${todayStr}T00:00:00.000Z`,
           source: isManualGame ? "manual_emergency" : `odds_api_${oddsProvider}`,
           canonical_game_key: canonicalKey,
         });
@@ -1358,6 +1358,7 @@ serve(async (req) => {
             const propsRes = await fetch(`${fnBase}/get-odds`, {
               method: "POST",
               headers: svcHeaders,
+              redirect: "error",
               body: JSON.stringify({
                 sport: cfg.oddsApiSport,
                 market: marketRequest,
@@ -1597,11 +1598,14 @@ serve(async (req) => {
     const pipelineResults: Record<string, any> = {};
     const todayET = easternDateString();
 
-    if (allGameDates.has(todayET) && gamesProcessed > 0) {
+    if (reqBody?.skip_downstream === true) {
+      pipelineResults.skipped = "orchestrated by run-daily-pipeline";
+    } else if (allGameDates.has(todayET) && gamesProcessed > 0) {
       try {
         console.log(`[${sport}] Pipeline: triggering refresh-availability...`);
         const availRes = await fetch(`${fnBase}/refresh-availability`, {
           method: "POST", headers: svcHeaders,
+          redirect: "error",
           body: JSON.stringify({ game_date: todayET, sport }),
           signal: AbortSignal.timeout(45_000),
         });
@@ -1618,6 +1622,7 @@ serve(async (req) => {
         console.log(`[${sport}] Pipeline: triggering ${scoringFn}...`);
         const scoreRes = await fetch(`${fnBase}/${scoringFn}`, {
           method: "POST", headers: svcHeaders,
+          redirect: "error",
           body: JSON.stringify(
             sport === "MLB"
               ? { game_date: todayET }

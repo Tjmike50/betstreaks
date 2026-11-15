@@ -1,3 +1,5 @@
+import { NbaWorkflowLink } from "@/components/nba-workflow/NbaWorkflowLink";
+import { adaptLegacyLegs } from "@/components/nba-workflow/client";
 import { useState } from "react";
 import { Trash2, Loader2, Shield, Target, Zap, Calendar, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -139,6 +141,8 @@ export function SavedSlipCard({ slip, onRemove, onCopyToBuilder }: SavedSlipCard
             </div>
           ))}
         </div>
+
+        {(!("sport" in slip) || slip.sport === "NBA") && <NbaWorkflowLink label="Recheck NBA legs" legs={adaptLegacyLegs(slip.legs)} />}
 
         {/* Footer */}
         <div className="flex items-center justify-between">

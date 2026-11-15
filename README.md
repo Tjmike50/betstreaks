@@ -2,6 +2,10 @@
 
 NBA player prop streak tracker for sports bettors.
 
+## Local configuration
+
+Copy `.env.example` to `.env.local` and set the approved project URL and modern publishable key. Vite requires both to build. Use a separate nonproduction project for connected testing. See the [owner release runbook](ops/SECURITY_RELEASE_RUNBOOK.md) for Edge credentials, scheduler cutover and offline verification.
+
 ## Paid MVP Launch Checklist
 
 ### ✅ Core Fixes Completed

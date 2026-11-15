@@ -4,7 +4,7 @@ import { paidWeeklyPass } from "./weeklyPass.ts";
 // layer so every branch is testable without a network or a database.
 // ============================================================
 
-import { shouldRevokePremium, type StripeAccountId } from "./stripeAccounts.ts";
+import { shouldRevokePremium, TEST_CUSTOMER_SCOPE, type StripeAccountId, type StripeCustomerScope } from "./stripeAccounts.ts";
 import {
   checkoutGrantDecision,
   evaluateEventOrder,
@@ -38,9 +38,9 @@ export interface WebhookStore {
   grantWeeklyPass(userId: string, sessionId: string, weeks: number): Promise<string>;
   getFlags(userId: string): Promise<UserFlags>;
   setPremium(userId: string, value: boolean, lifetime?: boolean): Promise<void>;
-  getUserIdByCustomer(account: StripeAccountId, customerId: string): Promise<string | null>;
+  getUserIdByCustomer(account: StripeCustomerScope, customerId: string): Promise<string | null>;
   upsertCustomer(
-    account: StripeAccountId,
+    account: StripeCustomerScope,
     userId: string,
     customerId: string,
   ): Promise<void>;
@@ -67,7 +67,15 @@ export async function handleStripeEvent(
   account: StripeAccountId,
   store: WebhookStore,
   log: (msg: string, meta?: Record<string, unknown>) => void = () => {},
+  customerScope: StripeCustomerScope = account,
 ): Promise<HandleResult> {
+  // Scope comes from the verified signing configuration, never event metadata.
+  if (customerScope === TEST_CUSTOMER_SCOPE) {
+    if (event.livemode !== false) return { handled: false, action: "mode_mismatch" };
+    return await handleSandboxEvent(event, customerScope, store);
+  }
+  if (event.livemode === false) return { handled: false, action: "mode_mismatch" };
+
   switch (event.type) {
     case "checkout.session.completed":
     case "checkout.session.async_payment_succeeded":
@@ -96,6 +104,26 @@ export async function handleStripeEvent(
       log("Unhandled event type", { type: event.type });
       return { handled: false, action: "ignored" };
   }
+}
+
+/** Sandbox deliveries only maintain customer mappings. No production entitlements
+ * or subscription mirrors are read/written, including cancellation and replay. */
+async function handleSandboxEvent(
+  event: AnyRecord,
+  scope: StripeCustomerScope,
+  store: WebhookStore,
+): Promise<HandleResult> {
+  if (!event.type?.startsWith("checkout.session.") &&
+    !event.type?.startsWith("customer.subscription.")) {
+    return { handled: true, action: "sandbox_ignored" };
+  }
+  const object = event.data?.object ?? {};
+  const customerId = resolveCustomerId(object.customer);
+  if (!customerId) return { handled: false, action: "missing_customer" };
+  const userId = object.metadata?.user_id ?? await store.getUserIdByCustomer(scope, customerId);
+  if (!userId) return { handled: false, action: "unknown_user" };
+  await store.upsertCustomer(scope, userId, customerId);
+  return { handled: true, action: "sandbox_customer_recorded", userId };
 }
 
 async function handleCheckoutSession(

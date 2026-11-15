@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { nbaWorkflowEnabled } from "@/components/nba-workflow/client";
+import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   AlertTriangle,
@@ -388,6 +389,7 @@ export default function AdminHealthPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">System Health</h1>
+            {nbaWorkflowEnabled && <Link className="text-sm text-primary underline" to="/admin/nba-research">NBA research diagnostics</Link>}
             <p className="text-sm text-muted-foreground">Read-only production monitoring for the 7-day watch period.</p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
@@ -541,9 +543,9 @@ export default function AdminHealthPage() {
               <CardContent className="space-y-3 text-sm text-muted-foreground">
                 <p>No write buttons were added here. Existing admin/eval already wires pipeline-style mutations, and this health page stays read-only for production monitoring.</p>
                 <div className="rounded-md bg-muted p-3 font-mono text-xs text-foreground">
-                  {`curl -X POST "$SUPABASE_URL/functions/v1/collect-line-snapshots" -H "Authorization: Bearer $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{"sport":"NBA"}'`}
+                  {`curl -X POST "$SUPABASE_URL/functions/v1/collect-line-snapshots" -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H "Content-Type: application/json" -d '{"sport":"NBA"}'`}
                   <br />
-                  {`curl -X POST "$SUPABASE_URL/functions/v1/mlb-health-check" -H "Authorization: Bearer $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{"game_date":"${today}"}'`}
+                  {`curl -X POST "$SUPABASE_URL/functions/v1/mlb-health-check" -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H "Content-Type: application/json" -d '{"game_date":"${today}"}'`}
                   <br />
                   {`update public.backend_alerts set resolved = true where alert_type = 'odds_api_quota_exhausted' and sport = 'NBA' and resolved is distinct from true;`}
                 </div>

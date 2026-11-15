@@ -9,6 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSport } from "@/contexts/SportContext";
 import { ENABLED_SPORTS, type SportKey } from "@/lib/sports/registry";
 import { toast } from "@/hooks/use-toast";
+import { NbaWorkflowLink } from "@/components/nba-workflow/NbaWorkflowLink";
 import { SavedSlipCard } from "@/components/saved-slips/SavedSlipCard";
 import type { AISlip } from "@/types/aiSlip";
 
@@ -180,6 +181,8 @@ export default function SavedSlipsPage() {
             </Button>
           )}
         </div>
+
+        <NbaWorkflowLink label="Review NBA research slips" />
 
         {/* Sport tabs */}
         <Tabs value={tabSport} onValueChange={(v) => setTabSport(v as SportKey)} className="w-full">
